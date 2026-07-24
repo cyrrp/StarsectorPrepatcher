@@ -1,22 +1,3 @@
-## Market.advance step semantics
-
-- Added raw-float RLE pending history and reusable market-specific batch-context stack.
-- Added local exact-step replay wrappers for `MilitaryBase`, `LionsGuardHQ`, and `RecentUnrest`.
-- Added temporary construction full-rate mode plus exact mutation barriers for `Market`, `BaseIndustry`, and `ConstructionQueue`.
-- Added coalesced/exact save modes, scheduler semantic metrics, and a behavior-neutral mod risk observer.
-- Fixed the scheduler capability gate so deferral requires all eleven core/semantic components,
-  including `Market.advancePlan`, the three replay wrappers and both construction-barrier groups.
-  Missing registration or a structurally skipped wrapper now keeps the scheduler synchronous.
-- Made semantic-risk observer-only mode strictly static even when the inspected class contains a
-  direct `Market.advance()` call; hierarchy classification is transitive and report dedup includes
-  source/mod identity.
-- Replaced per-input construction scans with mutation epochs plus a bounded safety audit, removed
-  duplicate queue-owner registration, and added a JAR-wide construction-mutator inventory test.
-- Defined save callback failure as non-retriable once invocation begins: ambiguous detached debt is
-  discarded, the market is disabled into synchronous fail-open, and the save exception propagates.
-- Documented that local component replay does not prove global intercomponent/RNG ordering without
-  campaign-level differential tests.
-
 # Журнал изменений
 
 Здесь фиксируются заметные пользовательские изменения StarsectorPrepatcher. Формат основан на
@@ -35,29 +16,38 @@
 
 ## [Unreleased]
 
-### Оптимизировано
+Пока нет.
 
-- Добавлен explicit `AOTD_NATIVE` mode для commodity temporal fast path.
-  `AoTDCommodityOnMarket` теперь связывает availability, excess, deficit и три trade stats,
-  засыпает при пустых temporal maps и просыпается от существующих mutation hooks.
-- Lookup `getExcDefData/excess/deficit` кэшируется при построении market state и не
-  выполняется в `advancePrepared()`.
-- Добавлена sampled телеметрия exact-vanilla/AoTD-native/vanilla-only inventories и active sets.
-
-
-## [0.11.0] - 2026-07-22
+## [0.11.0] - 2026-07-24
 
 ### Добавлено
 
 - Чистая обёртка `BaseIndustry.getMaxDeficit()` сохраняет vanilla-реализацию и
   включает AoTD priority-deficit semantics только после полного native handshake.
-- Capability `CLEAN_DEFICIT_SEMANTICS` и production mask `0xff`.
+- Capability `CLEAN_DEFICIT_SEMANTICS`, координация campaign/economy epoch и полный
+  production-профиль AoTD с mask `0x1ff`.
+- `SchedulerBridge` schema V6 с прямой loader-safe публикацией runtime epoch и запросом
+  актуальной capability mask.
+- Explicit `AOTD_NATIVE` mode для commodity temporal fast path. Availability, excess,
+  deficit и trade stats переходят в спящий режим при пустых temporal maps и просыпаются
+  от существующих mutation hooks.
+- Sampled-телеметрия exact-vanilla/AoTD-native/vanilla-only inventories, active sets и
+  scheduler due/policy decisions.
+- Единый интерактивный `StarsectorPrepatcher.bat` для сборки, установки, удаления и
+  полного release gate с выбором Vanilla/Faster Rendering/Both и CLI-режимом.
 - Structural/runtime validation для raw fallback, resolver path и повторной трансформации.
 
 ### Изменено
 
 - AoTD Scheduler Fork больше не требует и не допускает старую замену `starfarer.api.jar`.
-
+- Non-structural AoTD dirty masks сохраняются без ложного повышения structural generation;
+  вложенные mutation boundaries объединяют маски и публикуют не более одной structural revision.
+- Lookup `getExcDefData/excess/deficit` кэшируется при построении market state и не
+  выполняется в `advancePrepared()`.
+- Condition-only рынки вне economy получают кэшируемую и staggered due-проверку; economy markets,
+  пришедшие через тот же call site, сохраняют точную покадровую policy.
+- Delivered-time callbacks для рынков вне economy не публикуются в AoTD registry и учитываются
+  отдельной диагностикой.
 
 ### Исправлено
 
@@ -65,9 +55,36 @@
   вложенном вызове: вложенная граница объединяет reason mask и использует token
   внешней границы. После внешнего replay runtime повторно читает market state,
   поскольку replay может вызвать campaign callbacks.
+- При смене runtime epoch очищается loader-neutral market state, а поздние callbacks
+  старой global boundary отклоняются без изменения generation новой кампании.
+- После fail-stop отключения delivery listener актуальная capability mask немедленно
+  видна AoTD; fork один раз синхронизирует пропущенные поколения и включает fallback dirtying.
+- Кэш reflection-accessors для AoTD temporal stats переведён с process-lifetime map на
+  unload-safe `ClassValue`, поэтому он не удерживает classloader завершённой кампании/сборки.
+
+Подробности и состав проверок: [отчёт о выпуске 0.11.0](docs/releases/0.11.0.md).
 
 
 ## [0.10.0] - 2026-07-21
+
+### Market.advance step semantics
+
+- Added raw-float RLE pending history and reusable market-specific batch-context stack.
+- Added local exact-step replay wrappers for `MilitaryBase`, `LionsGuardHQ`, and `RecentUnrest`.
+- Added temporary construction full-rate mode plus exact mutation barriers for `Market`, `BaseIndustry`, and `ConstructionQueue`.
+- Added coalesced/exact save modes, scheduler semantic metrics, and a behavior-neutral mod risk observer.
+- Fixed the scheduler capability gate so deferral requires all eleven core/semantic components,
+  including `Market.advancePlan`, the three replay wrappers and both construction-barrier groups.
+  Missing registration or a structurally skipped wrapper now keeps the scheduler synchronous.
+- Made semantic-risk observer-only mode strictly static even when the inspected class contains a
+  direct `Market.advance()` call; hierarchy classification is transitive and report dedup includes
+  source/mod identity.
+- Replaced per-input construction scans with mutation epochs plus a bounded safety audit, removed
+  duplicate queue-owner registration, and added a JAR-wide construction-mutator inventory test.
+- Defined save callback failure as non-retriable once invocation begins: ambiguous detached debt is
+  discarded, the market is disabled into synchronous fail-open, and the save exception propagates.
+- Documented that local component replay does not prove global intercomponent/RNG ordering without
+  campaign-level differential tests.
 
 ### Изменено
 
@@ -251,6 +268,8 @@
   Классы, которые FR изменил до Instrumentation, применяются при неизменной local presentation
   surface либо получают локальный `SKIPPED_STRUCTURAL`; независимые structural patches продолжают
   применяться.
+
+Подробности и performance-контекст: [отчёт о выпуске 0.10.0](docs/releases/0.10.0.md).
 
 ## [0.9.5] - 2026-07-18
 

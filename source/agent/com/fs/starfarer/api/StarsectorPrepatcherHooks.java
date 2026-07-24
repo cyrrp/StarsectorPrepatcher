@@ -296,6 +296,13 @@ public final class StarsectorPrepatcherHooks {
     private static final LongAdder MARKET_SCHEDULER_REENTRANT_CALLS = new LongAdder();
     private static final LongAdder MARKET_SCHEDULER_MULTIPLE_SOURCE_TICK_CALLS = new LongAdder();
     private static final LongAdder MARKET_SCHEDULER_POLICY_FAILURES = new LongAdder();
+    private static final LongAdder MARKET_SCHEDULER_POLICY_AUDITS = new LongAdder();
+    private static final LongAdder MARKET_SCHEDULER_POLICY_CACHE_HITS = new LongAdder();
+    private static final LongAdder MARKET_SCHEDULER_DUE_CHECKS = new LongAdder();
+    private static final LongAdder MARKET_SCHEDULER_DUE_ENTRIES = new LongAdder();
+    private static final LongAdder MARKET_SCHEDULER_NOT_DUE_SKIPS = new LongAdder();
+    private static final LongAdder MARKET_SCHEDULER_INITIAL_PHASE_DEFERRALS = new LongAdder();
+    private static final LongAdder MARKET_SCHEDULER_BATCH_TOUCHED_ENTRIES = new LongAdder();
     private static final LongAdder MARKET_SCHEDULER_ADVANCE_FAILURES = new LongAdder();
     private static final LongAdder MARKET_SCHEDULER_DISABLED_MARKET_CALLS = new LongAdder();
     private static final LongAdder MARKET_SCHEDULER_SYNCHRONIZED_ADVANCES = new LongAdder();
@@ -1746,8 +1753,24 @@ public final class StarsectorPrepatcherHooks {
         // Publish only from this post-success path. The runtime owns a separate
         // weak identity generation table, so immediate/fallback callbacks are
         // visible even before a scheduler state exists for the market.
-        StarsectorPrepatcherRuntimeBridge.publishAoTDMarketTimeDelivered(
-                market, amount, origin);
+        if (market != null) {
+            boolean publishToAoTD = true;
+            try {
+                if (!market.isInEconomy()) {
+                    boolean conditionOnly = market.isPlanetConditionMarketOnly();
+                    StarsectorPrepatcherRuntimeBridge.recordAoTDNonEconomyDelivery(
+                            conditionOnly);
+                    publishToAoTD = false;
+                }
+            } catch (Throwable ignored) {
+                // Classification is fail-open; an unexpected MarketAPI
+                // implementation remains visible to the AoTD diagnostics.
+            }
+            if (publishToAoTD) {
+                StarsectorPrepatcherRuntimeBridge.publishAoTDMarketTimeDelivered(
+                        market, amount, origin);
+            }
+        }
         if (market == null) return;
         MarketScheduleState state;
         try {
@@ -2584,7 +2607,7 @@ public final class StarsectorPrepatcherHooks {
             deliverPendingCoalesced(market, state, scheduledOrigin, true, false);
         }
 
-        boolean addTouched = false;
+        boolean evaluateDue = false;
         boolean invalidTotal = false;
         synchronized (state) {
             if (state.lastSourceSimulationTick == tick.simulationTick
@@ -2601,11 +2624,13 @@ public final class StarsectorPrepatcherHooks {
                 invalidTotal = true;
                 if (state.pendingSteps == 0) state.debtSequence = 0L;
             } else {
+                int previousSourceMask = state.sourceMask;
                 state.sourceMask |= 1 << source;
-                if (state.lastTouchedBatch != batch.id) {
-                    state.lastTouchedBatch = batch.id;
-                    addTouched = true;
-                }
+                // One due decision per render batch is enough unless an economy
+                // source joins a condition-only debt later in the same batch.
+                evaluateDue = state.lastDueCheckBatch != batch.id
+                        || (source == 0 && previousSourceMask != state.sourceMask);
+                if (evaluateDue) state.lastDueCheckBatch = batch.id;
             }
         }
         if (invalidTotal) {
@@ -2615,7 +2640,10 @@ public final class StarsectorPrepatcherHooks {
             invokeObservedMarketAdvance(market, amount, fallbackOrigin);
             return;
         }
-        if (addTouched) batch.touched.add(new WeakIdentityEntry<>(market, state));
+        if (evaluateDue && prepareMarketForBatch(batch, market, state, c)) {
+            batch.touched.add(new WeakIdentityEntry<>(market, state));
+            MARKET_SCHEDULER_BATCH_TOUCHED_ENTRIES.increment();
+        }
         MARKET_SCHEDULER_ACCUMULATED_CALLS.increment();
     }
 
@@ -2636,27 +2664,83 @@ public final class StarsectorPrepatcherHooks {
         }
     }
 
-    private static void deliverMarketAtBatchEnd(
-            MarketSchedulerBatch batch, MarketAPI market, MarketScheduleState state) {
-        if (market == null || state == null) return;
-        PrepatcherConfig c = config;
-        if (c == null || !c.marketScheduler) return;
+    /**
+     * Computes one delivery decision on the first source call of a render batch.
+     * Condition-source markets cache stable policy inputs and are added to the
+     * batch list only when due. Economy markets retain exact per-batch policy.
+     */
+    private static boolean prepareMarketForBatch(
+            MarketSchedulerBatch batch, MarketAPI market,
+            MarketScheduleState state, PrepatcherConfig c) {
+        if (market == null || state == null || c == null || !c.marketScheduler) return false;
+        MARKET_SCHEDULER_DUE_CHECKS.increment();
 
+        int sourceMask;
+        synchronized (state) {
+            if (state.disabled || state.inAdvance || state.pendingSteps <= 0) return false;
+            sourceMask = state.sourceMask;
+        }
+        boolean conditionOnlySource = false;
+        if (sourceMask == (1 << 1)) {
+            try {
+                // Source 1 is also used by real economy markets whose primary
+                // entity owns planet conditions. Cache/stagger only genuinely
+                // non-economy markets; economy markets keep exact hot policy.
+                conditionOnlySource = !market.isInEconomy();
+            } catch (Throwable failure) {
+                MARKET_SCHEDULER_POLICY_FAILURES.increment();
+                conditionOnlySource = false;
+            }
+        }
         boolean hot = false;
         boolean hidden = false;
         int interval = 1;
         int phase = 0;
         try {
-            LocationAPI location = market.getContainingLocation();
-            if (location == null) {
-                SectorEntityToken primary = market.getPrimaryEntity();
-                if (primary != null) location = primary.getContainingLocation();
+            LocationAPI location;
+            boolean playerOwned;
+            if (conditionOnlySource) {
+                boolean audit;
+                synchronized (state) {
+                    audit = !state.schedulePolicyCached
+                            || state.lastSchedulePolicyAuditBatch == Long.MIN_VALUE
+                            || batch.id - state.lastSchedulePolicyAuditBatch
+                            >= c.marketSchedulerPolicyAuditBatches;
+                    if (audit) state.lastSchedulePolicyAuditBatch = batch.id;
+                    location = state.cachedScheduleLocation;
+                    hidden = state.cachedScheduleHidden;
+                }
+                if (audit) {
+                    location = market.getContainingLocation();
+                    if (location == null) {
+                        SectorEntityToken primary = market.getPrimaryEntity();
+                        if (primary != null) location = primary.getContainingLocation();
+                    }
+                    hidden = market.isHidden();
+                    synchronized (state) {
+                        state.cachedScheduleLocation = location;
+                        state.cachedScheduleHidden = hidden;
+                        state.schedulePolicyCached = true;
+                    }
+                    MARKET_SCHEDULER_POLICY_AUDITS.increment();
+                } else {
+                    MARKET_SCHEDULER_POLICY_CACHE_HITS.increment();
+                }
+                playerOwned = false;
+            } else {
+                location = market.getContainingLocation();
+                if (location == null) {
+                    SectorEntityToken primary = market.getPrimaryEntity();
+                    if (primary != null) location = primary.getContainingLocation();
+                }
+                playerOwned = market.isPlayerOwned();
+                hidden = market.isHidden();
+                MARKET_SCHEDULER_POLICY_AUDITS.increment();
             }
             if (c.marketSchedulerHotCurrentLocation
                     && location != null && location == batch.currentLocation) hot = true;
-            if (c.marketSchedulerHotPlayerOwned && market.isPlayerOwned()) hot = true;
+            if (c.marketSchedulerHotPlayerOwned && playerOwned) hot = true;
             if (c.marketSchedulerHotInteraction && market == batch.interactionMarket) hot = true;
-            hidden = market.isHidden();
             interval = hot ? 1 : (hidden
                     ? c.marketSchedulerHiddenBatches : c.marketSchedulerBatches);
             phase = stableMarketPhase(market, interval);
@@ -2668,10 +2752,48 @@ public final class StarsectorPrepatcherHooks {
         }
 
         synchronized (state) {
-            if (state.disabled || state.inAdvance || state.pendingSteps <= 0) return;
-            boolean first = state.nextDueBatch == Long.MIN_VALUE;
-            boolean due = first || interval <= 1 || batch.id >= state.nextDueBatch;
-            if (!due) return;
+            if (state.disabled || state.inAdvance || state.pendingSteps <= 0) return false;
+            if (state.nextDueBatch == Long.MIN_VALUE) {
+                if (conditionOnlySource && interval > 1) {
+                    state.nextDueBatch = firstStableDueBatch(batch.id, phase, interval);
+                    if (state.nextDueBatch > batch.id) {
+                        MARKET_SCHEDULER_INITIAL_PHASE_DEFERRALS.increment();
+                    }
+                } else {
+                    state.nextDueBatch = batch.id;
+                }
+            }
+            boolean due = interval <= 1 || batch.id >= state.nextDueBatch;
+            if (!due) {
+                MARKET_SCHEDULER_NOT_DUE_SKIPS.increment();
+                return false;
+            }
+            state.dueDecisionBatch = batch.id;
+            state.dueHot = hot;
+            state.dueHidden = hidden;
+            state.dueInterval = interval;
+            state.duePhase = phase;
+            if (state.lastTouchedBatch == batch.id) return false;
+            state.lastTouchedBatch = batch.id;
+            MARKET_SCHEDULER_DUE_ENTRIES.increment();
+            return true;
+        }
+    }
+
+    private static void deliverMarketAtBatchEnd(
+            MarketSchedulerBatch batch, MarketAPI market, MarketScheduleState state) {
+        if (market == null || state == null) return;
+        boolean hot;
+        boolean hidden;
+        int interval;
+        int phase;
+        synchronized (state) {
+            if (state.disabled || state.inAdvance || state.pendingSteps <= 0
+                    || state.dueDecisionBatch != batch.id) return;
+            hot = state.dueHot;
+            hidden = state.dueHidden;
+            interval = state.dueInterval;
+            phase = state.duePhase;
         }
 
         int delivered = deliverPendingCoalesced(
@@ -2682,6 +2804,11 @@ public final class StarsectorPrepatcherHooks {
         synchronized (state) {
             state.nextDueBatch = nextStableDueBatch(batch.id, phase, interval);
         }
+    }
+
+    private static long firstStableDueBatch(long currentBatch, int phase, int interval) {
+        if (interval <= 1) return currentBatch;
+        return currentBatch + Math.floorMod((long) phase - currentBatch, interval);
     }
 
     private static long nextStableDueBatch(long currentBatch, int phase, int interval) {
@@ -3085,8 +3212,13 @@ public final class StarsectorPrepatcherHooks {
             "data.kaysaar.aotd.tot.scripts.commoditydata.AoTDAvailableStat";
     private static final MethodHandle[] AOTD_TEMPORAL_ACCESS_UNSUPPORTED =
             new MethodHandle[0];
-    private static final ConcurrentHashMap<Class<?>, MethodHandle[]>
-            AOTD_TEMPORAL_ACCESS = new ConcurrentHashMap<>();
+    private static final ClassValue<MethodHandle[]> AOTD_TEMPORAL_ACCESS =
+            new ClassValue<>() {
+                @Override
+                protected MethodHandle[] computeValue(Class<?> type) {
+                    return createAoTDTemporalAccess(type);
+                }
+            };
 
     /**
      * Called only after transformed MutableStat bytecode observed a non-null
@@ -3255,8 +3387,7 @@ public final class StarsectorPrepatcherHooks {
                 || !AOTD_COMMODITY_CLASS.equals(commodityType.getName())) {
             return AOTD_TEMPORAL_ACCESS_UNSUPPORTED;
         }
-        return AOTD_TEMPORAL_ACCESS.computeIfAbsent(
-                commodityType, StarsectorPrepatcherHooks::createAoTDTemporalAccess);
+        return AOTD_TEMPORAL_ACCESS.get(commodityType);
     }
 
     private static MethodHandle[] createAoTDTemporalAccess(Class<?> commodityType) {
@@ -5566,7 +5697,17 @@ public final class StarsectorPrepatcherHooks {
         ArrayDeque<PendingStepRun> pendingRuns;
         long nextDueBatch = Long.MIN_VALUE;
         long lastTouchedBatch = Long.MIN_VALUE;
+        long lastDueCheckBatch = Long.MIN_VALUE;
+        long dueDecisionBatch = Long.MIN_VALUE;
+        boolean dueHot;
+        boolean dueHidden;
+        int dueInterval = 1;
+        int duePhase;
         long lastPolicyAuditBatch = Long.MIN_VALUE;
+        long lastSchedulePolicyAuditBatch = Long.MIN_VALUE;
+        LocationAPI cachedScheduleLocation;
+        boolean cachedScheduleHidden;
+        boolean schedulePolicyCached;
         long lastSourceSimulationTick = Long.MIN_VALUE;
         long debtSequence;
         long deliveredCallbacks;
@@ -7223,6 +7364,20 @@ public final class StarsectorPrepatcherHooks {
                         + MARKET_SCHEDULER_MULTIPLE_SOURCE_TICK_CALLS.sumThenReset()
                         + ", marketSchedulerPolicyFailures="
                         + MARKET_SCHEDULER_POLICY_FAILURES.sumThenReset()
+                        + ", marketSchedulerPolicyAudits="
+                        + MARKET_SCHEDULER_POLICY_AUDITS.sumThenReset()
+                        + ", marketSchedulerPolicyCacheHits="
+                        + MARKET_SCHEDULER_POLICY_CACHE_HITS.sumThenReset()
+                        + ", marketSchedulerDueChecks="
+                        + MARKET_SCHEDULER_DUE_CHECKS.sumThenReset()
+                        + ", marketSchedulerDueEntries="
+                        + MARKET_SCHEDULER_DUE_ENTRIES.sumThenReset()
+                        + ", marketSchedulerNotDueSkips="
+                        + MARKET_SCHEDULER_NOT_DUE_SKIPS.sumThenReset()
+                        + ", marketSchedulerInitialPhaseDeferrals="
+                        + MARKET_SCHEDULER_INITIAL_PHASE_DEFERRALS.sumThenReset()
+                        + ", marketSchedulerBatchTouchedEntries="
+                        + MARKET_SCHEDULER_BATCH_TOUCHED_ENTRIES.sumThenReset()
                         + ", marketSchedulerAdvanceFailures="
                         + MARKET_SCHEDULER_ADVANCE_FAILURES.sumThenReset()
                         + ", marketSchedulerDisabledMarketCalls="

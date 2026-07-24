@@ -27,7 +27,9 @@ public final class AoTDDeliveryListenerFailStopTest {
         StarsectorPrepatcherRuntimeBridge.publishAoTDMarketTimeDelivered(market, 1f, 1);
 
         require(calls.get() == 1, "broken callback was invoked more than once: " + calls.get());
-        require((StarsectorPrepatcherRuntimeBridge.getAoTDNegotiatedCapabilities()
+        long runtimeCapabilities =
+                StarsectorPrepatcherRuntimeBridge.getAoTDNegotiatedCapabilities();
+        require((runtimeCapabilities
                 & StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_NATIVE_DELIVERY_EVENTS) == 0L,
                 "delivery capability remained active after LinkageError");
         String status = StarsectorPrepatcherRuntimeBridge.getAoTDForkContractStatus();

@@ -112,7 +112,7 @@ profile и только там включает known-disabled loading/startup p
 документацию или дистрибутив. Если `fr.jar` отсутствует, FR smoke явно получает `SKIPPED`; такой
 результат допустим для обычной разработки, но не для выпуска с заявленной FR-совместимостью.
 Краткие пользовательские изменения фиксируются в [`CHANGELOG.md`](CHANGELOG.md), а причины,
-измерения и остаточные риски — в [`docs/releases/`](docs/releases/0.10.0.md). Обязательные regression
+измерения и остаточные риски — в [`docs/releases/`](docs/releases/0.11.0.md). Обязательные regression
 gates для новых pre-load патчей описаны в [`docs/VALIDATION.md`](docs/VALIDATION.md).
 
 ## Java 17 compatibility
@@ -135,7 +135,7 @@ StarsectorPrepatcherHooks.class.getClassLoader()
 заявляется совместимость. Сначала установите telemetry, затем выполните из каталога мода:
 
 ```bat
-install-agent.bat -Target FasterRendering
+StarsectorPrepatcher.bat install FasterRendering
 ```
 
 Запустите `starsector-core\fr.bat`, создайте новую кампанию и пройдите сценарии из

@@ -48,7 +48,7 @@ for payload_entry in "${REQUIRED_RUNTIME_PAYLOAD[@]}"; do
     exit 1
   fi
 done
-EXPECTED_RUNTIME_PAYLOAD_COUNT=86
+EXPECTED_RUNTIME_PAYLOAD_COUNT=87
 runtime_payload_count="$(grep -Ec '^com/fs/starfarer/api/StarsectorPrepatcher[^/]*\.class$' "$AGENT_ENTRIES" || true)"
 if [[ "$runtime_payload_count" -ne "$EXPECTED_RUNTIME_PAYLOAD_COUNT" ]]; then
   echo "Target-loader runtime payload inventory changed: expected $EXPECTED_RUNTIME_PAYLOAD_COUNT class entries, found $runtime_payload_count." >&2
@@ -71,7 +71,7 @@ fi
       printf '%s\n' "$top_level"
     fi
   done
-  find agent baseline docs jars media profiles source -type f -print
+  find agent docs jars media profiles source -type f -print
   printf '%s\n' 'logs/README.txt'
 ) | sed 's#^\./##' | LC_ALL=C sort -u > "$CHECKSUM_INPUTS"
 

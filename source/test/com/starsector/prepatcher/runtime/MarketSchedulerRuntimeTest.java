@@ -443,6 +443,9 @@ public final class MarketSchedulerRuntimeTest {
         MutableMarket memoryHot = new MutableMarket(
                 "condition-memory-hot", remote.proxy, false, false);
         memoryHot.memory.fullRate = true;
+        MutableMarket economyViaConditionSource = new MutableMarket(
+                "economy-condition-source", remote.proxy, true, false);
+        economyViaConditionSource.inEconomy = true;
 
         int frames = 13;
         for (int frame = 1; frame <= frames; frame++) {
@@ -456,6 +459,8 @@ public final class MarketSchedulerRuntimeTest {
                         local.proxy, 0.5f, 1);
                 StarsectorPrepatcherHooks.advanceMarketScheduled(
                         memoryHot.proxy, 0.25f, 1);
+                StarsectorPrepatcherHooks.advanceMarketScheduled(
+                        economyViaConditionSource.proxy, 0.125f, 1);
             } finally {
                 endSyntheticSchedulerTick();
             }
@@ -464,8 +469,7 @@ public final class MarketSchedulerRuntimeTest {
         for (MutableMarket market : remoteMarkets) {
             int phase = (Integer) stablePhase.invoke(null, market.proxy, 4);
             ArrayList<Integer> expected = new ArrayList<>();
-            expected.add(1);
-            for (int frame = 2; frame <= frames; frame++) {
+            for (int frame = 1; frame <= frames; frame++) {
                 if (Math.floorMod(frame, 4) == phase) expected.add(frame);
             }
             require(market.advanceFrames.equals(expected),
@@ -476,6 +480,9 @@ public final class MarketSchedulerRuntimeTest {
                 "current-location planet-condition market was throttled");
         require(memoryHot.calls == frames && close(memoryHot.totalAmount, frames * 0.25f),
                 "planet-condition memory opt-out was throttled");
+        require(economyViaConditionSource.calls == frames
+                        && close(economyViaConditionSource.totalAmount, frames * 0.125f),
+                "economy market reached through condition source lost player hot policy");
 
         StarsectorPrepatcherHooks.flushMarketSchedulerBeforeSave();
         for (MutableMarket market : remoteMarkets) {
@@ -489,14 +496,19 @@ public final class MarketSchedulerRuntimeTest {
         MutableMarket reentrant = new MutableMarket(
                 "condition-reentrant", remote.proxy, false, false);
         reentrant.reenterPlanetOnce = true;
-        beginSyntheticSchedulerTick();
-        try {
-            StarsectorPrepatcherHooks.advanceMarketScheduled(
-                    reentrant.proxy, 1f, 1);
-        } finally {
-            endSyntheticSchedulerTick();
+        int scheduledFrames = 0;
+        while (reentrant.calls == 0 && scheduledFrames < 4) {
+            beginSyntheticSchedulerTick();
+            try {
+                StarsectorPrepatcherHooks.advanceMarketScheduled(
+                        reentrant.proxy, 1f, 1);
+                scheduledFrames++;
+            } finally {
+                endSyntheticSchedulerTick();
+            }
         }
-        require(reentrant.calls == 2 && close(reentrant.totalAmount, 1.5f),
+        require(reentrant.calls == 2
+                        && close(reentrant.totalAmount, scheduledFrames + 0.5f),
                 "planet-condition reentrant call was lost or coalesced");
         require(metric("MARKET_SCHEDULER_REENTRANT_CALLS")
                         == reentrantMetricBefore + 1L,
@@ -1833,6 +1845,7 @@ public final class MarketSchedulerRuntimeTest {
         final LocationAPI location;
         final boolean playerOwned;
         final boolean hidden;
+        boolean inEconomy;
         final MutableMemory memory = new MutableMemory();
         final ConstructionQueue constructionQueue = new ConstructionQueue();
         final ArrayList<Industry> industries = new ArrayList<>();
@@ -1875,6 +1888,7 @@ public final class MarketSchedulerRuntimeTest {
                 case "getContainingLocation" -> location;
                 case "isPlayerOwned" -> playerOwned;
                 case "isHidden" -> hidden;
+                case "isInEconomy" -> inEconomy;
                 case "getMemoryWithoutUpdate" -> memory.proxy;
                 case "getConstructionQueue" -> {
                     constructionQueueReads++;

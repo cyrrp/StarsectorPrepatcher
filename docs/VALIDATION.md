@@ -125,7 +125,7 @@ Review не считается завершённым без следующих 
 Численное performance-заявление делается только после этих gates и одинакового A/B-прогона. Если
 какой-либо gate временно неприменим, патч остаётся experimental/disabled by default. Исключение
 допустимо только по явному решению владельца релиза, при наличии отдельного kill switch и записи
-причины/остаточного риска в отчёте соответствующего выпуска из [`releases/`](releases/0.10.0.md).
+причины/остаточного риска в отчёте соответствующего выпуска из [`releases/`](releases/0.11.0.md).
 
 ## Матрица запуска vanilla и Faster Rendering
 
@@ -138,8 +138,8 @@ Loader harness необходим, но не заменяет запуск на�
 В обоих режимах выполняются cold startup, создание новой кампании до первого campaign frame,
 загрузка существующего save, открытие sector/system/Intel map, переход через hyperspace и один бой.
 При включённой telemetry порядок должен быть `Telemetry` → `Prepatcher`; его можно восстановить
-идемпотентным вызовом `install-agent.bat -Target Vanilla` или
-`install-agent.bat -Target FasterRendering`.
+идемпотентным вызовом `StarsectorPrepatcher.bat install Vanilla` или
+`StarsectorPrepatcher.bat install FasterRendering`.
 
 Обязательные loader assertions для FR:
 
@@ -291,3 +291,19 @@ Required gates:
 - AoTD deficit semantic fixture;
 - Stage 6 pure-price and Stage 7 global-phase regressions;
 - ASM verification and runtime payload inventory.
+
+
+## AoTD runtime epoch и live capability profile
+
+Required gates:
+
+- bridge capability mask `0x1ff`;
+- direct `publishRuntimeEpoch(JJ)` transformation;
+- loader-neutral market-state reset on epoch publication;
+- stale global-boundary callback rejection;
+- domain-specific revision masks без ложного structural generation;
+- live capability downgrade и однократная generation resynchronization;
+- AoTD worker restart and executor recreation;
+- stale price/trade ticket rejection with identical market identity;
+- pre-epoch serialized task safe drop;
+- save-failure barrier release.

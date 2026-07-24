@@ -2,7 +2,7 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Current version: **0.10.0**. Supported game build: **Starsector 0.98a-RC8**.
+Current version: **0.11.0**. Supported game build: **Starsector 0.98a-RC8**.
 
 [![Unplayable without Prepatcher versus smooth with Prepatcher](media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
@@ -20,7 +20,7 @@ The project has a broader direction than map optimization alone:
 - keep version-specific bytecode knowledge inside the prepatcher instead of duplicating it across
   gameplay mods.
 
-The public API is a roadmap item, not a published compatibility surface in `0.10.0`. Its intended
+The public API is a roadmap item, not a published compatibility surface in `0.11.0`. Its intended
 namespace is `com.starsector.prepatcher.api`; API types will only become supported once they are
 documented and covered by compatibility tests.
 
@@ -60,22 +60,19 @@ log and warns when the mod is enabled without the startup agent.
 3. Install the agent for the launcher you use (commands below).
 4. Enable **StarsectorPrepatcher** in the launcher and start the game.
 
-For the vanilla launcher, run:
+On Windows, double-click `StarsectorPrepatcher.bat`, choose **Install javaagent**, and select
+Vanilla, Faster Rendering, or both. The same actions are available from a terminal:
 
 ```bat
-install-agent.bat
+StarsectorPrepatcher.bat install Vanilla
+StarsectorPrepatcher.bat install FasterRendering
+StarsectorPrepatcher.bat install Both
 ```
 
-For Faster Rendering (`starsector-core\fr.bat`), run:
-
-```bat
-install-agent.bat -Target FasterRendering
-```
-
-To configure both launch paths, use `install-agent.bat -Target Both`. The installer understands
-both vanilla's `vmparams` command line and Faster Rendering's `starsector-core\fr.vmparams` Java
-argument file. For every changed file it creates a timestamped backup, replaces any existing entry
-for this installation, and places Prepatcher after every other `-javaagent` option:
+The launcher explains every action before selection. Installation understands both vanilla's
+`vmparams` command line and Faster Rendering's `starsector-core\fr.vmparams` Java argument file.
+For every changed file it creates a timestamped backup, replaces any existing entry for this
+installation, and places Prepatcher after every other `-javaagent` option:
 
 ```text
 -javaagent:../mods/StarsectorPrepatcher/agent/StarsectorPrepatcherAgent.jar
@@ -187,8 +184,9 @@ samples can be enabled with `observer.marketConstructionDiagnostics=true`; they 
 source industries, transition buckets, and scalar `BaseIndustry` state, retain no game objects, and do
 not change scheduler behavior.
 
-Run `uninstall-agent.bat` for vanilla, `uninstall-agent.bat -Target FasterRendering` for FR, or
-`uninstall-agent.bat -Target Both` to remove both managed entries. Each changed file is backed up.
+Run `StarsectorPrepatcher.bat`, choose **Remove javaagent**, and select the affected launcher.
+The console equivalents are `StarsectorPrepatcher.bat uninstall Vanilla`,
+`... uninstall FasterRendering`, and `... uninstall Both`. Each changed file is backed up.
 
 ## Diagnostics and verification
 
@@ -205,10 +203,11 @@ The agent records `APPLIED`, `ALREADY_APPLIED`, `SKIPPED_STRUCTURAL`, `SKIPPED_C
 use the same local structural status model as the other patches. Every skip is fail-open; `SKIPPED_LOADER`
 must be investigated before calling that launch path compatible.
 
-Run `verify-structural.bat` on Windows or `./verify-structural.sh` on Linux/macOS for the complete
-documentation, structural, negative/idempotency, lifecycle/GC, runtime, hyperspace, and agent
-startup suite. When `fr.jar` is present it also runs the real Faster Rendering classloader smoke.
-Build details are in [`BUILDING.md`](BUILDING.md).
+Choose **Run full verification** in `StarsectorPrepatcher.bat` (or run
+`StarsectorPrepatcher.bat verify`) on Windows. Use `./verify-structural.sh` on Linux/macOS.
+The suite covers documentation, structural, negative/idempotency, lifecycle/GC, runtime,
+hyperspace, and agent startup; when `fr.jar` is present it also runs the real Faster Rendering
+classloader smoke. Build details are in [`BUILDING.md`](BUILDING.md).
 
 ## Documentation
 
@@ -220,17 +219,16 @@ Build details are in [`BUILDING.md`](BUILDING.md).
 - [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) — structural matching and fail-open rules;
 - [`docs/VALIDATION.md`](docs/VALIDATION.md) — regression and performance validation playbook;
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — structural discovery, architecture, tooling, and platform plan;
-- [`docs/releases/0.10.0.md`](docs/releases/0.10.0.md) — current detailed release report.
+- [`docs/releases/0.11.0.md`](docs/releases/0.11.0.md) — current detailed release report.
 
 StarsectorPrepatcher is distributed under the terms in [`LICENSE`](LICENSE).
 
-## AoTD native integration Stage 7
-
-The agent now negotiates bridge schema 4 and global-phase capability `0x80`. Hard global boundaries deliver pending market scheduler debt; soft boundaries identify immutable AoTD settlement phases. AoTD remains responsible for local generations, pure computation and committed snapshots.
-
-## AoTD production integration — Stage 8
+## AoTD Scheduler Fork integration
 
 Prepatcher 0.11.0 installs a clean wrapper around the original
 `BaseIndustry.getMaxDeficit()`. The preserved vanilla implementation remains active until a
-compatible AoTD Scheduler Fork registers the complete native capability profile `0xff`.
-Do not install the obsolete modified `starfarer.api.jar`.
+compatible AoTD Scheduler Fork registers the complete native capability profile `0x1ff`.
+Bridge schema V6 publishes campaign/economy epochs and reads the live runtime capability mask.
+Late callbacks from an older epoch are rejected; a listener fail-stop triggers one generation
+resynchronization before fallback dirtying is enabled. Do not install the obsolete modified
+`starfarer.api.jar`.

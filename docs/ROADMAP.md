@@ -1,10 +1,9 @@
 # Технический roadmap
 
-Статус: план работ после выпуска `0.10.0`. Persistent economy snapshots, ordered
-commodity active set, direct expiry-aware temp-mod scheduler и direct dormant `BaseIndustry` fast
-path выпущены в одном unified agent;
-рабочая цель следующего архитектурного milestone — `0.10.0`. Срок выпуска этим документом не
-задаётся.
+Статус: план работ после выпуска `0.11.0`. Persistent economy snapshots, ordered commodity active
+set, direct expiry-aware temp-mod scheduler, dormant `BaseIndustry` fast path и production-интеграция
+AoTD выпущены в одном unified agent. Следующий архитектурный milestone сосредоточен на structural
+discovery; срок выпуска этим документом не задаётся.
 
 Этот документ описывает известный технический долг, целевую архитектуру и порядок миграции.
 Текущее пользовательское поведение патчей зафиксировано в [`PATCHES.md`](PATCHES.md), правила

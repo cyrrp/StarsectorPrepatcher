@@ -1,5 +1,19 @@
-# Runtime output
-logs/*.log
-logs/direct-market-observe/
-logs/market-construction-diagnostics/
+# Build and verification output
 .build/
+*.class
+
+# Runtime output (keep the directory placeholder)
+/logs/*
+!/logs/README.txt
+hs_err_pid*.log
+replay_pid*.log
+
+# Local archives and editor/OS metadata
+/*.zip
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+*.swp

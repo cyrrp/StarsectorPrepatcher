@@ -45,7 +45,7 @@ foreach ($entry in $requiredRuntimePayload) {
         throw "Required target-loader runtime payload is missing from the agent JAR: $entry"
     }
 }
-$expectedRuntimePayloadCount = 86
+$expectedRuntimePayloadCount = 87
 $runtimePayloadEntries = @($agentEntries | Where-Object {
     $_ -cmatch '^com/fs/starfarer/api/StarsectorPrepatcher[^/]*\.class$'
 })
@@ -59,7 +59,7 @@ $checksumFiles = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
 Get-ChildItem -LiteralPath $modRoot -File -Force | Where-Object {
     $_.Name -ne 'SHA256SUMS.txt'
 } | ForEach-Object { $checksumFiles.Add($_) }
-foreach ($directory in @('agent', 'baseline', 'docs', 'jars', 'media', 'profiles', 'source')) {
+foreach ($directory in @('agent', 'docs', 'jars', 'media', 'profiles', 'source')) {
     Get-ChildItem -LiteralPath (Join-Path $modRoot $directory) -File -Force -Recurse |
         ForEach-Object { $checksumFiles.Add($_) }
 }

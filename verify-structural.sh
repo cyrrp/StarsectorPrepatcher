@@ -104,6 +104,8 @@ RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$CORE/st
   java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.TempModExpiryRuntimeRegressionTest
   echo '== LoadingSaveRuntimeRegressionTest =='
   java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.LoadingSaveRuntimeRegressionTest
+  echo '== AoTDDomainRevisionRuntimeTest =='
+  java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.AoTDDomainRevisionRuntimeTest
 } 2>&1 | tee "$REPORT_DIR/runtime-regression.txt"
 
 {

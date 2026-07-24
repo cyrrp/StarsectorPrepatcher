@@ -227,7 +227,8 @@ foreach ($test in @(
     'com.starsector.prepatcher.runtime.PersistentEconomyRuntimeRegressionTest',
     'com.starsector.prepatcher.runtime.MarketNoOpRuntimeRegressionTest',
     'com.starsector.prepatcher.runtime.TempModExpiryRuntimeRegressionTest',
-    'com.starsector.prepatcher.runtime.LoadingSaveRuntimeRegressionTest'
+    'com.starsector.prepatcher.runtime.LoadingSaveRuntimeRegressionTest',
+    'com.starsector.prepatcher.runtime.AoTDDomainRevisionRuntimeTest'
 )) {
     $runtimeLines.Add("== $test ==")
     $ErrorActionPreference = 'Continue'

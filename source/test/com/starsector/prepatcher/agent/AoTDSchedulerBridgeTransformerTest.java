@@ -80,8 +80,19 @@ public final class AoTDSchedulerBridgeTransformerTest {
                 "patched bridge did not activate: " + active);
         long capabilities = ((Long) patchedBridge.getMethod(
                 "getNegotiatedCapabilities").invoke(null)).longValue();
-        require(capabilities == 255L, "unexpected negotiated capabilities: " + capabilities);
+        require(capabilities == 511L, "unexpected negotiated capabilities: " + capabilities);
         patchedBridge.getMethod("requireProductionProfile").invoke(null);
+        patchedBridge.getMethod("publishRuntimeEpoch", long.class, long.class)
+                .invoke(null, 11L, 23L);
+        Class<?> runtime = Class.forName(
+                "com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge");
+        long campaignEpoch = ((Long) runtime.getMethod(
+                "getAoTDCampaignEpoch").invoke(null)).longValue();
+        long economyEpoch = ((Long) runtime.getMethod(
+                "getAoTDEconomyEpoch").invoke(null)).longValue();
+        require(campaignEpoch == 11L && economyEpoch == 23L,
+                "runtime epoch publication failed: campaign=" + campaignEpoch
+                        + ", economy=" + economyEpoch);
         long globalToken = ((Long) patchedBridge.getMethod(
                 "beforeGlobalBoundary", int.class, boolean.class)
                 .invoke(null, 1, false)).longValue();
@@ -89,13 +100,24 @@ public final class AoTDSchedulerBridgeTransformerTest {
         patchedBridge.getMethod("afterGlobalBoundary", long.class, long.class)
                 .invoke(null, globalToken, 1L);
 
+        long staleGlobalToken = ((Long) patchedBridge.getMethod(
+                "beforeGlobalBoundary", int.class, boolean.class)
+                .invoke(null, 2, false)).longValue();
+        patchedBridge.getMethod("publishRuntimeEpoch", long.class, long.class)
+                .invoke(null, 11L, 24L);
+        patchedBridge.getMethod("afterGlobalBoundary", long.class, long.class)
+                .invoke(null, staleGlobalToken, 2L);
+        long staleGlobalBoundaries = ((Long) runtime.getMethod(
+                "getAoTDStaleGlobalBoundaryCount").invoke(null)).longValue();
+        require(staleGlobalBoundaries == 1L,
+                "stale global boundary was not rejected/accounted: "
+                        + staleGlobalBoundaries);
+
         Object market = new Object();
         Class<?> registry = patchedBridge.getClassLoader().loadClass(
                 "data.kaysaar.aotd.tot.compat.MarketRegistry");
         registry.getMethod("registerMarket", String.class, Object.class)
                 .invoke(null, "test-market", market);
-        Class<?> runtime = Class.forName(
-                "com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge");
         runtime.getMethod("publishAoTDMarketTimeDelivered",
                 Object.class, float.class, int.class).invoke(null, market, 0.25f, 7);
         long generation = ((Long) patchedBridge.getMethod(
@@ -123,7 +145,45 @@ public final class AoTDSchedulerBridgeTransformerTest {
         require(registryStatus.contains("unknownMutation=0"),
                 "mutation bypassed registered market: " + registryStatus);
 
-        System.out.println("AoTD scheduler bridge transformer test passed: " + registryStatus);
+        // Stage 11: simulate a runtime listener LinkageError after a successful
+        // delivery. Prepatcher removes the capability; AoTD must observe the
+        // live mask on the next capability check and immediately resynchronize
+        // the missed delivered generation instead of waiting for a hard boundary.
+        java.lang.reflect.Field runtimeListener = runtime.getDeclaredField("aotdDeliveryListener");
+        runtimeListener.setAccessible(true);
+        java.util.function.Consumer<Object> broken = ignored -> {
+            throw new IllegalAccessError("synthetic runtime downgrade");
+        };
+        runtimeListener.set(null, broken);
+        runtime.getMethod("publishAoTDMarketTimeDelivered",
+                Object.class, float.class, int.class).invoke(null, market, 0.5f, 9);
+        long runtimeMaskAfterFailure = ((Long) runtime.getMethod(
+                "getAoTDNegotiatedCapabilities").invoke(null)).longValue();
+        require((runtimeMaskAfterFailure & 2L) == 0L,
+                "runtime delivery capability was not removed");
+        boolean deliveryStillActive = ((Boolean) patchedBridge.getMethod(
+                "hasCapability", long.class).invoke(null, 2L)).booleanValue();
+        require(!deliveryStillActive, "AoTD retained stale delivery capability");
+        long refreshedMask = ((Long) patchedBridge.getMethod(
+                "getNegotiatedCapabilities").invoke(null)).longValue();
+        require(refreshedMask == runtimeMaskAfterFailure,
+                "AoTD runtime mask did not converge: local=0x"
+                        + Long.toHexString(refreshedMask) + ", runtime=0x"
+                        + Long.toHexString(runtimeMaskAfterFailure));
+        long resyncs = ((Long) patchedBridge.getMethod(
+                "getRuntimeCapabilityResynchronizationCount").invoke(null)).longValue();
+        long repairedMarkets = ((Long) patchedBridge.getMethod(
+                "getRuntimeCapabilityResynchronizedMarketCount").invoke(null)).longValue();
+        require(resyncs == 1L, "runtime downgrade did not trigger one resync: " + resyncs);
+        require(repairedMarkets == 1L,
+                "missed delivery generation was not repaired: " + repairedMarkets);
+        boolean production = ((Boolean) patchedBridge.getMethod(
+                "hasProductionProfile").invoke(null)).booleanValue();
+        require(!production, "production profile remained active after runtime downgrade");
+
+        System.out.println("AoTD scheduler bridge transformer test passed: "
+                + registry.getMethod("statusSummary").invoke(null)
+                + "; bridge=" + patchedBridge.getMethod("statusSummary").invoke(null));
     }
 
     private static void inspectPatched(byte[] bytes) {
@@ -174,12 +234,22 @@ public final class AoTDSchedulerBridgeTransformerTest {
         require(runtimeCommit, "runtime mutation commit call missing");
         require(localQueueCommit, "fork-local dirty queue commit call missing");
 
+        MethodNode publishEpoch = null;
+        MethodNode runtimeCapabilities = null;
         MethodNode beforeGlobal = null;
         MethodNode afterGlobal = null;
         for (MethodNode method : node.methods) {
+            if ("publishRuntimeEpoch".equals(method.name) && "(JJ)V".equals(method.desc)) publishEpoch = method;
+            if ("getRuntimeCapabilities".equals(method.name) && "()J".equals(method.desc)) runtimeCapabilities = method;
             if ("beforeGlobalBoundary".equals(method.name) && "(IZ)J".equals(method.desc)) beforeGlobal = method;
             if ("afterGlobalBoundary".equals(method.name) && "(JJ)V".equals(method.desc)) afterGlobal = method;
         }
+        require(publishEpoch != null, "publishRuntimeEpoch method missing");
+        require(calls(publishEpoch, "publishAoTDRuntimeEpoch"),
+                "runtime epoch publication call missing");
+        require(runtimeCapabilities != null, "getRuntimeCapabilities method missing");
+        require(calls(runtimeCapabilities, "getAoTDNegotiatedCapabilities"),
+                "dynamic runtime capability query call missing");
         require(beforeGlobal != null && afterGlobal != null, "global boundary methods missing");
         require(calls(beforeGlobal, "beforeAoTDGlobalBoundary"), "runtime global begin call missing");
         require(calls(afterGlobal, "afterAoTDGlobalBoundary"), "runtime global end call missing");
@@ -202,7 +272,7 @@ public final class AoTDSchedulerBridgeTransformerTest {
             while (entries.hasMoreElements()) {
                 var jarEntry = entries.nextElement();
                 String entry = jarEntry.getName();
-                if (!entry.startsWith("data/kaysaar/aotd/tot/compat/")
+                if (!entry.startsWith("data/kaysaar/aotd/tot/")
                         || !entry.endsWith(".class")) continue;
                 try (InputStream input = jar.getInputStream(jarEntry)) {
                     result.put(entry, input.readAllBytes());

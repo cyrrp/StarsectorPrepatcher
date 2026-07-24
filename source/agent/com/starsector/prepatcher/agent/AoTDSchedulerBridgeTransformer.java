@@ -26,8 +26,8 @@ final class AoTDSchedulerBridgeTransformer implements ClassFileTransformer {
     private static final String RUNTIME_BRIDGE =
             "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
     private static final String PATCH_FIELD = "smo$patched$aotdSchedulerBridge";
-    private static final String PATCH_VALUE = "StarsectorPrepatcher:aotd-bridge-v5";
-    private static final String BRIDGE_MARKER = "AOTD_SCHEDULER_BRIDGE_V5";
+    private static final String PATCH_VALUE = "StarsectorPrepatcher:aotd-bridge-v6";
+    private static final String BRIDGE_MARKER = "AOTD_SCHEDULER_BRIDGE_V6";
 
     private final ClassLoader runtimeLoader;
 
@@ -58,7 +58,7 @@ final class AoTDSchedulerBridgeTransformer implements ClassFileTransformer {
                 record("ALREADY_PATCHED");
                 return null;
             }
-            if (!Integer.valueOf(5).equals(fieldValue(node, "BRIDGE_SCHEMA"))
+            if (!Integer.valueOf(6).equals(fieldValue(node, "BRIDGE_SCHEMA"))
                     || !BRIDGE_MARKER.equals(fieldValue(node, "BRIDGE_MARKER"))) {
                 record("SKIPPED_CONTRACT_MISMATCH");
                 return null;
@@ -82,6 +82,10 @@ final class AoTDSchedulerBridgeTransformer implements ClassFileTransformer {
                     "(Ljava/lang/Object;I)J"), directBeforeMutation(), 2, 2);
             rewrite(require(node, "afterMarketMutation",
                     "(JLjava/lang/Object;IJ)V"), directAfterMutation(), 6, 6);
+            rewrite(require(node, "publishRuntimeEpoch",
+                    "(JJ)V"), directPublishRuntimeEpoch(), 4, 4);
+            rewrite(require(node, "getRuntimeCapabilities",
+                    "()J"), directNoArgLong("getAoTDNegotiatedCapabilities"), 2, 0);
             rewrite(require(node, "beforeGlobalBoundary",
                     "(IZ)J"), directBeforeGlobalBoundary(), 2, 2);
             rewrite(require(node, "afterGlobalBoundary",
@@ -121,6 +125,14 @@ final class AoTDSchedulerBridgeTransformer implements ClassFileTransformer {
         code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, TARGET,
                 "activateFromPrepatcher", ACTIVATE_DESC, false));
         code.add(new InsnNode(Opcodes.ARETURN));
+        return code;
+    }
+
+    private static InsnList directNoArgLong(String name) {
+        InsnList code = new InsnList();
+        code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE, name,
+                "()J", false));
+        code.add(new InsnNode(Opcodes.LRETURN));
         return code;
     }
 
@@ -174,6 +186,16 @@ final class AoTDSchedulerBridgeTransformer implements ClassFileTransformer {
         return code;
     }
 
+
+    private static InsnList directPublishRuntimeEpoch() {
+        InsnList code = new InsnList();
+        code.add(new VarInsnNode(Opcodes.LLOAD, 0));
+        code.add(new VarInsnNode(Opcodes.LLOAD, 2));
+        code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE,
+                "publishAoTDRuntimeEpoch", "(JJ)V", false));
+        code.add(new InsnNode(Opcodes.RETURN));
+        return code;
+    }
 
     private static InsnList directBeforeGlobalBoundary() {
         InsnList code = new InsnList();

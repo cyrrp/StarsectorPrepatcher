@@ -7,13 +7,18 @@ import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 import java.util.function.BiFunction;
 
 /** Loader-neutral initialization and native AoTD ABI boundary. */
 public final class StarsectorPrepatcherRuntimeBridge {
+    /** AoTD SchedulerBridge.DIRTY_STRUCTURE; kept local to avoid a mod-loader link. */
+    private static final int AOTD_DIRTY_STRUCTURE = 1;
+
     public static final int AOTD_CONTRACT_ABI = 1;
     public static final long AOTD_CAPABILITY_CONTRACT_HANDSHAKE = 1L;
     public static final long AOTD_CAPABILITY_NATIVE_DELIVERY_EVENTS = 1L << 1;
@@ -23,6 +28,7 @@ public final class StarsectorPrepatcherRuntimeBridge {
     public static final long AOTD_CAPABILITY_AUTHORITATIVE_MARKET_STATE = 1L << 5;
     public static final long AOTD_CAPABILITY_PURE_PRICE_OFFLOAD = 1L << 6;
     public static final long AOTD_CAPABILITY_GLOBAL_PHASE_COORDINATION = 1L << 7;
+    public static final long AOTD_CAPABILITY_RUNTIME_EPOCH_COORDINATION = 1L << 8;
 
     private static final String AOTD_MOD_ID = "aotd_theory_of_toolbox";
     private static final long AOTD_SUPPORTED_CAPABILITIES =
@@ -33,7 +39,8 @@ public final class StarsectorPrepatcherRuntimeBridge {
                     | AOTD_CAPABILITY_CLEAN_DEFICIT_SEMANTICS
                     | AOTD_CAPABILITY_AUTHORITATIVE_MARKET_STATE
                     | AOTD_CAPABILITY_PURE_PRICE_OFFLOAD
-                    | AOTD_CAPABILITY_GLOBAL_PHASE_COORDINATION;
+                    | AOTD_CAPABILITY_GLOBAL_PHASE_COORDINATION
+                    | AOTD_CAPABILITY_RUNTIME_EPOCH_COORDINATION;
     private static final Object AOTD_CONTRACT_LOCK = new Object();
     private static final Object AOTD_MARKET_LOCK = new Object();
     private static final ReferenceQueue<Object> AOTD_MARKET_QUEUE = new ReferenceQueue<>();
@@ -47,7 +54,24 @@ public final class StarsectorPrepatcherRuntimeBridge {
     private static int aotdGlobalDepth;
     private static int aotdGlobalReasonMask;
     private static long aotdGlobalGeneration;
+    private static long aotdCampaignEpoch = 1L;
+    private static long aotdEconomyEpoch = 1L;
+    private static long aotdGlobalCampaignEpoch;
+    private static long aotdGlobalEconomyEpoch;
+    private static long aotdStaleGlobalBoundaries;
+    private static final LinkedHashSet<Long> AOTD_STALE_GLOBAL_TOKENS =
+            new LinkedHashSet<>();
+    private static final int AOTD_STALE_GLOBAL_TOKEN_LIMIT = 64;
     private static final AtomicLong AOTD_DELIVERY_LISTENER_FAILURES = new AtomicLong();
+    private static final LongAdder AOTD_CONDITION_ONLY_DELIVERIES_IGNORED = new LongAdder();
+    private static final LongAdder AOTD_OTHER_NON_ECONOMY_DELIVERIES_IGNORED = new LongAdder();
+    private static final AtomicLong AOTD_STALE_MARKET_BOUNDARY_CLOSES = new AtomicLong();
+    private static final AtomicLong AOTD_DUPLICATE_MARKET_BOUNDARY_CLOSES = new AtomicLong();
+    private static final AtomicLong AOTD_MARKET_BOUNDARY_TOKEN_MISMATCHES = new AtomicLong();
+    private static final AtomicLong AOTD_UNKNOWN_MARKET_BOUNDARY_CLOSES = new AtomicLong();
+    private static final LinkedHashSet<Long> AOTD_STALE_MARKET_TOKENS =
+            new LinkedHashSet<>();
+    private static final int AOTD_STALE_MARKET_TOKEN_LIMIT = 256;
 
     private static volatile boolean aotdContractRegistered;
     private static volatile String aotdForkVersion = "";
@@ -163,7 +187,19 @@ public final class StarsectorPrepatcherRuntimeBridge {
                 + "; trackedMarkets=" + markets
                 + "; deficitResolver=" + (aotdDeficitResolver != null)
                 + "; deliveryListener=" + aotdDeliveryListenerStatus
-                + "; callbackFailures=" + AOTD_DELIVERY_LISTENER_FAILURES.get();
+                + "; callbackFailures=" + AOTD_DELIVERY_LISTENER_FAILURES.get()
+                + "; conditionOnlyDeliveriesIgnored="
+                + AOTD_CONDITION_ONLY_DELIVERIES_IGNORED.sum()
+                + "; otherNonEconomyDeliveriesIgnored="
+                + AOTD_OTHER_NON_ECONOMY_DELIVERIES_IGNORED.sum()
+                + "; staleMarketBoundaryCloses="
+                + AOTD_STALE_MARKET_BOUNDARY_CLOSES.get()
+                + "; duplicateMarketBoundaryCloses="
+                + AOTD_DUPLICATE_MARKET_BOUNDARY_CLOSES.get()
+                + "; marketBoundaryTokenMismatches="
+                + AOTD_MARKET_BOUNDARY_TOKEN_MISMATCHES.get()
+                + "; unknownMarketBoundaryCloses="
+                + AOTD_UNKNOWN_MARKET_BOUNDARY_CLOSES.get();
     }
 
     /** Called by the clean BaseIndustry wrapper. Null means use preserved vanilla code. */
@@ -218,8 +254,8 @@ public final class StarsectorPrepatcherRuntimeBridge {
                         "0x" + Long.toHexString(aotdNegotiatedCapabilities));
                 PrepatcherLog.error("AoTD delivery listener disabled after linkage failure (#"
                         + failures + "); native delivery events capability was removed for "
-                        + "this session. Rebuild the complete SchedulerBridge class family.",
-                        failure);
+                        + "this session. AoTD will observe the live capability mask and "
+                        + "fall back to generation resynchronization.", failure);
             }
         } catch (Throwable failure) {
             long failures = AOTD_DELIVERY_LISTENER_FAILURES.incrementAndGet();
@@ -301,24 +337,91 @@ public final class StarsectorPrepatcherRuntimeBridge {
         requireAoTDCapability(AOTD_CAPABILITY_NATIVE_MUTATION_BOUNDARIES);
         if (market == null || token == 0L) return;
         synchronized (AOTD_MARKET_LOCK) {
+            if (AOTD_STALE_MARKET_TOKENS.remove(token)) {
+                AOTD_STALE_MARKET_BOUNDARY_CLOSES.incrementAndGet();
+                return;
+            }
             AoTDMarketState state = stateForLocked(market, false);
-            if (state == null || state.mutationDepth <= 0
-                    || state.mutationToken != token) {
-                PrepatcherLog.warn("Unbalanced AoTD market mutation boundary: token="
-                        + token + ", market=" + market);
+            if (state == null) {
+                long count = AOTD_UNKNOWN_MARKET_BOUNDARY_CLOSES.incrementAndGet();
+                logMarketBoundaryIssue("UNKNOWN_MARKET", count, token, market, null);
+                return;
+            }
+            if (state.mutationDepth <= 0) {
+                long count = AOTD_DUPLICATE_MARKET_BOUNDARY_CLOSES.incrementAndGet();
+                logMarketBoundaryIssue("DUPLICATE_CLOSE", count, token, market, state);
+                return;
+            }
+            if (state.mutationToken != token) {
+                long count = AOTD_MARKET_BOUNDARY_TOKEN_MISMATCHES.incrementAndGet();
+                logMarketBoundaryIssue("TOKEN_MISMATCH", count, token, market, state);
                 return;
             }
             state.mutationDirtyMask |= dirtyMask;
             state.lastSourceGeneration = sourceGeneration;
             state.mutationDepth--;
             if (state.mutationDepth == 0) {
-                state.structuralGeneration = nextPositive(state.structuralGeneration);
+                if ((state.mutationDirtyMask & AOTD_DIRTY_STRUCTURE) != 0) {
+                    state.structuralGeneration = nextPositive(state.structuralGeneration);
+                }
                 state.lastCommittedDirtyMask = state.mutationDirtyMask;
                 state.mutationDirtyMask = 0;
                 state.mutationReasonMask = 0;
                 state.mutationToken = 0L;
             }
         }
+    }
+
+    public static void publishAoTDRuntimeEpoch(long campaignEpoch, long economyEpoch) {
+        requireAoTDCapability(AOTD_CAPABILITY_RUNTIME_EPOCH_COORDINATION);
+        if (campaignEpoch <= 0L || economyEpoch <= 0L) {
+            throw new IllegalArgumentException("AoTD epochs must be positive");
+        }
+        boolean changed;
+        synchronized (AOTD_GLOBAL_LOCK) {
+            changed = aotdCampaignEpoch != campaignEpoch || aotdEconomyEpoch != economyEpoch;
+            if (!changed) return;
+            if (aotdGlobalDepth > 0 && aotdGlobalToken != 0L) {
+                aotdStaleGlobalBoundaries++;
+                AOTD_STALE_GLOBAL_TOKENS.add(aotdGlobalToken);
+                while (AOTD_STALE_GLOBAL_TOKENS.size() > AOTD_STALE_GLOBAL_TOKEN_LIMIT) {
+                    Long oldest = AOTD_STALE_GLOBAL_TOKENS.iterator().next();
+                    AOTD_STALE_GLOBAL_TOKENS.remove(oldest);
+                }
+            }
+            aotdCampaignEpoch = campaignEpoch;
+            aotdEconomyEpoch = economyEpoch;
+            aotdGlobalToken = 0L;
+            aotdGlobalDepth = 0;
+            aotdGlobalReasonMask = 0;
+            aotdGlobalCampaignEpoch = 0L;
+            aotdGlobalEconomyEpoch = 0L;
+        }
+        synchronized (AOTD_MARKET_LOCK) {
+            for (AoTDMarketState state : AOTD_MARKET_STATES.values()) {
+                if (state != null && state.mutationDepth > 0 && state.mutationToken != 0L) {
+                    AOTD_STALE_MARKET_TOKENS.add(state.mutationToken);
+                }
+            }
+            while (AOTD_STALE_MARKET_TOKENS.size() > AOTD_STALE_MARKET_TOKEN_LIMIT) {
+                Long oldest = AOTD_STALE_MARKET_TOKENS.iterator().next();
+                AOTD_STALE_MARKET_TOKENS.remove(oldest);
+            }
+            AOTD_MARKET_STATES.clear();
+            while (AOTD_MARKET_QUEUE.poll() != null) { }
+        }
+        System.setProperty("starsector.prepatcher.aotdCampaignEpoch",
+                Long.toString(campaignEpoch));
+        System.setProperty("starsector.prepatcher.aotdEconomyEpoch",
+                Long.toString(economyEpoch));
+        PrepatcherLog.info("AoTD runtime epoch published: campaign=" + campaignEpoch
+                + ", economy=" + economyEpoch);
+    }
+
+    public static long getAoTDCampaignEpoch() { return aotdCampaignEpoch; }
+    public static long getAoTDEconomyEpoch() { return aotdEconomyEpoch; }
+    public static long getAoTDStaleGlobalBoundaryCount() {
+        synchronized (AOTD_GLOBAL_LOCK) { return aotdStaleGlobalBoundaries; }
     }
 
     public static long beforeAoTDGlobalBoundary(int reasonMask, boolean hardFlush) {
@@ -337,6 +440,8 @@ public final class StarsectorPrepatcherRuntimeBridge {
             if (aotdGlobalDepth == 0) {
                 aotdGlobalToken = AOTD_GLOBAL_SEQUENCE.incrementAndGet();
                 aotdGlobalReasonMask = reasonMask;
+                aotdGlobalCampaignEpoch = aotdCampaignEpoch;
+                aotdGlobalEconomyEpoch = aotdEconomyEpoch;
             } else {
                 aotdGlobalReasonMask |= reasonMask;
             }
@@ -348,8 +453,22 @@ public final class StarsectorPrepatcherRuntimeBridge {
     public static void afterAoTDGlobalBoundary(long token, long generation) {
         requireAoTDCapability(AOTD_CAPABILITY_GLOBAL_PHASE_COORDINATION);
         synchronized (AOTD_GLOBAL_LOCK) {
+            if (token != 0L && AOTD_STALE_GLOBAL_TOKENS.remove(token)) {
+                return;
+            }
             if (token == 0L || token != aotdGlobalToken || aotdGlobalDepth <= 0) {
                 PrepatcherLog.warn("Unbalanced AoTD global boundary: token=" + token);
+                return;
+            }
+            if (aotdGlobalCampaignEpoch != aotdCampaignEpoch
+                    || aotdGlobalEconomyEpoch != aotdEconomyEpoch) {
+                aotdStaleGlobalBoundaries++;
+                aotdGlobalDepth = 0;
+                aotdGlobalToken = 0L;
+                aotdGlobalReasonMask = 0;
+                aotdGlobalCampaignEpoch = 0L;
+                aotdGlobalEconomyEpoch = 0L;
+                PrepatcherLog.warn("Rejected stale AoTD global boundary after epoch change");
                 return;
             }
             aotdGlobalDepth--;
@@ -359,6 +478,25 @@ public final class StarsectorPrepatcherRuntimeBridge {
                 aotdGlobalReasonMask = 0;
             }
         }
+    }
+
+    /** Called by the MarketAPI-aware Hooks layer before the loader-neutral ABI. */
+    public static void recordAoTDNonEconomyDelivery(boolean conditionOnly) {
+        if (conditionOnly) AOTD_CONDITION_ONLY_DELIVERIES_IGNORED.increment();
+        else AOTD_OTHER_NON_ECONOMY_DELIVERIES_IGNORED.increment();
+    }
+
+    private static void logMarketBoundaryIssue(
+            String reason, long count, long token, Object market, AoTDMarketState state) {
+        if (count > 4L && (count & (count - 1L)) != 0L) return;
+        PrepatcherLog.warn("AoTD market mutation boundary " + reason + " (#" + count
+                + "): token=" + token
+                + ", activeToken=" + (state == null ? 0L : state.mutationToken)
+                + ", depth=" + (state == null ? 0 : state.mutationDepth)
+                + ", marketClass=" + (market == null ? "null" : market.getClass().getName())
+                + ", identityHash=" + System.identityHashCode(market)
+                + ", campaignEpoch=" + aotdCampaignEpoch
+                + ", economyEpoch=" + aotdEconomyEpoch);
     }
 
     private static void requireAoTDCapability(long capability) {

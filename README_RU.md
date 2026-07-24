@@ -2,7 +2,7 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Текущая версия: **0.10.0**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
+Текущая версия: **0.11.0**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
 
 [![Без препатчера и с ним](media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
@@ -21,7 +21,7 @@ StarsectorPrepatcher — compatibility-first слой ранних патчей 
 - хранить зависимое от версии игры знание о bytecode внутри prepatcher, а не размножать его по
   игровым модам.
 
-Публичный API в `0.10.0` ещё не выпущен и остаётся пунктом roadmap. Планируемый namespace —
+Публичный API в `0.11.0` ещё не выпущен и остаётся пунктом roadmap. Планируемый namespace —
 `com.starsector.prepatcher.api`; типы станут поддерживаемым контрактом только после появления
 документации и compatibility-тестов.
 
@@ -59,22 +59,20 @@ Bootstrap plugin не меняет bytecode. Он выводит состоян�
 3. Установите agent для используемого способа запуска (команды ниже).
 4. Включите **StarsectorPrepatcher** в launcher и запустите игру.
 
-Для обычного launcher запустите:
+В Windows запустите двойным щелчком `StarsectorPrepatcher.bat`, выберите
+**Install javaagent**, затем Vanilla, Faster Rendering или оба варианта. Интерфейс BAT-файла
+на английском; те же действия доступны из консоли:
 
 ```bat
-install-agent.bat
+StarsectorPrepatcher.bat install Vanilla
+StarsectorPrepatcher.bat install FasterRendering
+StarsectorPrepatcher.bat install Both
 ```
 
-Для Faster Rendering (`starsector-core\fr.bat`) запустите:
-
-```bat
-install-agent.bat -Target FasterRendering
-```
-
-Чтобы настроить оба способа запуска, используйте `install-agent.bat -Target Both`. Installer
-понимает как vanilla command line в `vmparams`, так и Java argfile Faster Rendering
-`starsector-core\fr.vmparams`. Для каждого изменяемого файла он создаёт timestamped backup,
-заменяет существующую запись этой установки и размещает Prepatcher после остальных `-javaagent`:
+Launcher поясняет назначение каждого действия до выбора. Installer понимает как vanilla command
+line в `vmparams`, так и Java argfile Faster Rendering `starsector-core\fr.vmparams`. Для каждого
+изменяемого файла он создаёт timestamped backup, заменяет существующую запись этой установки и
+размещает Prepatcher после остальных `-javaagent`:
 
 ```text
 -javaagent:../mods/StarsectorPrepatcher/agent/StarsectorPrepatcherAgent.jar
@@ -190,9 +188,10 @@ planet-condition engine path учитывается отдельно от unknow
 источники building/upgrading, transition buckets и скалярное состояние `BaseIndustry`, не удерживает
 игровые объекты и не меняет поведение scheduler.
 
-Для удаления записи vanilla запустите `uninstall-agent.bat`, для FR —
-`uninstall-agent.bat -Target FasterRendering`, для обоих файлов —
-`uninstall-agent.bat -Target Both`. Каждый изменяемый файл предварительно сохраняется в backup.
+Для удаления запустите `StarsectorPrepatcher.bat`, выберите **Remove javaagent** и нужный
+launcher. Консольные варианты: `StarsectorPrepatcher.bat uninstall Vanilla`,
+`... uninstall FasterRendering` и `... uninstall Both`. Каждый изменяемый файл предварительно
+сохраняется в backup.
 
 ## Диагностика и проверка
 
@@ -209,10 +208,11 @@ Agent пишет `APPLIED`, `ALREADY_APPLIED`, `SKIPPED_STRUCTURAL`, `SKIPPED_CO
 используют ту же локальную structural-модель статусов, что и остальные patches. Каждый skip работает fail-open;
 `SKIPPED_LOADER` нужно разобрать до заявления совместимости соответствующего способа запуска.
 
-Полная проверка запускается через `verify-structural.bat` на Windows или `./verify-structural.sh` на
-Linux/macOS. Suite включает документацию, structural/negative/idempotency, lifecycle/GC, runtime,
-hyperspace и startup единого agent. При наличии `fr.jar` дополнительно запускается smoke с настоящим
-classloader Faster Rendering. Сборка описана в [`BUILDING.md`](BUILDING.md).
+В Windows выберите **Run full verification** в `StarsectorPrepatcher.bat` либо запустите
+`StarsectorPrepatcher.bat verify`; в Linux/macOS используйте `./verify-structural.sh`. Suite
+включает документацию, structural/negative/idempotency, lifecycle/GC, runtime, hyperspace и startup
+единого agent. При наличии `fr.jar` дополнительно запускается smoke с настоящим classloader Faster
+Rendering. Сборка описана в [`BUILDING.md`](BUILDING.md).
 
 ## Документация
 
@@ -223,18 +223,17 @@ classloader Faster Rendering. Сборка описана в [`BUILDING.md`](BUI
 - [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) — structural matching и fail-open правила;
 - [`docs/VALIDATION.md`](docs/VALIDATION.md) — playbook регрессионных и performance-проверок;
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — план structural discovery, архитектуры, tooling и платформ;
-- [`docs/releases/0.10.0.md`](docs/releases/0.10.0.md) — подробный отчёт текущего выпуска.
+- [`docs/releases/0.11.0.md`](docs/releases/0.11.0.md) — подробный отчёт текущего выпуска.
 
 Условия распространения находятся в [`LICENSE`](LICENSE).
 
-## Нативная интеграция AoTD — этап 7
-
-Добавлены schema 4 и глобальные временные границы. Prepatcher доставляет накопленное время рынков перед жёсткой границей, а AoTD самостоятельно выполняет локальный пересчёт и публикует неизменяемый settlement cut.
-
-## Нативная интеграция AoTD — production Stage 8
+## Интеграция с AoTD Scheduler Fork
 
 Prepatcher 0.11.0 устанавливает clean wrapper на оригинальный `BaseIndustry.getMaxDeficit()`.
 Vanilla-реализация сохраняется и используется, пока совместимый AoTD Scheduler Fork не зарегистрирует
-полный native-профиль `0xff`. Старый изменённый `starfarer.api.jar` устанавливать нельзя.
+полный native-профиль `0x1ff`. Bridge schema V6 публикует campaign/economy epoch и читает актуальную
+runtime capability mask. Поздние callbacks старой эпохи отклоняются, а fail-stop listener запускает
+однократную синхронизацию поколений перед включением fallback dirtying. Старый изменённый
+`starfarer.api.jar` устанавливать нельзя.
 
 Патч управляется ключом `patch.aotdCleanDeficitPath=true` и включён во всех поставляемых профилях.

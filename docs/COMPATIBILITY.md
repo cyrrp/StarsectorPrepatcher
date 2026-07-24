@@ -381,21 +381,22 @@ Telemetry schema `0.7.1`: старый `pooledRandom` называется `pool
 Structural proof показывает однозначность site, linkage, no-escape и verifier postconditions, но
 не доказывает величину ускорения. Runtime и performance evidence создаётся в `.build/reports/`, а
 проверенные выводы сохраняются в отчёте выпуска, например
-[`releases/0.10.0.md`](releases/0.10.0.md).
+[`releases/0.11.0.md`](releases/0.11.0.md).
 
 Если несколько javaagent меняют одни и те же классы, располагайте Prepatcher после них:
 transformer увидит bytes, возвращённые ранее зарегистрированными агентами. Installer обеспечивает
 этот порядок для vanilla `vmparams` и Faster Rendering `starsector-core/fr.vmparams`:
 
 ```bat
-install-agent.bat -Target Vanilla
-install-agent.bat -Target FasterRendering
-install-agent.bat -Target Both
+StarsectorPrepatcher.bat install Vanilla
+StarsectorPrepatcher.bat install FasterRendering
+StarsectorPrepatcher.bat install Both
 ```
 
-Default target — `Vanilla`. Каждый изменяемый файл получает отдельный timestamped backup; повторный
-вызов идемпотентен. Если telemetry или другой agent был установлен позднее, installer нужно
-запустить ещё раз, чтобы Prepatcher снова стал последним `-javaagent`.
+Без параметров единый Windows-launcher показывает меню и поясняет назначение каждой операции.
+Каждый изменяемый файл получает отдельный timestamped backup; повторный вызов идемпотентен.
+Если telemetry или другой agent был установлен позднее, installer нужно запустить ещё раз, чтобы
+Prepatcher снова стал последним `-javaagent`.
 
 ## Presentation и structural patches
 
