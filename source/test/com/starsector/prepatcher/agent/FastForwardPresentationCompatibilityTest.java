@@ -41,10 +41,13 @@ public final class FastForwardPresentationCompatibilityTest {
                     "smo$patched$marketScheduler",
                     "smo$patched$campaignListenerThrottle"),
             "com/fs/starfarer/campaign/BaseLocation", Set.of(
-                    "smo$patched$campaignSnapshotReuse"),
+                    "smo$patched$campaignSnapshotReuse",
+                    "smo$patched$strategicJumpDestinationIndex"),
             "com/fs/starfarer/campaign/BaseCampaignEntity", Set.of(
                     "smo$patched$entityScriptSnapshotReuse",
                     "smo$patched$marketScheduler"),
+            "com/fs/starfarer/campaign/JumpPoint", Set.of(
+                    "smo$patched$strategicJumpDestinationIndex"),
             "com/fs/starfarer/api/impl/campaign/terrain/HyperspaceTerrainPlugin", Set.of(
                     "smo$patched$skipNoOpTerrainLayer"));
 
@@ -382,6 +385,8 @@ public final class FastForwardPresentationCompatibilityTest {
         properties.setProperty("patch.systemNebulaCache", "false");
         properties.setProperty("patch.sampleCacheClearThrottle", "false");
         properties.setProperty("patch.routeJumpPointIndex", "false");
+        properties.setProperty("patch.strategicJumpDestinationFirst", "true");
+        properties.setProperty("patch.strategicJumpDestinationIndex", "true");
         properties.setProperty("patch.economyLocationCache", "false");
         properties.setProperty("patch.marketScheduler", "true");
         properties.setProperty("patch.directMarketObservation", "false");

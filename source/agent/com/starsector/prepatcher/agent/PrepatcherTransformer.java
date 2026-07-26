@@ -90,6 +90,11 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     static final String CAMPAIGN_STATE = "com/fs/starfarer/campaign/CampaignState";
     static final String CAMPAIGN_ENGINE = "com/fs/starfarer/campaign/CampaignEngine";
     static final String COURSE_WIDGET = "com/fs/starfarer/coreui/A/O0Oo";
+    static final String STRATEGIC_MODULE =
+            "com/fs/starfarer/campaign/ai/StrategicModule";
+    static final String JUMP_POINT = "com/fs/starfarer/campaign/JumpPoint";
+    static final String JUMP_DESTINATION =
+            "com/fs/starfarer/api/campaign/JumpPointAPI$JumpDestination";
     static final String BASE_LOCATION = "com/fs/starfarer/campaign/BaseLocation";
     static final String BASE_CAMPAIGN_ENTITY = "com/fs/starfarer/campaign/BaseCampaignEntity";
     static final String MEMORY = "com/fs/starfarer/campaign/rules/Memory";
@@ -170,7 +175,8 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             "com/fs/starfarer/api/impl/campaign/rulecmd/PK_CMD";
     static final Set<String> TARGET_CLASSES = Set.of(H, A, Z, EVENTS, CAMPAIGN_STATE,
             CAMPAIGN_ENGINE,
-            COURSE_WIDGET, BASE_LOCATION, BASE_CAMPAIGN_ENTITY, MEMORY, CORE_SCRIPT, ECONOMY,
+            COURSE_WIDGET, STRATEGIC_MODULE, JUMP_POINT, JUMP_DESTINATION, BASE_LOCATION, BASE_CAMPAIGN_ENTITY,
+            MEMORY, CORE_SCRIPT, ECONOMY,
             MARKET, BASE_INDUSTRY, MILITARY_BASE, LIONS_GUARD_HQ, RECENT_UNREST,
             CONSTRUCTION_QUEUE, COMMODITY_ON_MARKET, MUTABLE_STAT, MUTABLE_STAT_WITH_TEMP_MODS,
             INTEL_MANAGER, SHIP,
@@ -181,6 +187,51 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             DECIV_TRACKER, PK_CMD,
             HyperspacePatches.BASE_TILED, HyperspacePatches.HYPER_TERRAIN,
             HyperspacePatches.AUTOMATON, HyperspacePatches.STARFIELD);
+    private static final String STRATEGIC_JUMP_DESTINATION_FIRST_PATCH_ID =
+            "strategicJumpDestinationFirst";
+    private static final String STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID =
+            "strategicJumpDestinationIndex";
+    private static final String STRATEGIC_JUMP_INDEX_HOOK =
+            "strategicJumpPointsForDestination";
+    private static final String STRATEGIC_JUMP_INDEX_HOOK_DESC =
+            "(Lcom/fs/starfarer/api/campaign/LocationAPI;"
+                    + "Ljava/lang/Class;"
+                    + "Lcom/fs/starfarer/api/campaign/LocationAPI;)Ljava/util/List;";
+    private static final String STRATEGIC_JUMP_INVALIDATE_HOOK =
+            "strategicJumpDestinationsChanged";
+    private static final String STRATEGIC_JUMP_INVALIDATE_HOOK_DESC =
+            "(Lcom/fs/starfarer/api/campaign/JumpPointAPI;)V";
+    private static final String STRATEGIC_JUMP_ADDED_HOOK =
+            "strategicJumpDestinationAdded";
+    private static final String STRATEGIC_JUMP_ADDED_HOOK_DESC =
+            "(Lcom/fs/starfarer/api/campaign/JumpPointAPI;"
+                    + "Lcom/fs/starfarer/api/campaign/JumpPointAPI$JumpDestination;)V";
+    private static final String STRATEGIC_JUMP_RETARGET_HOOK =
+            "strategicJumpDestinationRetargeted";
+    private static final String STRATEGIC_JUMP_RETARGET_HOOK_DESC =
+            "(Lcom/fs/starfarer/api/campaign/JumpPointAPI$JumpDestination;)V";
+    private static final String STRATEGIC_JUMP_LOCATION_HOOK =
+            "strategicJumpLocationEntityChanged";
+    private static final String STRATEGIC_JUMP_LOCATION_HOOK_DESC =
+            "(Lcom/fs/starfarer/api/campaign/LocationAPI;Ljava/lang/Object;)V";
+    private static final String STRATEGIC_JUMP_DEFER_HOOK =
+            "strategicJumpDeferExpiredPlan";
+    private static final String STRATEGIC_JUMP_DEFER_HOOK_DESC =
+            "(Lcom/fs/starfarer/api/campaign/LocationAPI;"
+                    + "Lcom/fs/starfarer/api/campaign/LocationAPI;)Z";
+    private static final String STRATEGIC_JUMP_UPDATE_METHOD_DESC =
+            "(Lcom/fs/starfarer/api/campaign/LocationAPI;F)V";
+    private static final String STRATEGIC_JUMP_METHOD_DESC =
+            "(Lcom/fs/starfarer/api/campaign/CampaignFleetAPI;"
+                    + "Lcom/fs/starfarer/api/campaign/LocationAPI;)"
+                    + "Lcom/fs/starfarer/campaign/ai/StrategicModule$Oo;";
+    private static final String HOSTILE_MARKETS_DESC =
+            "(Lcom/fs/starfarer/api/campaign/FactionAPI;"
+                    + "Lcom/fs/starfarer/api/campaign/SectorEntityToken;F)I";
+    private static final String UNSAFE_FLEETS_DESC =
+            "(Lcom/fs/starfarer/api/campaign/CampaignFleetAPI;"
+                    + "Lcom/fs/starfarer/api/campaign/SectorEntityToken;F)I";
+    private static final int STRATEGIC_JUMP_UNCOMPUTED = Integer.MIN_VALUE;
     private static final String ENTITY_TOKEN_DESC = "Lcom/fs/starfarer/api/campaign/SectorEntityToken;";
     private static final String MAP_API_DESC = "Lcom/fs/starfarer/api/ui/SectorMapAPI;";
     private static final String INTEL_DESC = "Lcom/fs/starfarer/api/campaign/comm/IntelInfoPlugin;";
@@ -289,8 +340,30 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             }
             case COURSE_WIDGET -> apply(state, "routeJumpPointIndex",
                     config.routeJumpPointIndex, this::patchRouteJumpPointIndex);
-            case BASE_LOCATION -> apply(state, "campaignSnapshotReuse",
-                    config.campaignSnapshotReuse, this::patchCampaignSnapshotReuse);
+            case STRATEGIC_MODULE -> {
+                // Explicit dependency order: the index matcher consumes and revalidates
+                // the destination-first post-state produced by the preceding patch.
+                apply(state, STRATEGIC_JUMP_DESTINATION_FIRST_PATCH_ID,
+                        config.strategicJumpDestinationFirst,
+                        this::patchStrategicJumpDestinationFirst);
+                apply(state, STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID,
+                        config.strategicJumpDestinationIndex,
+                        this::patchStrategicJumpDestinationIndex);
+            }
+            case JUMP_POINT -> apply(state, STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID,
+                    config.strategicJumpDestinationIndex,
+                    this::patchStrategicJumpDestinationInvalidation);
+            case JUMP_DESTINATION -> apply(state,
+                    STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID,
+                    config.strategicJumpDestinationIndex,
+                    this::patchStrategicJumpDestinationRetarget);
+            case BASE_LOCATION -> {
+                apply(state, "campaignSnapshotReuse",
+                        config.campaignSnapshotReuse, this::patchCampaignSnapshotReuse);
+                apply(state, STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID,
+                        config.strategicJumpDestinationIndex,
+                        this::patchStrategicJumpLocationMutation);
+            }
             case BASE_CAMPAIGN_ENTITY -> {
                 apply(state, "entityScriptSnapshotReuse",
                         config.entityScriptSnapshotReuse, this::patchEntityScriptSnapshotReuse);
@@ -665,7 +738,11 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             case CAMPAIGN_STATE -> config.marketScheduler;
             case CAMPAIGN_ENGINE -> campaignCacheLifecycleEnabled() || config.campaignListenerThrottle;
             case COURSE_WIDGET -> config.routeJumpPointIndex;
-            case BASE_LOCATION -> config.campaignSnapshotReuse;
+            case STRATEGIC_MODULE -> config.strategicJumpDestinationFirst
+                    || config.strategicJumpDestinationIndex;
+            case JUMP_POINT, JUMP_DESTINATION -> config.strategicJumpDestinationIndex;
+            case BASE_LOCATION -> config.campaignSnapshotReuse
+                    || config.strategicJumpDestinationIndex;
             case BASE_CAMPAIGN_ENTITY -> config.entityScriptSnapshotReuse
                     || config.marketScheduler;
             case MEMORY -> config.emptyMemoryAdvanceFastPath;
@@ -764,6 +841,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
                 || config.intelArrowRendering || config.intelEntityIndex || config.mapHitTest
                 || config.systemNebulaCache || config.sampleCacheClearThrottle
                 || config.campaignListenerThrottle || config.routeJumpPointIndex
+                || config.strategicJumpDestinationIndex
                 || config.economyLocationCache || config.marketScheduler
                 || config.commRelaySystemIndex
                 || config.commodityTemporalFastPath
@@ -2851,6 +2929,948 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
         report.add("route hyperspace-anchor system index", 1);
         return report;
     }
+
+    // ---------------------------------------------------------------------
+    // StrategicModule: destination-first safe jump-point filtering
+    // ---------------------------------------------------------------------
+
+    /**
+     * Transformation surface: StrategicModule.findNearestSafeJumpPoint and only the
+     * straight-line hostile-market score feeding the accepted-destination candidate
+     * path. No other patch currently targets this class or method.
+     */
+    private PatchReport patchStrategicJumpDestinationFirst(ClassNode node) {
+        MethodNode method = requireMethod(node, "findNearestSafeJumpPoint",
+                STRATEGIC_JUMP_METHOD_DESC);
+        if ((method.access & (Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC))
+                != (Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC)) {
+            throw mismatch("StrategicModule.findNearestSafeJumpPoint access changed");
+        }
+
+        StrategicJumpCommon common = inspectStrategicJumpCommon(node.name, method);
+        boolean owned = hasPatchMarker(node, STRATEGIC_JUMP_DESTINATION_FIRST_PATCH_ID);
+        StrategicJumpOriginal original = inspectStrategicJumpOriginal(common, false);
+        StrategicJumpLazy lazy = inspectStrategicJumpLazy(common, false);
+
+        if (owned) {
+            if (lazy == null || original != null) {
+                throw mismatch("owned destination-first patch has an incomplete or mixed post-state");
+            }
+            throw already("destination predicate precedes the guarded hostile-market scan");
+        }
+        if (lazy != null) {
+            throw already("destination-first bytecode is already present without this optimizer marker");
+        }
+        if (original == null) {
+            throw mismatch("expected the vanilla eager hostile-market score before getDestinations");
+        }
+
+        InsnList sentinel = new InsnList();
+        sentinel.add(new LdcInsnNode(STRATEGIC_JUMP_UNCOMPUTED));
+        sentinel.add(new VarInsnNode(Opcodes.ISTORE, common.unsafeLocal));
+        method.instructions.insertBefore(original.start, sentinel);
+        removeRange(method, original.start, original.end);
+
+        LabelNode scoreReady = new LabelNode();
+        InsnList lazyScore = new InsnList();
+        lazyScore.add(new VarInsnNode(Opcodes.ILOAD, common.unsafeLocal));
+        lazyScore.add(new LdcInsnNode(STRATEGIC_JUMP_UNCOMPUTED));
+        lazyScore.add(new JumpInsnNode(Opcodes.IF_ICMPNE, scoreReady));
+        lazyScore.add(new VarInsnNode(Opcodes.ALOAD, common.fleetLocal));
+        lazyScore.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE,
+                "com/fs/starfarer/api/campaign/CampaignFleetAPI", "getFaction",
+                "()Lcom/fs/starfarer/api/campaign/FactionAPI;", true));
+        lazyScore.add(new VarInsnNode(Opcodes.ALOAD, common.jumpPointLocal));
+        lazyScore.add(new LdcInsnNode(Float.valueOf(4000f)));
+        lazyScore.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
+                "com/fs/starfarer/api/util/Misc", "getNumHostileMarkets",
+                HOSTILE_MARKETS_DESC, false));
+        lazyScore.add(new InsnNode(Opcodes.ICONST_2));
+        lazyScore.add(new InsnNode(Opcodes.IMUL));
+        lazyScore.add(new VarInsnNode(Opcodes.ISTORE, common.unsafeLocal));
+        lazyScore.add(scoreReady);
+        // The new join has the same locals and an empty stack as the existing
+        // accepted-destination frame immediately preceding this block.
+        lazyScore.add(new FrameNode(Opcodes.F_SAME, 0, null, 0, null));
+        method.instructions.insertBefore(common.candidateStart, lazyScore);
+
+        StrategicJumpCommon patchedCommon = inspectStrategicJumpCommon(node.name, method);
+        if (inspectStrategicJumpOriginal(patchedCommon, false) != null
+                || inspectStrategicJumpLazy(patchedCommon, false) == null) {
+            throw mismatch("destination-first mutation did not produce the complete lazy post-state");
+        }
+
+        PatchReport report = new PatchReport();
+        report.add("destination-first hostile-market guards", 1);
+        return report;
+    }
+
+    // ---------------------------------------------------------------------
+    // StrategicModule: destination-location jump-point index
+    // ---------------------------------------------------------------------
+
+    /**
+     * Transformation surface: the initial candidate-source expression in
+     * StrategicModule.findNearestSafeJumpPoint and the expired-plan clear branch in
+     * updateJumpPlanTo. This patch consumes the complete destination-first post-state,
+     * replaces LocationAPI.getEntities(JumpPoint.class) with the indexed runtime hook,
+     * defers only an expired replacement while the index is cold, and then revalidates
+     * both composed postconditions.
+     */
+    private PatchReport patchStrategicJumpDestinationIndex(ClassNode node) {
+        MethodNode method = requireMethod(node, "findNearestSafeJumpPoint",
+                STRATEGIC_JUMP_METHOD_DESC);
+        MethodNode update = requireMethod(node, "updateJumpPlanTo",
+                STRATEGIC_JUMP_UPDATE_METHOD_DESC);
+        if (!hasPatchMarker(node, STRATEGIC_JUMP_DESTINATION_FIRST_PATCH_ID)) {
+            throw mismatch("destination index requires the owned destination-first post-state");
+        }
+        StrategicJumpCommon common = inspectStrategicJumpCommon(node.name, method);
+        if (inspectStrategicJumpOriginal(common, false) != null
+                || inspectStrategicJumpLazy(common, false) == null) {
+            throw mismatch("destination-first postcondition changed before index composition");
+        }
+
+        StrategicJumpExpiry expiry = inspectStrategicJumpExpiry(node.name, update, true);
+        boolean deferred = strategicJumpExpiryDeferralState(node.name, update, expiry, false);
+        boolean owned = hasPatchMarker(node, STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID);
+        StrategicJumpSource original = inspectStrategicJumpOriginalSource(method, false);
+        StrategicJumpSource indexed = inspectStrategicJumpIndexedSource(method, false);
+        if (owned) {
+            if (indexed == null || original != null || !deferred) {
+                throw mismatch("owned strategic destination index has a mixed post-state");
+            }
+            throw already("strategic jump source and expired-plan deferral are already installed");
+        }
+        if (indexed != null || deferred) {
+            throw already("strategic destination-index bytecode is present without this marker");
+        }
+        if (original == null) {
+            throw mismatch("vanilla StrategicModule jump-point source was not found");
+        }
+
+        method.instructions.insertBefore(original.call,
+                new VarInsnNode(Opcodes.ALOAD, argumentLocal(method, 1)));
+        makeStatic(original.call, HOOKS, STRATEGIC_JUMP_INDEX_HOOK,
+                STRATEGIC_JUMP_INDEX_HOOK_DESC);
+        installStrategicJumpExpiryDeferral(node.name, update, expiry);
+
+        StrategicJumpSource patched = inspectStrategicJumpIndexedSource(method, true);
+        if (patched == null || inspectStrategicJumpOriginalSource(method, false) != null) {
+            throw mismatch("strategic destination-index mutation did not reach its post-state");
+        }
+        StrategicJumpExpiry patchedExpiry = inspectStrategicJumpExpiry(node.name, update, true);
+        if (!strategicJumpExpiryDeferralState(
+                node.name, update, patchedExpiry, true)) {
+            throw mismatch("strategic expired-plan deferral did not reach its post-state");
+        }
+        StrategicJumpCommon recomposed = inspectStrategicJumpCommon(node.name, method);
+        if (inspectStrategicJumpOriginal(recomposed, false) != null
+                || inspectStrategicJumpLazy(recomposed, false) == null) {
+            throw mismatch("strategic destination index damaged destination-first semantics");
+        }
+
+        PatchReport report = new PatchReport();
+        report.add("strategic destination-location jump-point source", 1);
+        report.add("strategic expired-plan incremental-index deferrals", 1);
+        return report;
+    }
+
+    private static void installStrategicJumpExpiryDeferral(String owner,
+                                                            MethodNode method,
+                                                            StrategicJumpExpiry expiry) {
+        LabelNode continueClear = new LabelNode();
+        InsnList hook = new InsnList();
+        hook.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        hook.add(new FieldInsnNode(Opcodes.GETFIELD, owner, "fleet",
+                "Lcom/fs/starfarer/campaign/fleet/CampaignFleet;"));
+        hook.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL,
+                "com/fs/starfarer/campaign/fleet/CampaignFleet",
+                "getContainingLocation",
+                "()Lcom/fs/starfarer/campaign/BaseLocation;", false));
+        hook.add(new VarInsnNode(Opcodes.ALOAD, argumentLocal(method, 0)));
+        hook.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS,
+                STRATEGIC_JUMP_DEFER_HOOK, STRATEGIC_JUMP_DEFER_HOOK_DESC, false));
+        hook.add(new JumpInsnNode(Opcodes.IFEQ, continueClear));
+        hook.add(new InsnNode(Opcodes.RETURN));
+        hook.add(continueClear);
+        hook.add(new FrameNode(Opcodes.F_SAME, 0, null, 0, null));
+        method.instructions.insertBefore(expiry.clearStart, hook);
+    }
+
+    private static StrategicJumpExpiry inspectStrategicJumpExpiry(
+            String owner, MethodNode method, boolean required) {
+        List<MethodInsnNode> findCalls = calls(method, Opcodes.INVOKESTATIC, owner,
+                "findNearestSafeJumpPoint", STRATEGIC_JUMP_METHOD_DESC);
+        if (findCalls.size() != 1) {
+            if (required) throw mismatch("StrategicModule update findNearest call count changed");
+            return null;
+        }
+        FieldInsnNode comparedTime = null;
+        JumpInsnNode expiryJump = null;
+        for (AbstractInsnNode insn : method.instructions.toArray()) {
+            if (!(insn instanceof FieldInsnNode field)
+                    || field.getOpcode() != Opcodes.GETFIELD
+                    || !field.owner.equals(
+                    "com/fs/starfarer/campaign/ai/CampaignFleetAI$JumpPlan")
+                    || !field.name.equals("timeLeft") || !field.desc.equals("F")) {
+                continue;
+            }
+            AbstractInsnNode zero = nextMeaningful(field);
+            AbstractInsnNode compare = nextMeaningful(zero);
+            AbstractInsnNode jump = nextMeaningful(compare);
+            if (zero == null || zero.getOpcode() != Opcodes.FCONST_0
+                    || compare == null || compare.getOpcode() != Opcodes.FCMPG
+                    || !(jump instanceof JumpInsnNode candidate)
+                    || candidate.getOpcode() != Opcodes.IFGT) continue;
+            if (comparedTime != null) {
+                if (required) throw mismatch("StrategicModule has ambiguous plan-expiry checks");
+                return null;
+            }
+            comparedTime = field;
+            expiryJump = candidate;
+        }
+        if (comparedTime == null || expiryJump == null) {
+            if (required) throw mismatch("StrategicModule plan-expiry comparison was not found");
+            return null;
+        }
+
+        int branchIndex = method.instructions.indexOf(expiryJump);
+        int targetIndex = method.instructions.indexOf(expiryJump.label);
+        FieldInsnNode clearWrite = null;
+        VarInsnNode clearStart = null;
+        for (AbstractInsnNode cursor = nextMeaningful(expiryJump);
+             cursor != null && method.instructions.indexOf(cursor) < targetIndex;
+             cursor = nextMeaningful(cursor)) {
+            if (!(cursor instanceof FieldInsnNode field)
+                    || field.getOpcode() != Opcodes.PUTFIELD
+                    || !field.owner.equals(owner)
+                    || !field.name.equals("currJumpPlan")
+                    || !field.desc.equals(
+                    "Lcom/fs/starfarer/campaign/ai/CampaignFleetAI$JumpPlan;")) continue;
+            AbstractInsnNode nullValue = previousMeaningful(field);
+            AbstractInsnNode receiver = previousMeaningful(nullValue);
+            if (nullValue == null || nullValue.getOpcode() != Opcodes.ACONST_NULL
+                    || !(receiver instanceof VarInsnNode load)
+                    || load.getOpcode() != Opcodes.ALOAD || load.var != 0) continue;
+            if (clearWrite != null) {
+                if (required) throw mismatch("StrategicModule expiry branch clears multiple plans");
+                return null;
+            }
+            clearWrite = field;
+            clearStart = load;
+        }
+        if (clearWrite == null || clearStart == null
+                || branchIndex >= method.instructions.indexOf(clearStart)
+                || method.instructions.indexOf(clearWrite) >= targetIndex
+                || method.instructions.indexOf(findCalls.get(0)) <= targetIndex) {
+            if (required) throw mismatch("StrategicModule expired-plan clear shape changed");
+            return null;
+        }
+        return new StrategicJumpExpiry(expiryJump, clearStart, clearWrite,
+                findCalls.get(0));
+    }
+
+    private static boolean strategicJumpExpiryDeferralState(
+            String owner, MethodNode method, StrategicJumpExpiry expiry,
+            boolean required) {
+        List<MethodInsnNode> hooks = calls(method, Opcodes.INVOKESTATIC, HOOKS,
+                STRATEGIC_JUMP_DEFER_HOOK, STRATEGIC_JUMP_DEFER_HOOK_DESC);
+        if (hooks.size() != 1) {
+            if (required) throw mismatch("StrategicModule expired-plan deferral count changed");
+            return false;
+        }
+        MethodInsnNode hook = hooks.get(0);
+        VarInsnNode requested = requireVar(previousMeaningful(hook), Opcodes.ALOAD,
+                "StrategicModule deferral requested-location argument");
+        MethodInsnNode containing = asMethod(previousMeaningful(requested),
+                "StrategicModule deferral current-location getter");
+        AbstractInsnNode fleetInsn = previousMeaningful(containing);
+        if (!(fleetInsn instanceof FieldInsnNode fleet)
+                || fleet.getOpcode() != Opcodes.GETFIELD) {
+            if (required) throw mismatch("StrategicModule deferral fleet field changed");
+            return false;
+        }
+        VarInsnNode receiver = requireVar(previousMeaningful(fleet), Opcodes.ALOAD,
+                "StrategicModule deferral receiver");
+        JumpInsnNode continueJump = requireJump(nextMeaningful(hook), Opcodes.IFEQ,
+                "StrategicModule deferral continuation");
+        AbstractInsnNode earlyReturn = nextMeaningful(continueJump);
+        if (requested.var != argumentLocal(method, 0)
+                || receiver.var != 0
+                || !fleet.owner.equals(owner) || !fleet.name.equals("fleet")
+                || !fleet.desc.equals("Lcom/fs/starfarer/campaign/fleet/CampaignFleet;")
+                || !callMatches(containing, Opcodes.INVOKEVIRTUAL,
+                "com/fs/starfarer/campaign/fleet/CampaignFleet",
+                "getContainingLocation", "()Lcom/fs/starfarer/campaign/BaseLocation;")
+                || earlyReturn == null || earlyReturn.getOpcode() != Opcodes.RETURN
+                || method.instructions.indexOf(hook)
+                <= method.instructions.indexOf(expiry.expiryJump)
+                || method.instructions.indexOf(earlyReturn)
+                >= method.instructions.indexOf(expiry.clearStart)
+                || method.instructions.indexOf(continueJump.label)
+                >= method.instructions.indexOf(expiry.clearStart)
+                || nextMeaningful(continueJump.label) != expiry.clearStart) {
+            if (required) throw mismatch("StrategicModule expired-plan deferral shape changed");
+            return false;
+        }
+        return true;
+    }
+
+    private static StrategicJumpSource inspectStrategicJumpOriginalSource(
+            MethodNode method, boolean required) {
+        List<MethodInsnNode> originalCalls = calls(method, Opcodes.INVOKEINTERFACE,
+                "com/fs/starfarer/api/campaign/LocationAPI", "getEntities",
+                "(Ljava/lang/Class;)Ljava/util/List;");
+        int indexedCalls = countCalls(method, Opcodes.INVOKESTATIC, HOOKS,
+                STRATEGIC_JUMP_INDEX_HOOK, STRATEGIC_JUMP_INDEX_HOOK_DESC);
+        if (originalCalls.size() != 1 || indexedCalls != 0) {
+            if (required) throw mismatch("StrategicModule original jump-point source count changed");
+            return null;
+        }
+        MethodInsnNode call = originalCalls.get(0);
+        AbstractInsnNode argument = previousMeaningful(call);
+        if (!(argument instanceof LdcInsnNode ldc)
+                || !(ldc.cst instanceof Type type)
+                || !type.getInternalName().equals(JUMP_POINT)) {
+            if (required) throw mismatch("StrategicModule getEntities class argument changed");
+            return null;
+        }
+        MethodInsnNode location = asMethod(previousMeaningful(argument),
+                "StrategicModule source containing-location getter");
+        VarInsnNode fleet = requireVar(previousMeaningful(location), Opcodes.ALOAD,
+                "StrategicModule source fleet argument");
+        if (fleet.var != argumentLocal(method, 0)
+                || !callMatches(location, Opcodes.INVOKEINTERFACE,
+                "com/fs/starfarer/api/campaign/CampaignFleetAPI", "getContainingLocation",
+                "()Lcom/fs/starfarer/api/campaign/LocationAPI;")) {
+            if (required) throw mismatch("StrategicModule source receiver changed");
+            return null;
+        }
+        requireVar(nextMeaningful(call), Opcodes.ASTORE,
+                "StrategicModule source result local");
+        return new StrategicJumpSource(call, argument);
+    }
+
+    private static StrategicJumpSource inspectStrategicJumpIndexedSource(
+            MethodNode method, boolean required) {
+        List<MethodInsnNode> indexedCalls = calls(method, Opcodes.INVOKESTATIC, HOOKS,
+                STRATEGIC_JUMP_INDEX_HOOK, STRATEGIC_JUMP_INDEX_HOOK_DESC);
+        int originalCalls = countCalls(method, Opcodes.INVOKEINTERFACE,
+                "com/fs/starfarer/api/campaign/LocationAPI", "getEntities",
+                "(Ljava/lang/Class;)Ljava/util/List;");
+        if (indexedCalls.size() != 1 || originalCalls != 0) {
+            if (required) throw mismatch("StrategicModule indexed jump-point source count changed");
+            return null;
+        }
+        MethodInsnNode call = indexedCalls.get(0);
+        VarInsnNode target = requireVar(previousMeaningful(call), Opcodes.ALOAD,
+                "StrategicModule indexed destination argument");
+        AbstractInsnNode typeArgument = previousMeaningful(target);
+        if (!(typeArgument instanceof LdcInsnNode ldc)
+                || !(ldc.cst instanceof Type type)
+                || !type.getInternalName().equals(JUMP_POINT)) {
+            if (required) throw mismatch("StrategicModule indexed class argument changed");
+            return null;
+        }
+        MethodInsnNode location = asMethod(previousMeaningful(typeArgument),
+                "StrategicModule indexed containing-location getter");
+        VarInsnNode fleet = requireVar(previousMeaningful(location), Opcodes.ALOAD,
+                "StrategicModule indexed fleet argument");
+        if (target.var != argumentLocal(method, 1)
+                || fleet.var != argumentLocal(method, 0)
+                || !callMatches(location, Opcodes.INVOKEINTERFACE,
+                "com/fs/starfarer/api/campaign/CampaignFleetAPI", "getContainingLocation",
+                "()Lcom/fs/starfarer/api/campaign/LocationAPI;")) {
+            if (required) throw mismatch("StrategicModule indexed source arguments changed");
+            return null;
+        }
+        requireVar(nextMeaningful(call), Opcodes.ASTORE,
+                "StrategicModule indexed source result local");
+        return new StrategicJumpSource(call, typeArgument);
+    }
+
+    // ---------------------------------------------------------------------
+    // Topology mutation hooks for the incremental strategic jump index
+    // ---------------------------------------------------------------------
+
+    private PatchReport patchStrategicJumpDestinationInvalidation(ClassNode node) {
+        MethodNode add = requireMethod(node, "addDestination",
+                "(Lcom/fs/starfarer/api/campaign/JumpPointAPI$JumpDestination;)V");
+        MethodNode clear = requireMethod(node, "clearDestinations", "()V");
+        MethodNode remove = requireMethod(node, "removeDestination",
+                "(Lcom/fs/starfarer/api/campaign/SectorEntityToken;)V");
+        boolean owned = hasPatchMarker(node, STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID);
+        boolean addHook = strategicJumpPointHookState(add, true, false);
+        boolean clearHook = strategicJumpPointHookState(clear, false, false);
+        boolean removeHook = strategicJumpPointHookState(remove, false, false);
+        int installed = (addHook ? 1 : 0) + (clearHook ? 1 : 0) + (removeHook ? 1 : 0);
+        if (owned) {
+            if (installed != 3) {
+                throw mismatch("owned JumpPoint topology hooks are incomplete");
+            }
+            throw already("JumpPoint topology mutations already update the strategic index");
+        }
+        if (installed != 0) {
+            throw already("foreign JumpPoint topology hooks are already present");
+        }
+
+        requireSingleReturn(add, "JumpPoint.addDestination");
+        requireSingleReturn(clear, "JumpPoint.clearDestinations");
+        requireSingleReturn(remove, "JumpPoint.removeDestination");
+        requireCount("JumpPoint.addDestination List.add calls",
+                countCalls(add, Opcodes.INVOKEINTERFACE, "java/util/List", "add",
+                        "(Ljava/lang/Object;)Z"), 1);
+        requireCount("JumpPoint.clearDestinations List.clear calls",
+                countCalls(clear, Opcodes.INVOKEINTERFACE, "java/util/List", "clear",
+                        "()V"), 1);
+        requireCount("JumpPoint.removeDestination List.remove calls",
+                countCalls(remove, Opcodes.INVOKEINTERFACE, "java/util/List", "remove",
+                        "(Ljava/lang/Object;)Z"), 1);
+
+        installStrategicJumpPointHook(add, true);
+        installStrategicJumpPointHook(clear, false);
+        installStrategicJumpPointHook(remove, false);
+        strategicJumpPointHookState(add, true, true);
+        strategicJumpPointHookState(clear, false, true);
+        strategicJumpPointHookState(remove, false, true);
+
+        PatchReport report = new PatchReport();
+        report.add("JumpPoint incremental topology epilogues", 3);
+        return report;
+    }
+
+    private static void installStrategicJumpPointHook(MethodNode method, boolean added) {
+        AbstractInsnNode exit = requireSingleReturn(method, "JumpPoint." + method.name);
+        InsnList hook = new InsnList();
+        hook.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        if (added) hook.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        hook.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS,
+                added ? STRATEGIC_JUMP_ADDED_HOOK : STRATEGIC_JUMP_INVALIDATE_HOOK,
+                added ? STRATEGIC_JUMP_ADDED_HOOK_DESC
+                        : STRATEGIC_JUMP_INVALIDATE_HOOK_DESC, false));
+        method.instructions.insertBefore(exit, hook);
+    }
+
+    private static boolean strategicJumpPointHookState(MethodNode method, boolean added,
+                                                        boolean required) {
+        String hookName = added ? STRATEGIC_JUMP_ADDED_HOOK : STRATEGIC_JUMP_INVALIDATE_HOOK;
+        String hookDesc = added ? STRATEGIC_JUMP_ADDED_HOOK_DESC
+                : STRATEGIC_JUMP_INVALIDATE_HOOK_DESC;
+        List<MethodInsnNode> hooks = calls(method, Opcodes.INVOKESTATIC, HOOKS,
+                hookName, hookDesc);
+        if (hooks.size() != 1) {
+            if (required) throw mismatch("JumpPoint hook count changed in "
+                    + method.name + method.desc);
+            return false;
+        }
+        AbstractInsnNode exit = requireSingleReturn(method, "JumpPoint." + method.name);
+        MethodInsnNode hook = hooks.get(0);
+        if (nextMeaningful(hook) != exit) {
+            if (required) throw mismatch("JumpPoint hook is not the normal epilogue in "
+                    + method.name + method.desc);
+            return false;
+        }
+        AbstractInsnNode previous = previousMeaningful(hook);
+        if (added) {
+            VarInsnNode destination = requireVar(previous, Opcodes.ALOAD,
+                    "JumpPoint.addDestination hook argument");
+            VarInsnNode receiver = requireVar(previousMeaningful(destination), Opcodes.ALOAD,
+                    "JumpPoint.addDestination hook receiver");
+            if (destination.var != 1 || receiver.var != 0) {
+                if (required) throw mismatch("JumpPoint.addDestination hook operands changed");
+                return false;
+            }
+        } else {
+            VarInsnNode receiver = requireVar(previous, Opcodes.ALOAD,
+                    "JumpPoint mutation hook receiver");
+            if (receiver.var != 0) {
+                if (required) throw mismatch("JumpPoint mutation hook receiver changed");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private PatchReport patchStrategicJumpDestinationRetarget(ClassNode node) {
+        MethodNode method = requireMethod(node, "setDestination",
+                "(Lcom/fs/starfarer/api/campaign/SectorEntityToken;)V");
+        boolean owned = hasPatchMarker(node, STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID);
+        boolean installed = strategicJumpRetargetHookState(method, false);
+        if (owned) {
+            if (!installed) throw mismatch("owned JumpDestination retarget hook is missing");
+            throw already("JumpDestination.setDestination already updates the strategic index");
+        }
+        if (installed) {
+            throw already("foreign JumpDestination retarget hook is already present");
+        }
+
+        AbstractInsnNode exit = requireSingleReturn(method, "JumpDestination.setDestination");
+        FieldInsnNode write = null;
+        for (AbstractInsnNode insn : method.instructions.toArray()) {
+            if (!(insn instanceof FieldInsnNode field) || field.getOpcode() != Opcodes.PUTFIELD
+                    || !field.owner.equals(JUMP_DESTINATION)
+                    || !field.name.equals("destination")
+                    || !field.desc.equals("Lcom/fs/starfarer/api/campaign/SectorEntityToken;")) {
+                continue;
+            }
+            if (write != null) throw mismatch("JumpDestination destination field has multiple writes");
+            write = field;
+        }
+        if (write == null || method.instructions.indexOf(write)
+                > method.instructions.indexOf(exit)) {
+            throw mismatch("JumpDestination destination field write was not found before return");
+        }
+        InsnList hook = new InsnList();
+        hook.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        hook.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS,
+                STRATEGIC_JUMP_RETARGET_HOOK, STRATEGIC_JUMP_RETARGET_HOOK_DESC, false));
+        method.instructions.insertBefore(exit, hook);
+        strategicJumpRetargetHookState(method, true);
+
+        PatchReport report = new PatchReport();
+        report.add("JumpDestination retarget epilogues", 1);
+        return report;
+    }
+
+    private static boolean strategicJumpRetargetHookState(MethodNode method,
+                                                           boolean required) {
+        List<MethodInsnNode> hooks = calls(method, Opcodes.INVOKESTATIC, HOOKS,
+                STRATEGIC_JUMP_RETARGET_HOOK, STRATEGIC_JUMP_RETARGET_HOOK_DESC);
+        if (hooks.size() != 1) {
+            if (required) throw mismatch("JumpDestination retarget hook count changed");
+            return false;
+        }
+        AbstractInsnNode exit = requireSingleReturn(method, "JumpDestination.setDestination");
+        MethodInsnNode hook = hooks.get(0);
+        VarInsnNode receiver = requireVar(previousMeaningful(hook), Opcodes.ALOAD,
+                "JumpDestination retarget hook receiver");
+        if (receiver.var != 0 || nextMeaningful(hook) != exit) {
+            if (required) throw mismatch("JumpDestination retarget hook epilogue changed");
+            return false;
+        }
+        return true;
+    }
+
+    private PatchReport patchStrategicJumpLocationMutation(ClassNode node) {
+        MethodNode add = requireMethod(node, "addObjectReal", "(Ljava/lang/Object;)V");
+        MethodNode remove = requireMethod(node, "removeObjectReal", "(Ljava/lang/Object;)V");
+        boolean owned = hasPatchMarker(node, STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID);
+        boolean addHook = strategicJumpLocationHookState(add, false);
+        boolean removeHook = strategicJumpLocationHookState(remove, false);
+        if (owned) {
+            if (!addHook || !removeHook) {
+                throw mismatch("owned BaseLocation topology hooks are incomplete");
+            }
+            throw already("BaseLocation entity mutations already update the strategic index");
+        }
+        if (addHook || removeHook) {
+            throw already("foreign BaseLocation topology hook is already present");
+        }
+
+        requireSingleReturn(add, "BaseLocation.addObjectReal");
+        requireSingleReturn(remove, "BaseLocation.removeObjectReal");
+        requireCount("BaseLocation ObjectRepository.add calls",
+                countCalls(add, Opcodes.INVOKEVIRTUAL,
+                        "com/fs/util/container/repo/ObjectRepository", "add",
+                        "(Ljava/lang/Object;)Z"), 1);
+        requireCount("BaseLocation ObjectRepository.remove calls",
+                countCalls(remove, Opcodes.INVOKEVIRTUAL,
+                        "com/fs/util/container/repo/ObjectRepository", "remove",
+                        "(Ljava/lang/Object;)Z"), 1);
+        installStrategicJumpLocationHook(add);
+        installStrategicJumpLocationHook(remove);
+        strategicJumpLocationHookState(add, true);
+        strategicJumpLocationHookState(remove, true);
+
+        PatchReport report = new PatchReport();
+        report.add("BaseLocation jump-source mutation epilogues", 2);
+        return report;
+    }
+
+    private static void installStrategicJumpLocationHook(MethodNode method) {
+        AbstractInsnNode exit = requireSingleReturn(method, "BaseLocation." + method.name);
+        InsnList hook = new InsnList();
+        hook.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        hook.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        hook.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS,
+                STRATEGIC_JUMP_LOCATION_HOOK, STRATEGIC_JUMP_LOCATION_HOOK_DESC, false));
+        method.instructions.insertBefore(exit, hook);
+    }
+
+    private static boolean strategicJumpLocationHookState(MethodNode method,
+                                                           boolean required) {
+        List<MethodInsnNode> hooks = calls(method, Opcodes.INVOKESTATIC, HOOKS,
+                STRATEGIC_JUMP_LOCATION_HOOK, STRATEGIC_JUMP_LOCATION_HOOK_DESC);
+        if (hooks.size() != 1) {
+            if (required) throw mismatch("BaseLocation topology hook count changed in "
+                    + method.name + method.desc);
+            return false;
+        }
+        AbstractInsnNode exit = requireSingleReturn(method, "BaseLocation." + method.name);
+        MethodInsnNode hook = hooks.get(0);
+        VarInsnNode entity = requireVar(previousMeaningful(hook), Opcodes.ALOAD,
+                "BaseLocation topology entity");
+        VarInsnNode receiver = requireVar(previousMeaningful(entity), Opcodes.ALOAD,
+                "BaseLocation topology receiver");
+        if (receiver.var != 0 || entity.var != 1 || nextMeaningful(hook) != exit) {
+            if (required) throw mismatch("BaseLocation topology hook epilogue changed");
+            return false;
+        }
+        return true;
+    }
+
+    private static AbstractInsnNode requireSingleReturn(MethodNode method, String label) {
+        AbstractInsnNode result = null;
+        for (AbstractInsnNode insn : method.instructions.toArray()) {
+            if (insn.getOpcode() != Opcodes.RETURN) continue;
+            if (result != null) throw mismatch(label + " has multiple normal returns");
+            result = insn;
+        }
+        if (result == null) throw mismatch(label + " has no normal return");
+        return result;
+    }
+
+    private static StrategicJumpCommon inspectStrategicJumpCommon(String owner,
+                                                                   MethodNode method) {
+        requireCount("StrategicModule hostile-market calls",
+                countCalls(method, Opcodes.INVOKESTATIC,
+                        "com/fs/starfarer/api/util/Misc", "getNumHostileMarkets",
+                        HOSTILE_MARKETS_DESC), 1);
+        requireCount("StrategicModule destination list calls",
+                countCalls(method, Opcodes.INVOKEVIRTUAL,
+                        "com/fs/starfarer/campaign/JumpPoint", "getDestinations",
+                        "()Ljava/util/List;"), 1);
+        requireCount("StrategicModule unsafe-fleet calls",
+                countCalls(method, Opcodes.INVOKESTATIC, owner,
+                        "getNumUnsafeFleetsAround", UNSAFE_FLEETS_DESC), 1);
+        requireCount("StrategicModule candidate sorting",
+                countCalls(method, Opcodes.INVOKESTATIC, "java/util/Collections", "sort",
+                        "(Ljava/util/List;Ljava/util/Comparator;)V"), 1);
+
+        MethodInsnNode destinations = calls(method, Opcodes.INVOKEVIRTUAL,
+                "com/fs/starfarer/campaign/JumpPoint", "getDestinations",
+                "()Ljava/util/List;").get(0);
+        VarInsnNode jumpLoad = requireVar(previousMeaningful(destinations), Opcodes.ALOAD,
+                "StrategicModule jump-point receiver");
+        int jumpPointLocal = jumpLoad.var;
+
+        MethodInsnNode listIterator = asMethod(nextMeaningful(destinations),
+                "StrategicModule destination iterator");
+        requireCall(listIterator, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator",
+                "()Ljava/util/Iterator;", "StrategicModule destination iterator");
+        VarInsnNode iteratorStore = requireVar(nextMeaningful(listIterator), Opcodes.ASTORE,
+                "StrategicModule destination iterator local");
+
+        MethodInsnNode iteratorNext = null;
+        for (AbstractInsnNode cursor = nextMeaningful(iteratorStore);
+             cursor != null; cursor = nextMeaningful(cursor)) {
+            if (!(cursor instanceof MethodInsnNode call)
+                    || !callMatches(call, Opcodes.INVOKEINTERFACE, "java/util/Iterator", "next",
+                    "()Ljava/lang/Object;")) continue;
+            VarInsnNode receiver = requireVar(previousMeaningful(call), Opcodes.ALOAD,
+                    "StrategicModule destination Iterator.next receiver");
+            if (receiver.var == iteratorStore.var) {
+                iteratorNext = call;
+                break;
+            }
+        }
+        if (iteratorNext == null) throw mismatch("destination Iterator.next call is missing");
+        AbstractInsnNode cast = nextMeaningful(iteratorNext);
+        if (!(cast instanceof TypeInsnNode type) || cast.getOpcode() != Opcodes.CHECKCAST
+                || !type.desc.equals(
+                "com/fs/starfarer/api/campaign/JumpPointAPI$JumpDestination")) {
+            throw mismatch("destination Iterator.next result cast changed");
+        }
+        VarInsnNode destinationStore = requireVar(nextMeaningful(cast), Opcodes.ASTORE,
+                "StrategicModule destination local");
+        int destinationLocal = destinationStore.var;
+
+        VarInsnNode nullReceiver = requireVar(nextMeaningful(destinationStore), Opcodes.ALOAD,
+                "StrategicModule null destination receiver");
+        if (nullReceiver.var != destinationLocal) {
+            throw mismatch("null destination check reads a different local");
+        }
+        MethodInsnNode nullGet = asMethod(nextMeaningful(nullReceiver),
+                "StrategicModule null destination getter");
+        requireJumpDestinationGetter(nullGet);
+        JumpInsnNode nullJump = requireJump(nextMeaningful(nullGet), Opcodes.IFNULL,
+                "StrategicModule null destination branch");
+
+        VarInsnNode exactReceiver = requireVar(nextMeaningful(nullJump), Opcodes.ALOAD,
+                "StrategicModule exact destination receiver");
+        if (exactReceiver.var != destinationLocal) {
+            throw mismatch("exact destination check reads a different local");
+        }
+        MethodInsnNode exactGet = asMethod(nextMeaningful(exactReceiver),
+                "StrategicModule exact destination getter");
+        requireJumpDestinationGetter(exactGet);
+        MethodInsnNode exactLocation = asMethod(nextMeaningful(exactGet),
+                "StrategicModule exact destination location");
+        requireContainingLocationGetter(exactLocation);
+        VarInsnNode targetLoad = requireVar(nextMeaningful(exactLocation), Opcodes.ALOAD,
+                "StrategicModule requested location local");
+        if (targetLoad.var != 1) {
+            throw mismatch("requested LocationAPI is not read from static argument local 1");
+        }
+        JumpInsnNode exactJump = requireJump(nextMeaningful(targetLoad), Opcodes.IF_ACMPEQ,
+                "StrategicModule exact destination branch");
+
+        VarInsnNode fallbackLoad = requireVar(nextMeaningful(exactJump), Opcodes.ILOAD,
+                "StrategicModule hyperspace fallback flag");
+        JumpInsnNode fallbackDisabled = requireJump(nextMeaningful(fallbackLoad), Opcodes.IFEQ,
+                "StrategicModule fallback-disabled branch");
+        requireVar(nextMeaningful(fallbackDisabled), Opcodes.ALOAD,
+                "StrategicModule hyperspace local");
+        VarInsnNode fallbackReceiver = requireVar(
+                nextMeaningful(nextMeaningful(fallbackDisabled)), Opcodes.ALOAD,
+                "StrategicModule fallback destination receiver");
+        if (fallbackReceiver.var != destinationLocal) {
+            throw mismatch("fallback destination check reads a different local");
+        }
+        MethodInsnNode fallbackGet = asMethod(nextMeaningful(fallbackReceiver),
+                "StrategicModule fallback destination getter");
+        requireJumpDestinationGetter(fallbackGet);
+        MethodInsnNode fallbackLocation = asMethod(nextMeaningful(fallbackGet),
+                "StrategicModule fallback destination location");
+        requireContainingLocationGetter(fallbackLocation);
+        JumpInsnNode fallbackJump = requireJump(nextMeaningful(fallbackLocation), Opcodes.IF_ACMPNE,
+                "StrategicModule fallback destination branch");
+
+        if (nullJump.label != fallbackDisabled.label || nullJump.label != fallbackJump.label) {
+            throw mismatch("destination rejection branches no longer share one continue target");
+        }
+        AbstractInsnNode acceptedEntry = nextMeaningful(exactJump.label);
+        if (acceptedEntry == null || acceptedEntry != nextMeaningful(fallbackJump)) {
+            throw mismatch("exact and fallback destination branches do not converge");
+        }
+        AbstractInsnNode candidateStart = acceptedEntry;
+        if (!(candidateStart instanceof VarInsnNode candidateLoad)
+                || candidateLoad.getOpcode() != Opcodes.ALOAD
+                || candidateLoad.var != jumpPointLocal
+                || !(nextMeaningful(candidateLoad) instanceof MethodInsnNode candidateCall)
+                || !callMatches(candidateCall, Opcodes.INVOKEVIRTUAL,
+                "com/fs/starfarer/campaign/JumpPoint", "getLocation",
+                "()Lorg/lwjgl/util/vector/Vector2f;")) {
+            candidateStart = null;
+            for (AbstractInsnNode cursor = acceptedEntry; cursor != null
+                    && cursor != nullJump.label; cursor = nextMeaningful(cursor)) {
+                if (!(cursor instanceof VarInsnNode candidateLoad)
+                        || candidateLoad.getOpcode() != Opcodes.ALOAD
+                        || candidateLoad.var != jumpPointLocal) continue;
+                AbstractInsnNode next = nextMeaningful(candidateLoad);
+                if (next instanceof MethodInsnNode candidateCall
+                        && callMatches(candidateCall, Opcodes.INVOKEVIRTUAL,
+                        "com/fs/starfarer/campaign/JumpPoint", "getLocation",
+                        "()Lorg/lwjgl/util/vector/Vector2f;")) {
+                    candidateStart = candidateLoad;
+                    break;
+                }
+            }
+            if (candidateStart == null) {
+                throw mismatch("accepted destination path no longer reaches jump-point distance");
+            }
+        }
+
+        MethodInsnNode unsafeCall = calls(method, Opcodes.INVOKESTATIC, owner,
+                "getNumUnsafeFleetsAround", UNSAFE_FLEETS_DESC).get(0);
+        if (method.instructions.indexOf(unsafeCall) <= method.instructions.indexOf(candidateStart)
+                || method.instructions.indexOf(unsafeCall)
+                >= method.instructions.indexOf(nullJump.label)) {
+            throw mismatch("unsafe-fleet score moved outside the accepted destination path");
+        }
+        VarInsnNode unsafeLoad = requireVar(nextMeaningful(unsafeCall), Opcodes.ILOAD,
+                "StrategicModule hostile-market candidate score");
+        AbstractInsnNode sum = nextMeaningful(unsafeLoad);
+        if (sum == null || sum.getOpcode() != Opcodes.IADD) {
+            throw mismatch("hostile-market score is not added to the unsafe-fleet score");
+        }
+        AbstractInsnNode scoreStore = nextMeaningful(sum);
+        if (!(scoreStore instanceof FieldInsnNode field)
+                || field.getOpcode() != Opcodes.PUTFIELD || !field.desc.equals("I")) {
+            throw mismatch("combined unsafe score is not stored in the candidate int field");
+        }
+
+        int fleetLocal = 0;
+        Frame<SourceValue>[] frames = sourceFrames(owner, method);
+        Frame<SourceValue> unsafeFrame = frameBefore(method, unsafeCall, frames);
+        if (unsafeFrame.getStackSize() < 3
+                || !sourceIsLocal(unsafeFrame.getStack(unsafeFrame.getStackSize() - 3),
+                Opcodes.ALOAD, fleetLocal)
+                || !sourceIsLocal(unsafeFrame.getStack(unsafeFrame.getStackSize() - 2),
+                Opcodes.ALOAD, jumpPointLocal)
+                || !sourceIsFloatConstant(
+                unsafeFrame.getStack(unsafeFrame.getStackSize() - 1), 750f)) {
+            throw mismatch("unsafe-fleet call arguments changed");
+        }
+
+        return new StrategicJumpCommon(method, destinations, acceptedEntry, candidateStart,
+                jumpPointLocal, fleetLocal, unsafeLoad.var);
+    }
+
+    private static StrategicJumpOriginal inspectStrategicJumpOriginal(
+            StrategicJumpCommon common, boolean required) {
+        MethodNode method = common.method;
+        MethodInsnNode hostile = calls(method, Opcodes.INVOKESTATIC,
+                "com/fs/starfarer/api/util/Misc", "getNumHostileMarkets",
+                HOSTILE_MARKETS_DESC).get(0);
+        if (method.instructions.indexOf(hostile)
+                > method.instructions.indexOf(common.destinations)) {
+            if (required) throw mismatch("hostile-market call is not in the vanilla eager position");
+            return null;
+        }
+
+        AbstractInsnNode radiusInsn = previousMeaningful(hostile);
+        if (!(radiusInsn instanceof LdcInsnNode radius) || !isFloat(radius, 4000f)) {
+            if (required) throw mismatch("hostile-market radius changed");
+            return null;
+        }
+        VarInsnNode jumpLoad = requireVar(previousMeaningful(radius), Opcodes.ALOAD,
+                "StrategicModule eager jump-point argument");
+        MethodInsnNode faction = asMethod(previousMeaningful(jumpLoad),
+                "StrategicModule eager faction getter");
+        VarInsnNode fleetLoad = requireVar(previousMeaningful(faction), Opcodes.ALOAD,
+                "StrategicModule eager fleet receiver");
+        if (jumpLoad.var != common.jumpPointLocal || fleetLoad.var != common.fleetLocal
+                || !callMatches(faction, Opcodes.INVOKEINTERFACE,
+                "com/fs/starfarer/api/campaign/CampaignFleetAPI", "getFaction",
+                "()Lcom/fs/starfarer/api/campaign/FactionAPI;")) {
+            if (required) throw mismatch("hostile-market eager arguments changed");
+            return null;
+        }
+        VarInsnNode firstStore = requireVar(nextMeaningful(hostile), Opcodes.ISTORE,
+                "StrategicModule eager hostile score local");
+        VarInsnNode multiplyLoad = requireVar(nextMeaningful(firstStore), Opcodes.ILOAD,
+                "StrategicModule eager hostile score multiplier load");
+        AbstractInsnNode two = nextMeaningful(multiplyLoad);
+        AbstractInsnNode multiply = nextMeaningful(two);
+        VarInsnNode secondStore = requireVar(nextMeaningful(multiply), Opcodes.ISTORE,
+                "StrategicModule eager hostile score result");
+        if (firstStore.var != common.unsafeLocal || multiplyLoad.var != common.unsafeLocal
+                || secondStore.var != common.unsafeLocal || !isIntegerLdc(two, 2)
+                || multiply == null || multiply.getOpcode() != Opcodes.IMUL
+                || nextMeaningful(secondStore) != previousMeaningful(common.destinations)) {
+            if (required) throw mismatch("hostile-market eager score sequence changed");
+            return null;
+        }
+        return new StrategicJumpOriginal(fleetLoad, secondStore);
+    }
+
+    private static StrategicJumpLazy inspectStrategicJumpLazy(
+            StrategicJumpCommon common, boolean required) {
+        MethodNode method = common.method;
+        MethodInsnNode hostile = calls(method, Opcodes.INVOKESTATIC,
+                "com/fs/starfarer/api/util/Misc", "getNumHostileMarkets",
+                HOSTILE_MARKETS_DESC).get(0);
+        if (method.instructions.indexOf(hostile)
+                < method.instructions.indexOf(common.destinations)) {
+            if (required) throw mismatch("hostile-market call remains before getDestinations");
+            return null;
+        }
+
+        VarInsnNode destinationReceiver = requireVar(previousMeaningful(common.destinations),
+                Opcodes.ALOAD, "StrategicModule lazy destination receiver");
+        VarInsnNode sentinelStore = requireVar(previousMeaningful(destinationReceiver),
+                Opcodes.ISTORE, "StrategicModule lazy sentinel local");
+        AbstractInsnNode sentinel = previousMeaningful(sentinelStore);
+        if (destinationReceiver.var != common.jumpPointLocal
+                || sentinelStore.var != common.unsafeLocal
+                || !isIntegerLdc(sentinel, STRATEGIC_JUMP_UNCOMPUTED)) {
+            if (required) throw mismatch("lazy hostile-market sentinel initialization changed");
+            return null;
+        }
+
+        AbstractInsnNode radiusInsn = previousMeaningful(hostile);
+        if (!(radiusInsn instanceof LdcInsnNode radius) || !isFloat(radius, 4000f)) {
+            if (required) throw mismatch("lazy hostile-market radius changed");
+            return null;
+        }
+        VarInsnNode jumpLoad = requireVar(previousMeaningful(radius), Opcodes.ALOAD,
+                "StrategicModule lazy jump-point argument");
+        MethodInsnNode faction = asMethod(previousMeaningful(jumpLoad),
+                "StrategicModule lazy faction getter");
+        VarInsnNode fleetLoad = requireVar(previousMeaningful(faction), Opcodes.ALOAD,
+                "StrategicModule lazy fleet receiver");
+        JumpInsnNode guard = requireJump(previousMeaningful(fleetLoad), Opcodes.IF_ICMPNE,
+                "StrategicModule lazy score guard");
+        AbstractInsnNode guardSentinel = previousMeaningful(guard);
+        VarInsnNode guardLoad = requireVar(previousMeaningful(guardSentinel), Opcodes.ILOAD,
+                "StrategicModule lazy score guard local");
+        if (jumpLoad.var != common.jumpPointLocal || fleetLoad.var != common.fleetLocal
+                || guardLoad.var != common.unsafeLocal
+                || !isIntegerLdc(guardSentinel, STRATEGIC_JUMP_UNCOMPUTED)
+                || guardLoad != common.acceptedEntry
+                || nextMeaningful(guard.label) != common.candidateStart
+                || !callMatches(faction, Opcodes.INVOKEINTERFACE,
+                "com/fs/starfarer/api/campaign/CampaignFleetAPI", "getFaction",
+                "()Lcom/fs/starfarer/api/campaign/FactionAPI;")) {
+            if (required) throw mismatch("lazy hostile-market guard or arguments changed");
+            return null;
+        }
+
+        AbstractInsnNode two = nextMeaningful(hostile);
+        AbstractInsnNode multiply = nextMeaningful(two);
+        VarInsnNode store = requireVar(nextMeaningful(multiply), Opcodes.ISTORE,
+                "StrategicModule lazy hostile score result");
+        if (!isIntegerLdc(two, 2) || multiply == null
+                || multiply.getOpcode() != Opcodes.IMUL || store.var != common.unsafeLocal
+                || nextMeaningful(store) != common.candidateStart) {
+            if (required) throw mismatch("lazy hostile-market score sequence changed");
+            return null;
+        }
+        return new StrategicJumpLazy(sentinelStore, guard, store);
+    }
+
+    private static void requireJumpDestinationGetter(MethodInsnNode call) {
+        requireCall(call, Opcodes.INVOKEVIRTUAL,
+                "com/fs/starfarer/api/campaign/JumpPointAPI$JumpDestination",
+                "getDestination", "()Lcom/fs/starfarer/api/campaign/SectorEntityToken;",
+                "StrategicModule JumpDestination.getDestination");
+    }
+
+    private static void requireContainingLocationGetter(MethodInsnNode call) {
+        requireCall(call, Opcodes.INVOKEINTERFACE,
+                "com/fs/starfarer/api/campaign/SectorEntityToken", "getContainingLocation",
+                "()Lcom/fs/starfarer/api/campaign/LocationAPI;",
+                "StrategicModule destination containing location");
+    }
+
+    private static VarInsnNode requireVar(AbstractInsnNode insn, int opcode, String label) {
+        if (!(insn instanceof VarInsnNode var) || var.getOpcode() != opcode) {
+            throw mismatch(label + " has unexpected instruction");
+        }
+        return var;
+    }
+
+    private static JumpInsnNode requireJump(AbstractInsnNode insn, int opcode, String label) {
+        if (!(insn instanceof JumpInsnNode jump) || jump.getOpcode() != opcode) {
+            throw mismatch(label + " has unexpected instruction");
+        }
+        return jump;
+    }
+
+    private static boolean sourceIsFloatConstant(SourceValue value, float expected) {
+        return value != null && value.insns != null && value.insns.size() == 1
+                && value.insns.iterator().next() instanceof LdcInsnNode ldc
+                && isFloat(ldc, expected);
+    }
+
+    private record StrategicJumpCommon(MethodNode method, MethodInsnNode destinations,
+                                       AbstractInsnNode acceptedEntry,
+                                       AbstractInsnNode candidateStart, int jumpPointLocal,
+                                       int fleetLocal, int unsafeLocal) {}
+
+    private record StrategicJumpOriginal(AbstractInsnNode start, AbstractInsnNode end) {}
+
+    private record StrategicJumpLazy(VarInsnNode sentinelStore, JumpInsnNode guard,
+                                     VarInsnNode scoreStore) {}
+
+    private record StrategicJumpSource(MethodInsnNode call, AbstractInsnNode argument) {}
+
+    private record StrategicJumpExpiry(JumpInsnNode expiryJump,
+                                       VarInsnNode clearStart,
+                                       FieldInsnNode clearWrite,
+                                       MethodInsnNode findCall) {}
 
     private PatchReport patchCampaignSnapshotReuse(ClassNode node) {
         String methodDesc = "(FLcom/fs/starfarer/util/A/new;)V";

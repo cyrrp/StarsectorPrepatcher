@@ -291,6 +291,44 @@ relationship snapshot — раз в `route.indexTtlMs`. Это сохраняе�
 видимость прямой мутации сторонним модом. Значение TTL `0` отключает runtime index; в
 `profiles/safe.properties` route patch отключён полностью.
 
+`patch.strategicJumpDestinationFirst` не использует route index, TTL или runtime helper. Это
+самостоятельная inline-трансформация `StrategicModule.findNearestSafeJumpPoint`: accepted destination
+predicate остаётся vanilla, а `getNumHostileMarkets` лениво выполняется не более одного раза на
+принятый jump point. Поэтому патч не зависит от `patch.routeJumpPointIndex` и не делит с ним
+transformation surface. Несовпадение radius/multiplier/control-flow либо foreign lazy-state оставляет
+весь класс без изменений со `SKIPPED_STRUCTURAL`.
+
+`patch.strategicJumpDestinationIndex` имеет явную structural-зависимость от destination-first и
+потребляет его уже преобразованный post-state. Он также требует owned lifecycle-maintenance hook,
+`JumpPoint` destination mutators, `JumpDestination.setDestination` и membership hooks `BaseLocation`.
+До загрузки всех поверхностей capability остаётся `PENDING`, partial index не публикуется.
+
+Runtime не использует route-widget cache и не определяет тип current location. Каждый запрошенный
+`LocationAPI` принимается одинаково, с bounded admission rate и bounded LRU. Первый lookup только
+регистрирует demand; точный ordered index строится и проверяется в campaign maintenance под общим
+wall-clock/work-unit budget. Полная длительность maintenance — включая lock, выбор задачи, очереди,
+retry heap, LRU и cleanup — вычитается из token bucket; линейного поиска retry/audit state в общем LRU
+нет. Пока state `BUILDING`, `REFRESHING` или `FAILED_COOLDOWN`, внешний цикл получает пустой source
+вместо полного vanilla list. В `BUILDING`/`REFRESHING` истёкший существующий `JumpPlan` остаётся
+активным, а флот без плана повторяет rebuild позже; `FAILED_COOLDOWN` очищает stale plan и также ждёт
+ограниченного retry. Следовательно, патч намеренно допускает задержку маршрута на несколько кадров,
+но не меняет candidate result после READY.
+
+Exact target и исходный hyperspace fallback объединяются по identity в vanilla outer order, а один
+jump point присутствует в union один раз. Проверенный destination miss кешируется как пустой результат.
+Нормальные API-мутации обновляют один point или запускают budgeted replacement source build; прямые
+mutable-list edits обнаруживает непрерывный budgeted audit. Ошибки одной location получают cooldown и
+редкий ограниченный retry, поэтому несовместимый getter не вызывает полный rebuild на каждом lookup.
+Неожиданная ошибка самого runtime hook считается capability failure: оптимизация отключается и только
+в этом аварийном случае возвращается vanilla source.
+
+Memory retention ограничена числом LRU states, idle TTL, campaign-generation reset, фиксированным
+weak-identity owner accelerator и фиксированным merge cache. Capacity pressure вытесняет только
+готовый или failed state; незавершённый build не перезапускается из-за admission churn. Due failures
+хранятся по одному разу в indexed bounded heap, READY audit — по одному разу в intrusive queue.
+Внешний index state не добавляется в save и не полагается на weak-key map, value которой через
+`JumpPoint` снова удерживает location key.
+
 Comm-relay index намеренно использует такой же bounded-staleness контракт. Size/radius и identity
 первой/последней системы проверяются на каждом запросе, а полный ordered identity/coordinate audit
 выполняется раз в `commRelay.indexTtlMs`. Владелец релиза явно принимает задержку до TTL для прямого

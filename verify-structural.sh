@@ -68,6 +68,16 @@ java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
   2>&1 | tee "$REPORT_DIR/core-worlds-structural-matcher.txt"
 
 java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.StrategicJumpDestinationFirstTransformerTest \
+  "$VERIFICATION_CONFIG" "$CORE/starfarer_obf.jar" \
+  2>&1 | tee "$REPORT_DIR/strategic-jump-destination-first.txt"
+
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.StrategicJumpDestinationIndexTransformerTest \
+  "$VERIFICATION_CONFIG" "$CORE/starfarer_obf.jar" "$CORE/starfarer.api.jar" \
+  2>&1 | tee "$REPORT_DIR/strategic-jump-destination-index.txt"
+
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
   com.starsector.prepatcher.agent.FastForwardPresentationStructuralPlanTest \
   2>&1 | tee "$REPORT_DIR/fast-forward-presentation-structural-plan.txt"
 
@@ -80,7 +90,7 @@ java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
   com.starsector.prepatcher.agent.DirectMarketObserveTransformerTest \
   2>&1 | tee "$REPORT_DIR/direct-market-transformer.txt"
 
-RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar"
+RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
 {
   echo '== LifecycleGcRegressionTest =='
   java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.LifecycleGcRegressionTest
@@ -106,6 +116,8 @@ RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$CORE/st
   java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.LoadingSaveRuntimeRegressionTest
   echo '== AoTDDomainRevisionRuntimeTest =='
   java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.AoTDDomainRevisionRuntimeTest
+  echo '== StrategicJumpDestinationIndexRuntimeTest =='
+  java -cp "$RUNTIME_CP" com.fs.starfarer.api.StrategicJumpDestinationIndexRuntimeTest
 } 2>&1 | tee "$REPORT_DIR/runtime-regression.txt"
 
 {

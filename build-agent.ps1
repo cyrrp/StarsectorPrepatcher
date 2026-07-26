@@ -36,7 +36,8 @@ $requiredRuntimePayload = @(
     'com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge.class',
     'com/fs/starfarer/api/StarsectorPrepatcherCoreWorldsRuntime.class',
     'com/fs/starfarer/api/StarsectorPrepatcherTempModHooks.class',
-    'com/fs/starfarer/api/StarsectorPrepatcherPresentationHooks.class'
+    'com/fs/starfarer/api/StarsectorPrepatcherPresentationHooks.class',
+    'com/fs/starfarer/api/StarsectorPrepatcherStrategicJumpIndex.class'
 )
 $agentEntries = @(& jar tf $agentJar)
 if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the agent JAR.' }
@@ -45,7 +46,7 @@ foreach ($entry in $requiredRuntimePayload) {
         throw "Required target-loader runtime payload is missing from the agent JAR: $entry"
     }
 }
-$expectedRuntimePayloadCount = 87
+$expectedRuntimePayloadCount = 108
 $runtimePayloadEntries = @($agentEntries | Where-Object {
     $_ -cmatch '^com/fs/starfarer/api/StarsectorPrepatcher[^/]*\.class$'
 })

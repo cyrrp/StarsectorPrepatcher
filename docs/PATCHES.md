@@ -39,6 +39,8 @@ classfile или JAR не участвует в решении.
 | `patch.emptyMemoryAdvanceFastPath` | `Memory.advance` | inline return when expire+require are empty | restoration/pause and non-empty loops remain vanilla |
 | `patch.coreWorldsExtentCache` | `CoreScript.advance(F)V` | cache `$coreWorldsMin/Max/Center`; avoid unchanged allocations/writes and optionally skip extra fast-forward scans | unique `Global.getSector` local, terminal call after `RouteManager.advance`, owner marker and exact hook postcondition |
 | `patch.routeJumpPointIndex` | route widget | ordered jump/system candidates | original filter/distance/tie loop |
+| `patch.strategicJumpDestinationFirst` | `StrategicModule.findNearestSafeJumpPoint` | lazy hostile-market score only after the original destination predicate accepts a jump point | exact target/hyperspace fallback, one score per jump point, candidate order/sort/early return unchanged |
+| `patch.strategicJumpDestinationIndex` | `StrategicModule.findNearestSafeJumpPoint`, expired `JumpPlan`, jump/location topology mutators | budgeted ordered index keyed by destination `LocationAPI` identity | requires destination-first; no location type/size admission rule; cold/dirty work is deferred under one global frame budget |
 | `patch.economyLocationCache` | `Economy.advance` | omit only redundant automatic dirty write | explicit mod dirty state authoritative |
 | `patch.marketScheduler` | `Economy.advance`, `BaseCampaignEntity.advance`, pre-save boundary | one stable-phase scheduler for all transformed engine-owned market updates with exact accumulated amount | one identity state and policy; direct mod calls immediate; hot markets full-rate; callback cadence intentionally changes |
 | `patch.directMarketObservation` | mod call sites + known engine origins + concrete `Market.advance` entry | synchronous wrappers, eager call-site manifest, sampled timing and interval-bounded stack attribution | direct mod calls are never delayed/merged/suppressed; known planet path is classified separately |
@@ -91,6 +93,86 @@ ownership marker. Он применяется после `saveMethodPlan`, а о
 maintenance hook, scheduler flush, component registration и scheduler capability остаются активны.
 Таким образом, необязательная allocation-оптимизация больше не влияет на correctness/readiness
 планировщика.
+
+### Destination-first strategic jump filtering
+
+`patch.strategicJumpDestinationFirst` изменяет только локальный порядок вычислений в
+`StrategicModule.findNearestSafeJumpPoint(CampaignFleetAPI, LocationAPI)`. Vanilla сначала для
+каждого допустимого `JumpPoint` вызывает `Misc.getNumHostileMarkets(..., 4000f)`, а уже затем
+проверяет его `JumpDestination`. Патч записывает sentinel в исходный `int` local и переносит
+единственный hostile-market вызов в ветвь, где исходный identity-предикат уже принял exact target
+или штатный fallback в hyperspace. При нескольких подходящих destinations одного jump point score
+вычисляется один раз. Фильтры star anchor/unstable/wormhole, `getNumUnsafeFleetsAround`, candidate
+allocation, insertion order, comparator, `Collections.sort` и ранний return `< 2000` не меняются.
+
+Transformation surface ограничена одним методом и прямым value-flow hostile-market score → candidate
+unsafe field. Других патчей этого класса нет. Matcher требует точные descriptors, общий continue для
+трёх reject-ветвей, схождение exact/fallback ветвей, radius `4000f`, multiplier `2`, unsafe-fleet
+arguments `fleet/jumpPoint/750f` и последующее `IADD`. Owned post-state требует sentinel, один
+`IF_ICMPNE` guard и один hostile-market call; похожий foreign lazy-state без marker получает
+`SKIPPED_STRUCTURAL`.
+
+### Strategic destination-location index
+
+`patch.strategicJumpDestinationIndex` применяется после destination-first и атомарно меняет две
+части `StrategicModule`: источник внешнего цикла `findNearestSafeJumpPoint` и ветвь истечения
+существующего `JumpPlan` в `updateJumpPlanTo`. Runtime не классифицирует current location как
+hyperspace/system и не использует размер списка как admission-эвристику. Hyperspace остаётся только
+частью исходного vanilla-предиката exact-target/fallback, который патч не изменяет.
+
+Первый lookup не строит индекс и не читает destinations: он лишь принимает bounded state для
+`LocationAPI`. `campaignCacheMaintenanceTick()` продвигает все `BUILDING`, `REFRESHING`, retry и
+audit-задачи под одним process-wide token bucket. За каждые 16,67 мс допускается не более
+`strategicJump.indexBudgetMicros` полной wall-clock стоимости и не более
+`strategicJump.indexMaxWorkUnits` элементарных операций. В wall-clock accounting входят ожидание
+общего lock, выбор задачи, retry heap, work/audit queues, LRU, idle cleanup и сама неделимая unit.
+Deadline проверяется до выбора следующей unit, поэтому один вызов может выйти за него не более чем
+на стоимость одной уже начатой unit и постоянного финального accounting. Дополнительные simulation
+substeps при fast-forward не умножают допустимую работу. `indexMaxWorkUnits` остаётся вторичным
+ограничителем для очень дешёвых units; штатное значение 512 не увеличивает frame budget в 250 мкс.
+Полное построение по-прежнему требует просмотра всех `J` jump points и `D` relations, но эта стоимость
+распределяется между кадрами; READY lookup читает только ordered candidates для exact target и
+vanilla fallback. Проверенный miss является пустым cache hit и не возвращает полный список.
+
+Due retries выбираются indexed min-heap без полного прохода LRU. READY states находятся в отдельной
+intrusive round-robin audit queue; audit получает не более одной шестнадцатой work-unit ceiling за
+maintenance-вызов и не сжигает весь budget в спокойном steady state. Эти структуры ограничены числом
+активных location states и очищаются при campaign-generation reset.
+
+Пока точный snapshot не READY, hook возвращает immutable empty source, поэтому исходный полный
+`Θ(J + D)` цикл не возникает в том же кадре. Во время `BUILDING`/`REFRESHING` уже существующий
+`JumpPlan` временно сохраняется; флот без плана повторяет запрос в последующих advances. В
+`FAILED_COOLDOWN` старый план очищается, чтобы постоянная ошибка не удерживала stale route. Это намеренное изменение
+только момента route rebuild: после READY vanilla destination/safety/distance/candidate/sort/early-return
+логика получает тот же identity-ordered subset.
+
+Обычные topology-события обслуживаются дельтами: `JumpPoint.addDestination`, `clearDestinations` и
+`removeDestination`, `JumpDestination.setDestination`, а также добавление/удаление `JumpPoint` через
+`BaseLocation` получают отдельные hooks. Изменение destinations одного point пересчитывает только его
+relations; изменение source membership запускает replacement build, также ограниченный общим бюджетом.
+Прямые изменения mutable lists обнаруживаются непрерывным budgeted audit. Ошибка build/refresh переводит
+только эту location в `FAILED_COOLDOWN` с ограниченным exponential retry и не запускает новый полный
+проход на каждом lookup.
+
+State хранится в identity LRU с жёстким `strategicJump.indexMaxLocations`, idle TTL и полным reset при
+смене campaign generation. Capacity eviction допускает только `READY` и `FAILED_COOLDOWN` states;
+`BUILDING`/`REFRESHING` не теряют уже выполненную работу. Если все слоты заняты незавершёнными
+индексами, новый admission быстро откладывается до появления безопасной жертвы, а не запускает LRU
+thrashing. Длительно неиспользуемый state всё ещё может быть удалён idle TTL под тем же maintenance
+budget. Accelerator `JumpDestination -> PointRecord` является фиксированным set-associative
+weak-identity cache; он не растёт вместе с числом когда-либо увиденных relations, а его miss
+исправляется audit-ом. Candidate union имеет фиксированный малый cache и не удерживает
+неограниченное число requested locations.
+
+Периодическая статистика публикует полную/максимальную длительность maintenance, максимальный
+budget overrun, размеры work/audit/retry queues, phase gauges, deferred-plan count, oldest pending/
+deferred ages и максимальную latency до READY. Это позволяет отделить устранённый CPU hotpath от
+возможного gameplay latency debt после загрузки.
+
+Structural capability считается READY только при наличии owned post-state destination-first,
+maintenance hook и всех topology hooks. Matcher повторно проверяет lazy hostile-market guard после
+source rewrite и требует точную expired-plan deferral; mixed/foreign state получает fail-open
+`SKIPPED_STRUCTURAL` без частичного изменения класса.
 
 ### Campaign cache maintenance and scratch retention
 

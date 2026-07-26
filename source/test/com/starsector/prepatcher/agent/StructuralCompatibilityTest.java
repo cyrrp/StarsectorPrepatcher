@@ -2453,6 +2453,9 @@ public final class StructuralCompatibilityTest {
             case PrepatcherTransformer.BASE_LOCATION -> {
                 expected.put("borrowLocationAdvanceSnapshot", 3);
                 expected.put("borrowPausedLocationSnapshot", 2);
+                expected.put("strategicJumpLocationEntityChanged", 2);
+                require(hasOwnershipMarker(read(bytes), "strategicJumpDestinationIndex"),
+                        "BaseLocation destination-index marker is missing");
             }
             case PrepatcherTransformer.BASE_CAMPAIGN_ENTITY -> {
                 // Entity-script empty fast path remains inline. The condition-only
@@ -2525,6 +2528,28 @@ public final class StructuralCompatibilityTest {
                 assertHookCount(bytes, TEMP_MOD_HOOKS, "recordHybridSubclassFallback", 1);
                 assertHookCount(bytes, TEMP_MOD_HOOKS, "recordHybridFailureFallback", 1);
                 assertHookCount(bytes, HOOKS, "markCommodityTemporalStatExposed", 2);
+            }
+            case PrepatcherTransformer.STRATEGIC_MODULE -> {
+                ClassNode strategic = read(bytes);
+                require(hasOwnershipMarker(strategic, "strategicJumpDestinationFirst"),
+                        "StrategicModule destination-first marker is missing");
+                require(hasOwnershipMarker(strategic, "strategicJumpDestinationIndex"),
+                        "StrategicModule destination-index marker is missing");
+                expected.put("strategicJumpPointsForDestination", 1);
+                expected.put("strategicJumpDeferExpiredPlan", 1);
+            }
+            case PrepatcherTransformer.JUMP_POINT -> {
+                ClassNode jumpPoint = read(bytes);
+                require(hasOwnershipMarker(jumpPoint, "strategicJumpDestinationIndex"),
+                        "JumpPoint destination-index marker is missing");
+                expected.put("strategicJumpDestinationAdded", 1);
+                expected.put("strategicJumpDestinationsChanged", 2);
+            }
+            case PrepatcherTransformer.JUMP_DESTINATION -> {
+                ClassNode destination = read(bytes);
+                require(hasOwnershipMarker(destination, "strategicJumpDestinationIndex"),
+                        "JumpDestination destination-index marker is missing");
+                expected.put("strategicJumpDestinationRetargeted", 1);
             }
             case PrepatcherTransformer.INTEL_MANAGER -> expected.put("commRelayCandidateSystems", 1);
             case PrepatcherTransformer.SHIP -> {

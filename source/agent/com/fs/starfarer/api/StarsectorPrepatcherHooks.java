@@ -16,6 +16,7 @@ import com.fs.starfarer.api.impl.campaign.econ.impl.BaseIndustry;
 import com.fs.starfarer.api.impl.campaign.ids.Conditions;
 import com.fs.starfarer.api.combat.MutableStatWithTempMods;
 import com.fs.starfarer.campaign.CampaignEngine;
+import com.fs.starfarer.campaign.JumpPoint;
 import com.fs.starfarer.campaign.econ.CommodityOnMarket;
 import com.fs.starfarer.campaign.econ.Economy;
 import com.fs.starfarer.campaign.econ.Market;
@@ -114,6 +115,30 @@ public final class StarsectorPrepatcherHooks {
             Collections.synchronizedMap(new WeakHashMap<>());
     private static volatile Map<Object, RouteSystemIndex> ROUTE_SYSTEM_INDEXES =
             Collections.synchronizedMap(new WeakHashMap<>());
+    private static final int STRATEGIC_JUMP_CAPABILITY_UNKNOWN = 0;
+    private static final int STRATEGIC_JUMP_CAPABILITY_READY = 1;
+    private static final int STRATEGIC_JUMP_CAPABILITY_PENDING = 2;
+    private static final int STRATEGIC_JUMP_CAPABILITY_FAILED = -1;
+    private static volatile int strategicJumpRuntimeCapability;
+    private static final String STRATEGIC_JUMP_MAINTENANCE_STATUS =
+            "starsector.prepatcher.patchStatus.com.fs.starfarer.campaign.CampaignEngine."
+                    + "campaignCacheLifecycle";
+    private static final String STRATEGIC_JUMP_FIRST_STATUS =
+            "starsector.prepatcher.patchStatus.com.fs.starfarer.campaign.ai.StrategicModule."
+                    + "strategicJumpDestinationFirst";
+    private static final String STRATEGIC_JUMP_SOURCE_STATUS =
+            "starsector.prepatcher.patchStatus.com.fs.starfarer.campaign.ai.StrategicModule."
+                    + "strategicJumpDestinationIndex";
+    private static final String STRATEGIC_JUMP_POINT_STATUS =
+            "starsector.prepatcher.patchStatus.com.fs.starfarer.campaign.JumpPoint."
+                    + "strategicJumpDestinationIndex";
+    private static final String STRATEGIC_JUMP_LOCATION_STATUS =
+            "starsector.prepatcher.patchStatus.com.fs.starfarer.campaign.BaseLocation."
+                    + "strategicJumpDestinationIndex";
+    private static final String STRATEGIC_JUMP_DESTINATION_STATUS =
+            "starsector.prepatcher.patchStatus."
+                    + "com.fs.starfarer.api.campaign.JumpPointAPI$JumpDestination."
+                    + "strategicJumpDestinationIndex";
     private static volatile Map<ReachEconomy, EconomyLocationState> ECONOMY_LOCATION_STATES =
             Collections.synchronizedMap(new WeakHashMap<>());
     private static final int MARKET_SCHEDULER_COMPONENT_ENGINE = 1;
@@ -442,6 +467,8 @@ public final class StarsectorPrepatcherHooks {
     static void configure(PrepatcherConfig optimizerConfig, Path root) {
         config = optimizerConfig;
         modRoot = root;
+        strategicJumpRuntimeCapability = STRATEGIC_JUMP_CAPABILITY_UNKNOWN;
+        StarsectorPrepatcherStrategicJumpIndex.reset();
         CONSTRUCTION_DIAGNOSTICS = null;
         if (optimizerConfig.marketConstructionDiagnostics) {
             try {
@@ -750,6 +777,7 @@ public final class StarsectorPrepatcherHooks {
         CAMPAIGN_LISTENER_STATES = Collections.synchronizedMap(new WeakHashMap<>());
         ROUTE_JUMP_INDEXES = Collections.synchronizedMap(new WeakHashMap<>());
         ROUTE_SYSTEM_INDEXES = Collections.synchronizedMap(new WeakHashMap<>());
+        StarsectorPrepatcherStrategicJumpIndex.reset();
         ECONOMY_LOCATION_STATES = Collections.synchronizedMap(new WeakHashMap<>());
         MARKET_SCHEDULER_STATES = new WeakIdentityMap<>();
         CONSTRUCTION_QUEUE_OWNERS = new WeakIdentityMap<>();
@@ -816,6 +844,14 @@ public final class StarsectorPrepatcherHooks {
 
     /** Throttled campaign-thread maintenance entry installed in CampaignEngine.advance(). */
     public static void campaignCacheMaintenanceTick() {
+        PrepatcherConfig c = config;
+        long generation = campaignCacheGeneration;
+        if (c != null && c.strategicJumpDestinationIndex
+                && campaignCachesReady(generation)
+                && strategicJumpIndexCapability() == STRATEGIC_JUMP_CAPABILITY_READY) {
+            StarsectorPrepatcherStrategicJumpIndex.maintenance(
+                    c, generation, StarsectorPrepatcherHooks::nanoTime);
+        }
         runCacheMaintenance(false);
     }
 
@@ -6727,6 +6763,204 @@ public final class StarsectorPrepatcherHooks {
     }
 
     // ---------------------------------------------------------------------
+    // Strategic fleet jump-point index.
+    //
+    // StrategicModule keeps its original destination, safety, distance and
+    // tie-breaking code. The hook changes only the ordered source list. A
+    // location-agnostic state machine builds that exact source incrementally
+    // under one wall-clock token bucket shared by every location. Until READY,
+    // an immutable empty list defers this route rebuild instead of re-entering
+    // the original full scan.
+    // ---------------------------------------------------------------------
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public static List strategicJumpPointsForDestination(LocationAPI current,
+                                                          Class jumpPointType,
+                                                          LocationAPI requested) {
+        PrepatcherConfig c = config;
+        if (current == null) return null;
+        if (c == null || !c.strategicJumpDestinationIndex) {
+            return strategicJumpVanillaSource(current, jumpPointType);
+        }
+
+        long generation = campaignCacheGeneration;
+        if (!campaignCachesReady(generation)) return Collections.emptyList();
+
+        int capability = strategicJumpIndexCapability();
+        if (capability == STRATEGIC_JUMP_CAPABILITY_PENDING) {
+            return Collections.emptyList();
+        }
+        if (capability != STRATEGIC_JUMP_CAPABILITY_READY) {
+            return strategicJumpVanillaSource(current, jumpPointType);
+        }
+
+        LocationAPI hyperspace;
+        try {
+            CampaignEngine engine = CampaignEngine.getInstance();
+            hyperspace = engine == null ? null : engine.getHyperspace();
+        } catch (Throwable ignored) {
+            hyperspace = null;
+        }
+        if (hyperspace == null) return Collections.emptyList();
+
+        try {
+            return StarsectorPrepatcherStrategicJumpIndex.lookup(
+                    current, jumpPointType, requested, hyperspace, c, generation);
+        } catch (Throwable failure) {
+            // A runtime implementation failure must not make campaign routes
+            // disappear permanently. Disable only this optimization and retain
+            // the vanilla compatibility path.
+            strategicJumpRuntimeCapability = STRATEGIC_JUMP_CAPABILITY_FAILED;
+            return strategicJumpVanillaSource(current, jumpPointType);
+        }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    static List strategicJumpPointsForDestination(LocationAPI current,
+                                                   Class jumpPointType,
+                                                   LocationAPI requested,
+                                                   LocationAPI hyperspace) {
+        PrepatcherConfig c = config;
+        if (current == null) return null;
+        if (c == null || !c.strategicJumpDestinationIndex) {
+            return strategicJumpVanillaSource(current, jumpPointType);
+        }
+        long generation = campaignCacheGeneration;
+        if (!campaignCachesReady(generation)) return Collections.emptyList();
+        int capability = strategicJumpIndexCapability();
+        if (capability == STRATEGIC_JUMP_CAPABILITY_PENDING) {
+            return Collections.emptyList();
+        }
+        if (capability != STRATEGIC_JUMP_CAPABILITY_READY) {
+            return strategicJumpVanillaSource(current, jumpPointType);
+        }
+        if (hyperspace == null) return Collections.emptyList();
+        try {
+            return StarsectorPrepatcherStrategicJumpIndex.lookup(
+                    current, jumpPointType, requested, hyperspace, c, generation);
+        } catch (Throwable failure) {
+            strategicJumpRuntimeCapability = STRATEGIC_JUMP_CAPABILITY_FAILED;
+            return strategicJumpVanillaSource(current, jumpPointType);
+        }
+    }
+
+    /**
+     * Called only from the expired-plan branch in StrategicModule. The prior
+     * valid plan remains in place until the exact incremental index is READY.
+     */
+    public static boolean strategicJumpDeferExpiredPlan(LocationAPI current,
+                                                         LocationAPI requested) {
+        PrepatcherConfig c = config;
+        if (current == null || c == null || !c.strategicJumpDestinationIndex) {
+            return false;
+        }
+        long generation = campaignCacheGeneration;
+        if (!campaignCachesReady(generation)) return true;
+        int capability = strategicJumpIndexCapability();
+        if (capability == STRATEGIC_JUMP_CAPABILITY_PENDING) return true;
+        if (capability != STRATEGIC_JUMP_CAPABILITY_READY) return false;
+        try {
+            return StarsectorPrepatcherStrategicJumpIndex.deferExpiredPlan(
+                    current, JumpPoint.class, c, generation);
+        } catch (Throwable failure) {
+            strategicJumpRuntimeCapability = STRATEGIC_JUMP_CAPABILITY_FAILED;
+            return false;
+        }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static List strategicJumpVanillaSource(LocationAPI current, Class jumpPointType) {
+        try {
+            return current == null ? null : current.getEntities(jumpPointType);
+        } catch (Throwable ignored) {
+            return Collections.emptyList();
+        }
+    }
+
+    public static void strategicJumpDestinationsChanged(JumpPointAPI jumpPoint) {
+        try {
+            PrepatcherConfig c = config;
+            if (c != null && c.strategicJumpDestinationIndex) {
+                StarsectorPrepatcherStrategicJumpIndex.destinationsChanged(jumpPoint);
+            }
+        } catch (Throwable ignored) {
+            // Mutation semantics never depend on this optional index.
+        }
+    }
+
+    public static void strategicJumpDestinationAdded(
+            JumpPointAPI jumpPoint, JumpPointAPI.JumpDestination destination) {
+        try {
+            PrepatcherConfig c = config;
+            if (c != null && c.strategicJumpDestinationIndex) {
+                StarsectorPrepatcherStrategicJumpIndex.destinationAdded(
+                        jumpPoint, destination);
+            }
+        } catch (Throwable ignored) {
+            // Mutation semantics never depend on this optional index.
+        }
+    }
+
+    public static void strategicJumpDestinationRetargeted(
+            JumpPointAPI.JumpDestination destination) {
+        try {
+            PrepatcherConfig c = config;
+            if (c != null && c.strategicJumpDestinationIndex) {
+                StarsectorPrepatcherStrategicJumpIndex.destinationRetargeted(destination);
+            }
+        } catch (Throwable ignored) {
+            // Mutation semantics never depend on this optional index.
+        }
+    }
+
+    public static void strategicJumpLocationEntityChanged(LocationAPI location,
+                                                           Object entity) {
+        try {
+            PrepatcherConfig c = config;
+            if (c != null && c.strategicJumpDestinationIndex) {
+                StarsectorPrepatcherStrategicJumpIndex.locationEntityChanged(
+                        location, entity);
+            }
+        } catch (Throwable ignored) {
+            // Location mutation semantics never depend on this optional index.
+        }
+    }
+
+    private static int strategicJumpIndexCapability() {
+        int cached = strategicJumpRuntimeCapability;
+        if (cached == STRATEGIC_JUMP_CAPABILITY_READY
+                || cached == STRATEGIC_JUMP_CAPABILITY_FAILED) return cached;
+
+        String maintenance = System.getProperty(STRATEGIC_JUMP_MAINTENANCE_STATUS);
+        String first = System.getProperty(STRATEGIC_JUMP_FIRST_STATUS);
+        String source = System.getProperty(STRATEGIC_JUMP_SOURCE_STATUS);
+        String point = System.getProperty(STRATEGIC_JUMP_POINT_STATUS);
+        String location = System.getProperty(STRATEGIC_JUMP_LOCATION_STATUS);
+        String destination = System.getProperty(STRATEGIC_JUMP_DESTINATION_STATUS);
+        if (patchApplied(maintenance) && patchApplied(first) && patchApplied(source)
+                && patchApplied(point)
+                && patchApplied(location) && patchApplied(destination)) {
+            strategicJumpRuntimeCapability = STRATEGIC_JUMP_CAPABILITY_READY;
+            return STRATEGIC_JUMP_CAPABILITY_READY;
+        }
+        if (patchFailed(maintenance) || patchFailed(first) || patchFailed(source)
+                || patchFailed(point)
+                || patchFailed(location) || patchFailed(destination)) {
+            strategicJumpRuntimeCapability = STRATEGIC_JUMP_CAPABILITY_FAILED;
+            return STRATEGIC_JUMP_CAPABILITY_FAILED;
+        }
+        return STRATEGIC_JUMP_CAPABILITY_PENDING;
+    }
+
+    private static boolean patchApplied(String status) {
+        return "APPLIED".equals(status) || "ALREADY_APPLIED".equals(status);
+    }
+
+    private static boolean patchFailed(String status) {
+        return status != null && !patchApplied(status);
+    }
+
+    // ---------------------------------------------------------------------
     // Route/pathfinding indexes.
     //
     // O0Oo.getNextStep() and getLastLegDistance() preserve all of their original
@@ -7306,6 +7540,7 @@ public final class StarsectorPrepatcherHooks {
                         + ", routeSystemIndexHits=" + ROUTE_SYSTEM_INDEX_HITS.sumThenReset()
                         + ", routeSystemIndexBuilds=" + ROUTE_SYSTEM_INDEX_BUILDS.sumThenReset()
                         + ", routeSystemIndexFallbacks=" + ROUTE_SYSTEM_INDEX_FALLBACKS.sumThenReset()
+                        + StarsectorPrepatcherStrategicJumpIndex.statsAndReset()
                         + ", economyLocationChecks=" + ECONOMY_LOCATION_CHECKS.sumThenReset()
                         + ", economyLocationDirty=" + ECONOMY_LOCATION_DIRTY.sumThenReset()
                         + ", economyLocationSkips=" + ECONOMY_LOCATION_SKIPS.sumThenReset()

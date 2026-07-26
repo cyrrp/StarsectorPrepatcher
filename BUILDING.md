@@ -35,7 +35,7 @@ agent JAR как обычные entries `com/fs/starfarer/api/StarsectorPrepatch
 не должен иметь на них статических ссылок: `RuntimeInstaller` читает эти entries как bytes и через
 `MethodHandles.Lookup.defineClass()` определяет их в system/game loader. Build завершается ошибкой,
 если в JAR нет обязательных top-level entries или exact inventory текущего payload отличается от
-86 top-level/nested class entries:
+108 top-level/nested class entries:
 
 ```text
 com/fs/starfarer/api/StarsectorPrepatcherHooks.class
@@ -43,6 +43,7 @@ com/fs/starfarer/api/StarsectorPrepatcherHyperspaceHooks.class
 com/fs/starfarer/api/StarsectorPrepatcherPresentationHooks.class
 com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge.class
 com/fs/starfarer/api/StarsectorPrepatcherTempModHooks.class
+com/fs/starfarer/api/StarsectorPrepatcherStrategicJumpIndex.class
 ```
 
 В конце сборка атомарно регенерирует `SHA256SUMS.txt` для поставляемых файлов. Сам manifest,

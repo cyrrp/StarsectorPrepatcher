@@ -16,7 +16,18 @@
 
 ## [Unreleased]
 
-Пока нет.
+### Добавлено
+
+- Location-agnostic incremental index `StrategicModule` по destination `LocationAPI`. Cold build,
+  replacement, point refresh и continuous audit разделены на элементарные операции под единым
+  wall-clock/work-unit budget; lookup не выполняет синхронный полный scan. Пока snapshot не готов,
+  существующий истёкший `JumpPlan` сохраняется, а новый rebuild откладывается. Добавлены точные hooks
+  `JumpPoint`, `JumpDestination` и `BaseLocation`, negative-result cache, failure cooldown, bounded LRU,
+  fixed weak owner accelerator и campaign-generation reset без weak-key/value retention cycle.
+- Full-call enforcement стратегического budget: lock/selection/queues/LRU/cleanup теперь входят в
+  token bucket; retry LRU scan заменён indexed min-heap, audit scan — O(1) round-robin queue. Capacity
+  pressure больше не вытесняет незавершённые builds. Добавлены phase/queue/maintenance-overrun и
+  oldest deferred-route diagnostics для проверки gameplay latency debt.
 
 ## [0.11.0] - 2026-07-24
 

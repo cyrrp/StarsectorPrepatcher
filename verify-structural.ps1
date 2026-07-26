@@ -142,6 +142,50 @@ if ($coreWorldsStructuralExitCode -ne 0) {
     throw 'Core-worlds structural matcher verification failed.'
 }
 
+$strategicJumpReport =
+    Join-Path $reportDir 'strategic-jump-destination-first.txt'
+$ErrorActionPreference = 'Continue'
+try {
+    $strategicJumpOutput = @(& java @exports -cp $classPath `
+        com.starsector.prepatcher.agent.StrategicJumpDestinationFirstTransformerTest `
+        $verificationConfig (Join-Path $core 'starfarer_obf.jar') 2>&1)
+    $strategicJumpExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$strategicJumpLines = @(
+    $strategicJumpOutput | ForEach-Object { $_.ToString() })
+$strategicJumpLines
+[IO.File]::WriteAllLines(
+    $strategicJumpReport,
+    [string[]] $strategicJumpLines,
+    $utf8)
+if ($strategicJumpExitCode -ne 0) {
+    throw 'Strategic jump destination-first verification failed.'
+}
+
+$strategicJumpIndexReport = Join-Path $reportDir 'strategic-jump-destination-index.txt'
+$ErrorActionPreference = 'Continue'
+try {
+    $strategicJumpIndexOutput = @(& java @exports -cp $classPath `
+        com.starsector.prepatcher.agent.StrategicJumpDestinationIndexTransformerTest `
+        $verificationConfig (Join-Path $core 'starfarer_obf.jar') `
+        (Join-Path $core 'starfarer.api.jar') 2>&1)
+    $strategicJumpIndexExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$strategicJumpIndexLines = @(
+    $strategicJumpIndexOutput | ForEach-Object { $_.ToString() })
+$strategicJumpIndexLines
+[IO.File]::WriteAllLines(
+    $strategicJumpIndexReport,
+    [string[]] $strategicJumpIndexLines,
+    $utf8)
+if ($strategicJumpIndexExitCode -ne 0) {
+    throw 'Strategic jump destination index verification failed.'
+}
+
 $presentationStructuralPlanReport =
     Join-Path $reportDir 'fast-forward-presentation-structural-plan.txt'
 $ErrorActionPreference = 'Continue'
@@ -212,7 +256,8 @@ $runtimeCp = @(
     (Join-Path $core 'lwjgl.jar'),
     (Join-Path $core 'lwjgl_util.jar'),
     (Join-Path $core 'xstream-1.4.10.jar'),
-    (Join-Path $core 'jaxb-api-2.4.0-b180830.0359.jar')
+    (Join-Path $core 'jaxb-api-2.4.0-b180830.0359.jar'),
+    (Join-Path $core 'json.jar')
 ) -join [IO.Path]::PathSeparator
 $runtimeReport = Join-Path $reportDir 'runtime-regression.txt'
 $runtimeLines = [System.Collections.Generic.List[string]]::new()
@@ -228,7 +273,8 @@ foreach ($test in @(
     'com.starsector.prepatcher.runtime.MarketNoOpRuntimeRegressionTest',
     'com.starsector.prepatcher.runtime.TempModExpiryRuntimeRegressionTest',
     'com.starsector.prepatcher.runtime.LoadingSaveRuntimeRegressionTest',
-    'com.starsector.prepatcher.runtime.AoTDDomainRevisionRuntimeTest'
+    'com.starsector.prepatcher.runtime.AoTDDomainRevisionRuntimeTest',
+    'com.fs.starfarer.api.StrategicJumpDestinationIndexRuntimeTest'
 )) {
     $runtimeLines.Add("== $test ==")
     $ErrorActionPreference = 'Continue'

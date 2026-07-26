@@ -30,6 +30,7 @@ final class PresentationStructuralContract {
     static final String CAMPAIGN_ENGINE = "com/fs/starfarer/campaign/CampaignEngine";
     static final String BASE_LOCATION = "com/fs/starfarer/campaign/BaseLocation";
     static final String BASE_CAMPAIGN_ENTITY = "com/fs/starfarer/campaign/BaseCampaignEntity";
+    static final String JUMP_POINT = "com/fs/starfarer/campaign/JumpPoint";
     static final String HYPERSPACE_TERRAIN =
             "com/fs/starfarer/api/impl/campaign/terrain/HyperspaceTerrainPlugin";
 
@@ -38,6 +39,7 @@ final class PresentationStructuralContract {
             CAMPAIGN_ENGINE,
             BASE_LOCATION,
             BASE_CAMPAIGN_ENTITY,
+            JUMP_POINT,
             HYPERSPACE_TERRAIN);
 
     private PresentationStructuralContract() {}
@@ -159,6 +161,16 @@ final class PresentationStructuralContract {
                     add(expected, "advance", "(F)V", "advanceSensorFader",
                             "(Lcom/fs/graphics/util/Fader;F)V", 2);
                 }
+            }
+            case JUMP_POINT -> {
+                add(expected, "advance", "(F)V", "advanceDynamicRingBand",
+                        "(Lcom/fs/starfarer/campaign/DynamicRingBand;F)V", 1);
+                add(expected, "advance", "(F)V", "advanceJumpRingData",
+                        "(Lcom/fs/starfarer/campaign/JumpPoint$RingData;F)V", 2);
+                add(expected, "advance", "(F)V", "advanceJumpCoronaData",
+                        "(Lcom/fs/starfarer/campaign/JumpPoint$CoronaData;F)V", 1);
+                add(expected, "advance", "(F)V", "advancePlanetGraphics",
+                        "(Lcom/fs/starfarer/combat/entities/terrain/Planet;F)V", 1);
             }
             case HYPERSPACE_TERRAIN -> {
                 add(expected, "advance", "(F)V", "applyLowPassFilter",

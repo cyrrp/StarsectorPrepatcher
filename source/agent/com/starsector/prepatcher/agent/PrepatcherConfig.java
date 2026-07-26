@@ -23,6 +23,18 @@ public final class PrepatcherConfig {
     public final boolean gridLineCap;
     public final boolean campaignListenerThrottle;
     public final boolean routeJumpPointIndex;
+    public final boolean strategicJumpDestinationFirst;
+    public final boolean strategicJumpDestinationIndex;
+    /** Wall-clock work admitted per 16.67 ms, shared by all strategic indexes. */
+    public final int strategicJumpIndexBudgetMicros;
+    /** Secondary bound for exceptionally cheap work units in one maintenance call. */
+    public final int strategicJumpIndexMaxWorkUnits;
+    /** Maximum new location states admitted per 16.67 ms. */
+    public final int strategicJumpIndexAdmissionBurst;
+    /** Strong LRU bound; campaign generation changes clear all states. */
+    public final int strategicJumpIndexMaxLocations;
+    public final int strategicJumpIndexIdleTtlMs;
+    public final int strategicJumpIndexFailureRetryMs;
     public final boolean campaignSnapshotReuse;
     public final boolean entityScriptSnapshotReuse;
     public final boolean emptyMemoryAdvanceFastPath;
@@ -142,6 +154,28 @@ public final class PrepatcherConfig {
         gridLineCap = bool("patch.gridLineCap", true);
         campaignListenerThrottle = bool("patch.campaignListenerThrottle", true);
         routeJumpPointIndex = bool("patch.routeJumpPointIndex", true);
+        strategicJumpDestinationFirst = bool(
+                "patch.strategicJumpDestinationFirst", false);
+        boolean requestedStrategicJumpDestinationIndex = bool(
+                "patch.strategicJumpDestinationIndex", false);
+        if (requestedStrategicJumpDestinationIndex && !strategicJumpDestinationFirst) {
+            PrepatcherLog.warn("patch.strategicJumpDestinationIndex requires "
+                    + "patch.strategicJumpDestinationFirst; the destination index is disabled");
+            requestedStrategicJumpDestinationIndex = false;
+        }
+        strategicJumpDestinationIndex = requestedStrategicJumpDestinationIndex;
+        strategicJumpIndexBudgetMicros = integer(
+                "strategicJump.indexBudgetMicros", 250, 25, 5_000);
+        strategicJumpIndexMaxWorkUnits = integer(
+                "strategicJump.indexMaxWorkUnits", 512, 1, 4_096);
+        strategicJumpIndexAdmissionBurst = integer(
+                "strategicJump.indexAdmissionBurst", 8, 1, 1_024);
+        strategicJumpIndexMaxLocations = integer(
+                "strategicJump.indexMaxLocations", 128, 8, 8_192);
+        strategicJumpIndexIdleTtlMs = integer(
+                "strategicJump.indexIdleTtlMs", 120_000, 1_000, 86_400_000);
+        strategicJumpIndexFailureRetryMs = integer(
+                "strategicJump.indexFailureRetryMs", 5_000, 100, 300_000);
         campaignSnapshotReuse = bool("patch.campaignSnapshotReuse", true);
         entityScriptSnapshotReuse = bool("patch.entityScriptSnapshotReuse", true);
         emptyMemoryAdvanceFastPath = bool("patch.emptyMemoryAdvanceFastPath", true);
