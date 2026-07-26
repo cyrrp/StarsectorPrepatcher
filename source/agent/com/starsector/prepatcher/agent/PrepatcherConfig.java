@@ -42,6 +42,8 @@ public final class PrepatcherConfig {
     public final boolean coreWorldsSkipFastForwardIterations;
     public final boolean coreWorldsCheckMemoryExpiry;
     public final int coreWorldsValidationFrames;
+    /** Bounded audit for direct mutations of BaseLocation.getTags() live collections. */
+    public final int coreWorldsAuditSystemsPerFrame;
     public final boolean economyLocationCache;
     public final boolean economyPersistentSnapshots;
     public final boolean commodityEventModDirtyCache;
@@ -189,6 +191,8 @@ public final class PrepatcherConfig {
         coreWorldsCheckMemoryExpiry = bool("coreWorlds.checkMemoryExpiry", true);
         coreWorldsValidationFrames = integer(
                 "coreWorlds.validationFrames", 1, 1, 1_000_000);
+        coreWorldsAuditSystemsPerFrame = integer(
+                "coreWorlds.auditSystemsPerFrame", 64, 1, 16_384);
         economyLocationCache = bool("patch.economyLocationCache", true);
         warnRemovedEconomySnapshotReuse();
         economyPersistentSnapshots = bool("patch.economyPersistentSnapshots", false);

@@ -399,7 +399,8 @@ public final class DocumentationConsistencyTest {
                 "market.structureAuditFrames", "600",
                 "commodity.temporalAuditFrames", "300",
                 "market.noOpIndustryAuditFrames", "600",
-                "market.remote.constructionAuditBatches", "180");
+                "market.remote.constructionAuditBatches", "180",
+                "coreWorlds.auditSystemsPerFrame", "64");
         for (String relative : List.of(
                 "prepatcher.properties",
                 "profiles/safe.properties",

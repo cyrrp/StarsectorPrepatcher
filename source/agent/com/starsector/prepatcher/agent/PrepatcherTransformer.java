@@ -61,6 +61,8 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             "com/fs/starfarer/api/StarsectorPrepatcherTempModHooks";
     private static final String CORE_WORLDS_RUNTIME =
             "com/fs/starfarer/api/StarsectorPrepatcherCoreWorldsRuntime";
+    private static final String CORE_WORLDS_PATCH_ID =
+            "coreWorldsExtentCache";
     private static final int MARKET_SCHEDULER_COMPONENT_ENGINE = 1;
     private static final int MARKET_SCHEDULER_COMPONENT_ECONOMY = 2;
     private static final int MARKET_SCHEDULER_COMPONENT_ENTITY = 4;
@@ -381,6 +383,10 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             case CAMPAIGN_STATE -> apply(state, "marketScheduler", config.marketScheduler,
                     this::patchMarketSchedulerBatchProtocol);
             case CAMPAIGN_ENGINE -> {
+                // The incremental core-worlds contract spans three independent classes.
+                // This CampaignEngine surface owns authoritative system add/remove events.
+                apply(state, CORE_WORLDS_PATCH_ID,
+                        config.coreWorldsExtentCache, this::patchCoreWorldsTopologyHooks);
                 apply(state, "campaignCacheLifecycle", campaignCacheLifecycleEnabled(),
                         this::patchCampaignCacheLifecycle);
                 apply(state, "marketScheduler", config.marketScheduler,
@@ -408,6 +414,9 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
                     config.strategicJumpDestinationIndex,
                     this::patchStrategicJumpDestinationRetarget);
             case BASE_LOCATION -> {
+                // BaseLocation owns authoritative addTag/removeTag/clearTags events.
+                apply(state, CORE_WORLDS_PATCH_ID,
+                        config.coreWorldsExtentCache, this::patchCoreWorldsTagHooks);
                 apply(state, "campaignSnapshotReuse",
                         config.campaignSnapshotReuse, this::patchCampaignSnapshotReuse);
                 apply(state, STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID,
@@ -423,7 +432,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             }
             case MEMORY -> apply(state, "emptyMemoryAdvanceFastPath",
                     config.emptyMemoryAdvanceFastPath, this::patchEmptyMemoryAdvanceFastPath);
-            case CORE_SCRIPT -> apply(state, "coreWorldsExtentCache",
+            case CORE_SCRIPT -> apply(state, CORE_WORLDS_PATCH_ID,
                     config.coreWorldsExtentCache, this::patchCoreWorldsExtentCache);
             case ECONOMY -> apply(state, ECONOMY_ADVANCE_PLAN_PATCH_ID,
                     economyAdvancePlanEnabled(), this::patchEconomyAdvancePlan);
@@ -805,13 +814,14 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             case Z -> config.intelArrowRendering;
             case EVENTS -> config.intelCallbackCache || config.intelReconciliation;
             case CAMPAIGN_STATE -> config.marketScheduler;
-            case CAMPAIGN_ENGINE -> campaignCacheLifecycleEnabled() || config.campaignListenerThrottle;
+            case CAMPAIGN_ENGINE -> config.coreWorldsExtentCache
+                    || campaignCacheLifecycleEnabled() || config.campaignListenerThrottle;
             case COURSE_WIDGET -> config.routeJumpPointIndex;
             case STRATEGIC_MODULE -> config.strategicJumpDestinationFirst
                     || config.strategicJumpDestinationIndex;
             case JUMP_POINT, JUMP_DESTINATION -> config.strategicJumpDestinationIndex;
-            case BASE_LOCATION -> config.campaignSnapshotReuse
-                    || config.strategicJumpDestinationIndex;
+            case BASE_LOCATION -> config.coreWorldsExtentCache
+                    || config.campaignSnapshotReuse || config.strategicJumpDestinationIndex;
             case BASE_CAMPAIGN_ENTITY -> config.entityScriptSnapshotReuse
                     || config.marketScheduler;
             case MEMORY -> config.emptyMemoryAdvanceFastPath;
@@ -4493,6 +4503,324 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
         }
     }
 
+
+    /**
+     * Adds notifications to the two authoritative CampaignEngine system-list mutations.
+     * Deferred removal already funnels through removeStarSystem(), so no advance-method
+     * surface is required and this remains independent from the market-scheduler patch.
+     */
+    private PatchReport patchCoreWorldsTopologyHooks(ClassNode node) {
+        String sectorDesc = "Lcom/fs/starfarer/api/campaign/SectorAPI;";
+        String systemDesc = "Lcom/fs/starfarer/api/campaign/StarSystemAPI;";
+        String hookDesc = "(" + sectorDesc + systemDesc + ")V";
+        MethodNode create = requireMethod(node, "createStarSystem",
+                "(Ljava/lang/String;)" + systemDesc);
+        MethodNode remove = requireMethod(node, "removeStarSystem",
+                "(" + systemDesc + ")V");
+        if ((create.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0
+                || (remove.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
+            throw mismatch("CampaignEngine core-worlds topology methods have no code");
+        }
+
+        AbstractInsnNode createReturn = onlyInsn(opcodeReturns(
+                create, Opcodes.ARETURN, "CampaignEngine.createStarSystem"),
+                "CampaignEngine.createStarSystem ARETURN");
+        AbstractInsnNode removeReturn = onlyInsn(campaignReturns(remove),
+                "CampaignEngine.removeStarSystem RETURN");
+        int systemLocal = requireCoreWorldsCreateSystemLocal(node.name, create);
+        int removeArgument = argumentLocal(remove, 0);
+        requireCoreWorldsRemoveShape(node.name, remove, removeArgument, removeReturn);
+
+        int createHooks = countCalls(create, Opcodes.INVOKESTATIC,
+                CORE_WORLDS_RUNTIME, "starSystemAdded", hookDesc);
+        int removeHooks = countCalls(remove, Opcodes.INVOKESTATIC,
+                CORE_WORLDS_RUNTIME, "starSystemRemoved", hookDesc);
+        if (createHooks == 1 && removeHooks == 1) {
+            validateCoreWorldsCreateHook(create, createReturn, hookDesc, systemLocal);
+            validateCoreWorldsVoidHook(remove, removeReturn,
+                    "starSystemRemoved", hookDesc, removeArgument);
+            throw already("CampaignEngine core-worlds topology hooks match");
+        }
+        if (createHooks != 0 || removeHooks != 0) {
+            throw mismatch("CampaignEngine core-worlds topology hook state is partial: create="
+                    + createHooks + "/1, remove=" + removeHooks + "/1");
+        }
+
+        // ARETURN already has the return object below the hook arguments on the operand stack.
+        // Calling the hook immediately before ARETURN consumes only the two newly pushed values
+        // and leaves the original return value untouched.
+        InsnList createHook = new InsnList();
+        createHook.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        createHook.add(new VarInsnNode(Opcodes.ALOAD, systemLocal));
+        createHook.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
+                CORE_WORLDS_RUNTIME, "starSystemAdded", hookDesc, false));
+        create.instructions.insertBefore(createReturn, createHook);
+
+        InsnList removeHook = new InsnList();
+        removeHook.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        removeHook.add(new VarInsnNode(Opcodes.ALOAD, removeArgument));
+        removeHook.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
+                CORE_WORLDS_RUNTIME, "starSystemRemoved", hookDesc, false));
+        remove.instructions.insertBefore(removeReturn, removeHook);
+
+        validateCoreWorldsCreateHook(create, createReturn, hookDesc, systemLocal);
+        validateCoreWorldsVoidHook(remove, removeReturn,
+                "starSystemRemoved", hookDesc, removeArgument);
+        PatchReport report = new PatchReport();
+        report.add("CampaignEngine core-worlds system membership epilogues", 2);
+        return report;
+    }
+
+    private static int requireCoreWorldsCreateSystemLocal(
+            String owner, MethodNode method) {
+        TypeInsnNode allocation = null;
+        int allocations = 0;
+        for (AbstractInsnNode insn : method.instructions.toArray()) {
+            if (insn instanceof TypeInsnNode type && type.getOpcode() == Opcodes.NEW
+                    && type.desc.equals("com/fs/starfarer/campaign/StarSystem")) {
+                allocation = type;
+                allocations++;
+            }
+        }
+        requireCount("CampaignEngine.createStarSystem StarSystem allocations", allocations, 1);
+        MethodInsnNode constructor = only(calls(method, Opcodes.INVOKESPECIAL,
+                "com/fs/starfarer/campaign/StarSystem", "<init>",
+                "(Ljava/lang/String;)V"),
+                "CampaignEngine.createStarSystem constructor");
+        requireVar(previousMeaningful(constructor), Opcodes.ALOAD, argumentLocal(method, 0),
+                "CampaignEngine.createStarSystem constructor name argument");
+        AbstractInsnNode duplicate = previousMeaningful(previousMeaningful(constructor));
+        if (duplicate == null || duplicate.getOpcode() != Opcodes.DUP
+                || previousMeaningful(duplicate) != allocation) {
+            throw mismatch("CampaignEngine.createStarSystem allocation/constructor sequence changed");
+        }
+        AbstractInsnNode storeInsn = nextMeaningful(constructor);
+        if (!(storeInsn instanceof VarInsnNode store)
+                || store.getOpcode() != Opcodes.ASTORE) {
+            throw mismatch("CampaignEngine.createStarSystem result is not stored in a local");
+        }
+        int systemLocal = store.var;
+        requireCount("CampaignEngine.createStarSystem system-local stores",
+                countStores(method, systemLocal), 1);
+
+        MethodInsnNode addition = only(calls(method, Opcodes.INVOKEINTERFACE,
+                "java/util/List", "add", "(Ljava/lang/Object;)Z"),
+                "CampaignEngine.createStarSystem List.add");
+        Frame<SourceValue>[] frames = sourceFrames(owner, method);
+        if (!sourceIsFieldDesc(receiverSource(method, addition, frames), "Ljava/util/List;")) {
+            throw mismatch("CampaignEngine.createStarSystem add receiver is not a List field");
+        }
+        int addedLocal = requireLoadedLocal(
+                argumentSource(method, addition, frames, 0), Opcodes.ALOAD,
+                "CampaignEngine.createStarSystem added system");
+        if (addedLocal != systemLocal) {
+            throw mismatch("CampaignEngine.createStarSystem adds a different local");
+        }
+        // Return materialization is deliberately not constrained. The hook uses the exact local
+        // proven to be inserted into CampaignEngine.starSystems, while preserving whatever
+        // compatible expression the method places on the ARETURN stack.
+        return systemLocal;
+    }
+
+    private static void requireCoreWorldsRemoveShape(
+            String owner, MethodNode method, int systemLocal, AbstractInsnNode returnInsn) {
+        MethodInsnNode removal = only(calls(method, Opcodes.INVOKEINTERFACE,
+                "java/util/List", "remove", "(Ljava/lang/Object;)Z"),
+                "CampaignEngine.removeStarSystem List.remove");
+        Frame<SourceValue>[] frames = sourceFrames(owner, method);
+        if (!sourceIsFieldDesc(receiverSource(method, removal, frames), "Ljava/util/List;")) {
+            throw mismatch("CampaignEngine.removeStarSystem remove receiver is not a List field");
+        }
+        int removedLocal = requireLoadedLocal(
+                argumentSource(method, removal, frames, 0), Opcodes.ALOAD,
+                "CampaignEngine.removeStarSystem argument");
+        if (removedLocal != systemLocal) {
+            throw mismatch("CampaignEngine.removeStarSystem removes a different local");
+        }
+        AbstractInsnNode discard = nextMeaningful(removal);
+        if (discard == null || discard.getOpcode() != Opcodes.POP) {
+            throw mismatch("CampaignEngine.removeStarSystem removal result is not discarded");
+        }
+        // Compatible builds may perform unrelated bookkeeping after the authoritative list
+        // removal. The single proven normal RETURN remains the safe notification boundary.
+    }
+
+    private static void validateCoreWorldsCreateHook(
+            MethodNode method, AbstractInsnNode returnInsn, String hookDesc, int systemLocal) {
+        MethodInsnNode hook = asMethod(previousMeaningful(returnInsn),
+                "CampaignEngine.createStarSystem core-worlds hook");
+        requireCall(hook, Opcodes.INVOKESTATIC, CORE_WORLDS_RUNTIME,
+                "starSystemAdded", hookDesc,
+                "CampaignEngine.createStarSystem core-worlds hook");
+        requireVar(previousMeaningful(hook), Opcodes.ALOAD, systemLocal,
+                "CampaignEngine.createStarSystem hook system argument");
+        requireVar(previousMeaningful(previousMeaningful(hook)), Opcodes.ALOAD, 0,
+                "CampaignEngine.createStarSystem hook sector argument");
+    }
+
+    private static void validateCoreWorldsVoidHook(
+            MethodNode method, AbstractInsnNode returnInsn, String hookName,
+            String hookDesc, int systemLocal) {
+        MethodInsnNode hook = asMethod(previousMeaningful(returnInsn),
+                method.name + " core-worlds hook");
+        requireCall(hook, Opcodes.INVOKESTATIC, CORE_WORLDS_RUNTIME,
+                hookName, hookDesc, method.name + " core-worlds hook");
+        requireVar(previousMeaningful(hook), Opcodes.ALOAD, systemLocal,
+                method.name + " core-worlds system argument");
+        requireVar(previousMeaningful(previousMeaningful(hook)), Opcodes.ALOAD, 0,
+                method.name + " core-worlds sector argument");
+    }
+
+    /**
+     * Notifies the core-worlds index after all normal BaseLocation tag API exits.
+     * Direct edits through the live getTags() collection remain covered by the
+     * bounded rotating non-core audit in the runtime.
+     */
+    private PatchReport patchCoreWorldsTagHooks(ClassNode node) {
+        String locationDesc = "Lcom/fs/starfarer/api/campaign/LocationAPI;";
+        String tagHookDesc = "(" + locationDesc + "Ljava/lang/String;)V";
+        String clearHookDesc = "(" + locationDesc + ")V";
+        MethodNode add = requireMethod(node, "addTag", "(Ljava/lang/String;)V");
+        MethodNode remove = requireMethod(node, "removeTag", "(Ljava/lang/String;)V");
+        MethodNode clear = requireMethod(node, "clearTags", "()V");
+        if ((add.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0
+                || (remove.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0
+                || (clear.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
+            throw mismatch("BaseLocation core-worlds tag methods have no code");
+        }
+
+        requireCoreWorldsTagMutationShape(node.name, add,
+                "add", "(Ljava/lang/Object;)Z", true);
+        requireCoreWorldsTagMutationShape(node.name, remove,
+                "remove", "(Ljava/lang/Object;)Z", true);
+        requireCoreWorldsTagMutationShape(node.name, clear,
+                "clear", "()V", false);
+        List<AbstractInsnNode> addReturns = campaignReturns(add);
+        List<AbstractInsnNode> removeReturns = campaignReturns(remove);
+        List<AbstractInsnNode> clearReturns = campaignReturns(clear);
+        requireCount("BaseLocation.addTag normal returns", addReturns.size(), 1);
+        requireCount("BaseLocation.removeTag normal returns", removeReturns.size(), 2);
+        requireCount("BaseLocation.clearTags normal returns", clearReturns.size(), 1);
+
+        int addHooks = countCalls(add, Opcodes.INVOKESTATIC,
+                CORE_WORLDS_RUNTIME, "locationTagAdded", tagHookDesc);
+        int removeHooks = countCalls(remove, Opcodes.INVOKESTATIC,
+                CORE_WORLDS_RUNTIME, "locationTagRemoved", tagHookDesc);
+        int clearHooks = countCalls(clear, Opcodes.INVOKESTATIC,
+                CORE_WORLDS_RUNTIME, "locationTagsCleared", clearHookDesc);
+        if (addHooks == addReturns.size()
+                && removeHooks == removeReturns.size()
+                && clearHooks == clearReturns.size()) {
+            validateCoreWorldsTagHookReturns(add, addReturns,
+                    "locationTagAdded", tagHookDesc, true);
+            validateCoreWorldsTagHookReturns(remove, removeReturns,
+                    "locationTagRemoved", tagHookDesc, true);
+            validateCoreWorldsTagHookReturns(clear, clearReturns,
+                    "locationTagsCleared", clearHookDesc, false);
+            throw already("BaseLocation core-worlds tag hooks match");
+        }
+        if (addHooks != 0 || removeHooks != 0 || clearHooks != 0) {
+            throw mismatch("BaseLocation core-worlds tag hook state is partial: add="
+                    + addHooks + "/" + addReturns.size() + ", remove="
+                    + removeHooks + "/" + removeReturns.size() + ", clear="
+                    + clearHooks + "/" + clearReturns.size());
+        }
+
+        insertCoreWorldsTagHooks(add, addReturns,
+                "locationTagAdded", tagHookDesc, true);
+        insertCoreWorldsTagHooks(remove, removeReturns,
+                "locationTagRemoved", tagHookDesc, true);
+        insertCoreWorldsTagHooks(clear, clearReturns,
+                "locationTagsCleared", clearHookDesc, false);
+        validateCoreWorldsTagHookReturns(add, addReturns,
+                "locationTagAdded", tagHookDesc, true);
+        validateCoreWorldsTagHookReturns(remove, removeReturns,
+                "locationTagRemoved", tagHookDesc, true);
+        validateCoreWorldsTagHookReturns(clear, clearReturns,
+                "locationTagsCleared", clearHookDesc, false);
+        PatchReport report = new PatchReport();
+        report.add("BaseLocation core-tag mutation epilogues",
+                addReturns.size() + removeReturns.size() + clearReturns.size());
+        return report;
+    }
+
+    private static void requireCoreWorldsTagMutationShape(
+            String owner, MethodNode method, String operation,
+            String descriptor, boolean stringArgument) {
+        MethodInsnNode mutation = only(calls(method, Opcodes.INVOKEVIRTUAL,
+                "java/util/HashSet", operation, descriptor),
+                "BaseLocation." + method.name + " HashSet." + operation);
+        Frame<SourceValue>[] frames = sourceFrames(owner, method);
+        if (!sourceIsFieldDesc(receiverSource(method, mutation, frames),
+                "Ljava/util/HashSet;")) {
+            throw mismatch("BaseLocation." + method.name
+                    + " mutation receiver is not the tag HashSet field");
+        }
+        if (stringArgument) {
+            int loaded = requireLoadedLocal(
+                    argumentSource(method, mutation, frames, 0), Opcodes.ALOAD,
+                    "BaseLocation." + method.name + " tag argument");
+            if (loaded != argumentLocal(method, 0)) {
+                throw mismatch("BaseLocation." + method.name
+                        + " mutates a different tag argument local");
+            }
+        }
+    }
+
+    private static void insertCoreWorldsTagHooks(
+            MethodNode method, List<AbstractInsnNode> returns,
+            String hookName, String hookDesc, boolean stringArgument) {
+        int tagLocal = stringArgument ? argumentLocal(method, 0) : -1;
+        for (AbstractInsnNode returnInsn : returns) {
+            InsnList hook = new InsnList();
+            hook.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            if (stringArgument) hook.add(new VarInsnNode(Opcodes.ALOAD, tagLocal));
+            hook.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
+                    CORE_WORLDS_RUNTIME, hookName, hookDesc, false));
+            method.instructions.insertBefore(returnInsn, hook);
+        }
+    }
+
+    private static void validateCoreWorldsTagHookReturns(
+            MethodNode method, List<AbstractInsnNode> returns,
+            String hookName, String hookDesc, boolean stringArgument) {
+        int tagLocal = stringArgument ? argumentLocal(method, 0) : -1;
+        for (AbstractInsnNode returnInsn : returns) {
+            MethodInsnNode hook = asMethod(previousMeaningful(returnInsn),
+                    method.name + " core-worlds tag hook");
+            requireCall(hook, Opcodes.INVOKESTATIC, CORE_WORLDS_RUNTIME,
+                    hookName, hookDesc, method.name + " core-worlds tag hook");
+            AbstractInsnNode locationLoad;
+            if (stringArgument) {
+                AbstractInsnNode tag = previousMeaningful(hook);
+                requireVar(tag, Opcodes.ALOAD, tagLocal,
+                        method.name + " core-worlds tag argument");
+                locationLoad = previousMeaningful(tag);
+            } else {
+                locationLoad = previousMeaningful(hook);
+            }
+            requireVar(locationLoad, Opcodes.ALOAD, 0,
+                    method.name + " core-worlds location argument");
+        }
+    }
+
+    private static AbstractInsnNode onlyInsn(
+            List<AbstractInsnNode> values, String label) {
+        if (values.size() != 1) {
+            throw mismatch(label + " expected exactly 1 site but found " + values.size());
+        }
+        return values.get(0);
+    }
+
+    private static List<AbstractInsnNode> opcodeReturns(
+            MethodNode method, int opcode, String label) {
+        ArrayList<AbstractInsnNode> returns = new ArrayList<>();
+        for (AbstractInsnNode insn : method.instructions.toArray()) {
+            if (insn.getOpcode() == opcode) returns.add(insn);
+        }
+        if (returns.isEmpty()) throw mismatch(label + " has no expected return");
+        return returns;
+    }
 
     /**
      * Replaces the terminal vanilla core-worlds recomputation only after the

@@ -16,8 +16,15 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-26
+
 ### Добавлено
 
+- Инкрементальный core-worlds index: `CampaignEngine` system topology и `BaseLocation` core-tag
+  mutations обновляют weak membership state; per-frame путь проверяет только core systems и
+  bounded audit вместо `SectorAPI.getStarSystems()` по всему сектору.
+- Fail-closed трёхклассовый structural contract, operation-count/direct-mutation/recovery и
+  weak-retention regressions для core-worlds runtime.
 - Location-agnostic incremental index `StrategicModule` по destination `LocationAPI`. Cold build,
   replacement, point refresh и continuous audit разделены на элементарные операции под единым
   wall-clock/work-unit budget; lookup не выполняет синхронный полный scan. Пока snapshot не готов,
@@ -46,11 +53,20 @@
 
 ### Исправлено
 
+- `coreWorldsExtentCache` больше не создаёт defensive `ArrayList` и не сканирует все star systems
+  каждый outer frame. После одного campaign/recovery snapshot steady state имеет стоимость O(C+B),
+  где C — число core systems, B — `coreWorlds.auditSystemsPerFrame` (по умолчанию 64). Lifecycle
+  reset/rebuild заменяет wrapper-list containers и не удерживает их прежнюю backing capacity.
 - Exact-class guard P0/P1 заменён loader-safe `ClassValue` compatibility gate: текущий
   AoTD Scheduler Fork наследует оптимизированный путь, а будущий critical override автоматически
   возвращает только этот runtime class на raw behavior без structural failure.
 - Добавлен regression на реальном `AoTDToolboxTheory.jar`, synthetic future override и GC
   disposable mod classloader.
+- Для установки с AoTD Theory of Toolbox поддерживаемый Scheduler Fork `1.0.14-spp1` объявлен
+  обязательным условием оптимальной производительности. Без AoTD форк не требуется; с оригинальным
+  AoTD Prepatcher сохраняет fail-closed/raw пути, но не обещает полный native scheduler contract.
+
+Подробности и состав проверок: [отчёт о выпуске 0.12.0](docs/releases/0.12.0.md).
 
 ## [0.11.0] - 2026-07-24
 

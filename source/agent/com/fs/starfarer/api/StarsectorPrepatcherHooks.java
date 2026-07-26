@@ -469,6 +469,7 @@ public final class StarsectorPrepatcherHooks {
         modRoot = root;
         strategicJumpRuntimeCapability = STRATEGIC_JUMP_CAPABILITY_UNKNOWN;
         StarsectorPrepatcherStrategicJumpIndex.reset();
+        StarsectorPrepatcherCoreWorldsRuntime.campaignLifecycleReset();
         CONSTRUCTION_DIAGNOSTICS = null;
         if (optimizerConfig.marketConstructionDiagnostics) {
             try {
@@ -777,6 +778,7 @@ public final class StarsectorPrepatcherHooks {
         CAMPAIGN_LISTENER_STATES = Collections.synchronizedMap(new WeakHashMap<>());
         ROUTE_JUMP_INDEXES = Collections.synchronizedMap(new WeakHashMap<>());
         ROUTE_SYSTEM_INDEXES = Collections.synchronizedMap(new WeakHashMap<>());
+        StarsectorPrepatcherCoreWorldsRuntime.campaignLifecycleReset();
         StarsectorPrepatcherStrategicJumpIndex.reset();
         ECONOMY_LOCATION_STATES = Collections.synchronizedMap(new WeakHashMap<>());
         MARKET_SCHEDULER_STATES = new WeakIdentityMap<>();

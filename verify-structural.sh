@@ -64,7 +64,7 @@ java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
 
 java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
   com.starsector.prepatcher.agent.CoreWorldsStructuralMatcherTest \
-  "$VERIFICATION_CONFIG" "$CORE/starfarer.api.jar" \
+  "$VERIFICATION_CONFIG" "$CORE/starfarer.api.jar" "$CORE/starfarer_obf.jar" \
   2>&1 | tee "$REPORT_DIR/core-worlds-structural-matcher.txt"
 
 NEX_JAR="${NEXERELIN_JAR:-$GAME_ROOT/mods/Nexerelin/jars/ExerelinCore.jar}"

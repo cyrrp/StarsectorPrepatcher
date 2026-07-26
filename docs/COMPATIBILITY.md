@@ -438,7 +438,7 @@ Telemetry schema `0.7.1`: старый `pooledRandom` называется `pool
 Structural proof показывает однозначность site, linkage, no-escape и verifier postconditions, но
 не доказывает величину ускорения. Runtime и performance evidence создаётся в `.build/reports/`, а
 проверенные выводы сохраняются в отчёте выпуска, например
-[`releases/0.11.0.md`](releases/0.11.0.md).
+[`releases/0.12.0.md`](releases/0.12.0.md).
 
 Если несколько javaagent меняют одни и те же классы, располагайте Prepatcher после них:
 transformer увидит bytes, возвращённые ранее зарегистрированными агентами. Installer обеспечивает
@@ -458,18 +458,26 @@ Prepatcher снова стал последним `-javaagent`.
 ## Presentation и structural patches
 
 Общие классы не полагаются на случайный порядок двух независимых transformer-ов. Поддерживаемая
-поддерживаемая runtime-последовательность остаётся `presentation → structural`. Все presentation
+runtime-последовательность остаётся `presentation → structural`. Все presentation
 target-классы проверяются по локальной структуре методов; SHA-256 класса и JAR не участвуют в
 compatibility decision. Presentation stage публикует owner, global feature mask и точный hook
 inventory. Structural stage проверяет их до анализа и после каждого commit. При локальном
 `SKIPPED_STRUCTURAL` presentation-класс остаётся входным, а независимые structural patches могут
 продолжить работу на своих surfaces.
 
-## AoTD Scheduler Fork Stage 8
+## AoTD Scheduler Fork
 
-The Stage 8 fork requires Prepatcher 0.11.0 and the original game `starfarer.api.jar`.
+Scheduler Fork release `1.0.14-spp1` requires Prepatcher `0.12.0`, an active compatible javaagent
+and the original game `starfarer.api.jar`. The fork is required for optimal performance when
+AoTD Theory of Toolbox is installed; it is not a dependency for configurations without AoTD.
 A partial capability profile is intentionally rejected. The legacy AoTD core-JAR replacement is
 not compatible with this profile.
+
+The owned fork is validated from its real `AoTDToolboxTheory.jar`. Its scheduler bridge is
+transformed directly, the market-share optimization is inherited only while the five critical
+methods remain vanilla-owned, and the core-worlds index is intentionally unrelated because the
+fork owns none of its three transformation surfaces. A future critical market-share override fails
+closed for that concrete runtime class instead of silently receiving inherited semantics.
 
 ## Optional Nexerelin market-share target
 

@@ -126,7 +126,8 @@ $ErrorActionPreference = 'Continue'
 try {
     $coreWorldsStructuralOutput = @(& java @exports -cp $classPath `
         com.starsector.prepatcher.agent.CoreWorldsStructuralMatcherTest `
-        $verificationConfig (Join-Path $core 'starfarer.api.jar') 2>&1)
+        $verificationConfig (Join-Path $core 'starfarer.api.jar') `
+        (Join-Path $core 'starfarer_obf.jar') 2>&1)
     $coreWorldsStructuralExitCode = $LASTEXITCODE
 } finally {
     $ErrorActionPreference = $savedErrorActionPreference

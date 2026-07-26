@@ -2,7 +2,7 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Current version: **0.11.0**. Supported game build: **Starsector 0.98a-RC8**.
+Current version: **0.12.0**. Supported game build: **Starsector 0.98a-RC8**.
 
 [![Unplayable without Prepatcher versus smooth with Prepatcher](media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
@@ -20,7 +20,7 @@ The project has a broader direction than map optimization alone:
 - keep version-specific bytecode knowledge inside the prepatcher instead of duplicating it across
   gameplay mods.
 
-The public API is a roadmap item, not a published compatibility surface in `0.11.0`. Its intended
+The public API is a roadmap item, not a published compatibility surface in `0.12.0`. Its intended
 namespace is `com.starsector.prepatcher.api`; API types will only become supported once they are
 documented and covered by compatibility tests.
 
@@ -60,6 +60,11 @@ log and warns when the mod is enabled without the startup agent.
 3. Install the agent for the launcher you use (commands below).
 4. Enable **StarsectorPrepatcher** in the launcher and start the game.
 
+If you use **AoTD — Theory of Toolbox**, install the maintained
+[Scheduler Fork](https://github.com/cyrrp/AoTD-Theory-Of-Toolbox-Scheduler-Fork), release
+`1.0.14-spp1` or newer. The fork is required for optimal AoTD performance and for the supported
+native scheduler/capability path. It is not required when AoTD is absent.
+
 On Windows, double-click `StarsectorPrepatcher.bat`, choose **Install javaagent**, and select
 Vanilla, Faster Rendering, or both. The same actions are available from a terminal:
 
@@ -98,7 +103,8 @@ The prepatcher does not modify save data, and its runtime caches are never seria
   ReachEconomy fingerprint, an ordered inactive-commodity fast path combined with the direct
   expiry-aware `MutableStatWithTempMods` scheduler, a guarded dormant inherited-`BaseIndustry`
   fast path, repeated absent commodity event-mod removal suppression, empty-script/empty-memory
-  fast paths, a structurally matched CoreScript core-worlds extent cache, and comm-relay candidates;
+  fast paths, a fail-closed incremental core-worlds index with `CampaignEngine`/`BaseLocation`
+  mutation hooks and a bounded direct-tag audit, and comm-relay candidates;
 - routing: ordered jump-point and system indexes with vanilla selection and fallback semantics;
 - combat and particles: internal scratch collections and stable deferred cleanup;
 - fast-forward presentation: final-substep coalescing for guarded campaign visuals and continuous
@@ -219,19 +225,24 @@ classloader smoke. Build details are in [`BUILDING.md`](BUILDING.md).
 - [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) — structural matching and fail-open rules;
 - [`docs/VALIDATION.md`](docs/VALIDATION.md) — regression and performance validation playbook;
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — structural discovery, architecture, tooling, and platform plan;
-- [`docs/releases/0.11.0.md`](docs/releases/0.11.0.md) — current detailed release report.
+- [`docs/releases/0.12.0.md`](docs/releases/0.12.0.md) — current detailed release report.
 
 StarsectorPrepatcher is distributed under the terms in [`LICENSE`](LICENSE).
 
 ## AoTD Scheduler Fork integration
 
-Prepatcher 0.11.0 installs a clean wrapper around the original
+Prepatcher 0.12.0 installs a clean wrapper around the original
 `BaseIndustry.getMaxDeficit()`. The preserved vanilla implementation remains active until a
 compatible AoTD Scheduler Fork registers the complete native capability profile `0x1ff`.
 Bridge schema V6 publishes campaign/economy epochs and reads the live runtime capability mask.
 Late callbacks from an older epoch are rejected; a listener fail-stop triggers one generation
 resynchronization before fallback dirtying is enabled. Do not install the obsolete modified
 `starfarer.api.jar`.
+
+The maintained Scheduler Fork `1.0.14-spp1` is required for optimal performance when AoTD Theory of
+Toolbox is installed. Prepatcher does not require AoTD or the fork in any other setup. The original
+AoTD build may use preserved fail-closed/raw paths, but it does not provide the complete supported
+native scheduler contract.
 
 The market-share P0/P0.5/P1 set also treats the owned
 `AoTDCommodityMarketData` as a supported implementation. A loader-local `ClassValue` admits the

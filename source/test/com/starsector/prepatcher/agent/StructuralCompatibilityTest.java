@@ -2531,6 +2531,10 @@ public final class StructuralCompatibilityTest {
                 expected.put("endMarketSchedulerTick", 2);
                 expected.put("marketSchedulerFastForwardIterationChanged", 1);
                 expected.put("readdChangeListenersIfNeeded", 1);
+                assertHookCount(bytes, CORE_WORLDS_RUNTIME, "starSystemAdded", 1);
+                assertHookCount(bytes, CORE_WORLDS_RUNTIME, "starSystemRemoved", 1);
+                require(hasOwnershipMarker(read(bytes), "coreWorldsExtentCache"),
+                        "CampaignEngine core-worlds marker is missing");
             }
             case PrepatcherTransformer.COURSE_WIDGET -> {
                 expected.put("routeJumpPointsForSystem", 3);
@@ -2540,6 +2544,11 @@ public final class StructuralCompatibilityTest {
                 expected.put("borrowLocationAdvanceSnapshot", 3);
                 expected.put("borrowPausedLocationSnapshot", 2);
                 expected.put("strategicJumpLocationEntityChanged", 2);
+                assertHookCount(bytes, CORE_WORLDS_RUNTIME, "locationTagAdded", 1);
+                assertHookCount(bytes, CORE_WORLDS_RUNTIME, "locationTagRemoved", 2);
+                assertHookCount(bytes, CORE_WORLDS_RUNTIME, "locationTagsCleared", 1);
+                require(hasOwnershipMarker(read(bytes), "coreWorldsExtentCache"),
+                        "BaseLocation core-worlds marker is missing");
                 require(hasOwnershipMarker(read(bytes), "strategicJumpDestinationIndex"),
                         "BaseLocation destination-index marker is missing");
             }
@@ -2552,8 +2561,11 @@ public final class StructuralCompatibilityTest {
                 // Fully inline; the previous helper-based version was measurable
                 // in real campaign telemetry.
             }
-            case PrepatcherTransformer.CORE_SCRIPT ->
-                    assertHookCount(bytes, CORE_WORLDS_RUNTIME, "update", 1);
+            case PrepatcherTransformer.CORE_SCRIPT -> {
+                assertHookCount(bytes, CORE_WORLDS_RUNTIME, "update", 1);
+                require(hasOwnershipMarker(read(bytes), "coreWorldsExtentCache"),
+                        "CoreScript core-worlds marker is missing");
+            }
             case PrepatcherTransformer.ECONOMY -> {
                 expected.put("updateEconomyLocationMapIfNeededPersistent", 1);
                 expected.put("borrowPersistentSnapshotTimed", 1);

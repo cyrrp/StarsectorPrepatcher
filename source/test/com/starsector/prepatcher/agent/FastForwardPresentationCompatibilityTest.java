@@ -38,10 +38,12 @@ public final class FastForwardPresentationCompatibilityTest {
                     "smo$patched$marketScheduler"),
             "com/fs/starfarer/campaign/CampaignEngine", Set.of(
                     "smo$patched$campaignCacheLifecycle",
+                    "smo$patched$coreWorldsExtentCache",
                     "smo$patched$marketScheduler",
                     "smo$patched$campaignListenerThrottle"),
             "com/fs/starfarer/campaign/BaseLocation", Set.of(
                     "smo$patched$campaignSnapshotReuse",
+                    "smo$patched$coreWorldsExtentCache",
                     "smo$patched$strategicJumpDestinationIndex"),
             "com/fs/starfarer/campaign/BaseCampaignEntity", Set.of(
                     "smo$patched$entityScriptSnapshotReuse",

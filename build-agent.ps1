@@ -19,8 +19,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Bootstrap compilation failed.' }
 $utf8 = New-Object Text.UTF8Encoding($false)
 $agentManifest = Join-Path $build 'agent.mf'
 $bootstrapManifest = Join-Path $build 'bootstrap.mf'
-[IO.File]::WriteAllText($agentManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Agent`nImplementation-Version: 0.11.0`nPremain-Class: com.starsector.prepatcher.agent.PrepatcherAgent`nCan-Redefine-Classes: false`nCan-Retransform-Classes: false`n`n", $utf8)
-[IO.File]::WriteAllText($bootstrapManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Bootstrap`nImplementation-Version: 0.11.0`n`n", $utf8)
+[IO.File]::WriteAllText($agentManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Agent`nImplementation-Version: 0.12.0`nPremain-Class: com.starsector.prepatcher.agent.PrepatcherAgent`nCan-Redefine-Classes: false`nCan-Retransform-Classes: false`n`n", $utf8)
+[IO.File]::WriteAllText($bootstrapManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Bootstrap`nImplementation-Version: 0.12.0`n`n", $utf8)
 $agentJar = Join-Path $modRoot 'agent\StarsectorPrepatcherAgent.jar'
 & jar cfm $agentJar $agentManifest -C $agentClasses .
 if ($LASTEXITCODE -ne 0) { throw 'Agent JAR creation failed.' }
@@ -47,7 +47,7 @@ foreach ($entry in $requiredRuntimePayload) {
         throw "Required target-loader runtime payload is missing from the agent JAR: $entry"
     }
 }
-$expectedRuntimePayloadCount = 110
+$expectedRuntimePayloadCount = 111
 $runtimePayloadEntries = @($agentEntries | Where-Object {
     $_ -cmatch '^com/fs/starfarer/api/StarsectorPrepatcher[^/]*\.class$'
 })

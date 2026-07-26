@@ -37,7 +37,7 @@ classfile или JAR не участвует в решении.
 | `patch.campaignSnapshotReuse` | `BaseLocation` | reusable eager snapshots | point-in-time order/mutation isolation |
 | `patch.entityScriptSnapshotReuse` | entity scripts | inline empty fast return; non-empty fresh vanilla snapshot | no scratch scope for empty lists; mutation isolation unchanged |
 | `patch.emptyMemoryAdvanceFastPath` | `Memory.advance` | inline return when expire+require are empty | restoration/pause and non-empty loops remain vanilla |
-| `patch.coreWorldsExtentCache` | `CoreScript.advance(F)V` | cache `$coreWorldsMin/Max/Center`; avoid unchanged allocations/writes and optionally skip extra fast-forward scans | unique `Global.getSector` local, terminal call after `RouteManager.advance`, owner marker and exact hook postcondition |
+| `patch.coreWorldsExtentCache` | `CoreScript.advance(F)V`, `CampaignEngine.create/removeStarSystem`, `BaseLocation.add/remove/clearTags` | one campaign snapshot, weak system/core index, O(C+B) steady validation, unchanged-write suppression and optional fast-forward skip | all three structural surfaces must apply; missing mutation hook fails closed to vanilla; bounded audit covers direct live-tag additions |
 | `patch.routeJumpPointIndex` | route widget | ordered jump/system candidates | original filter/distance/tie loop |
 | `patch.strategicJumpDestinationFirst` | `StrategicModule.findNearestSafeJumpPoint` | lazy hostile-market score only after the original destination predicate accepts a jump point | exact target/hyperspace fallback, one score per jump point, candidate order/sort/early return unchanged |
 | `patch.strategicJumpDestinationIndex` | `StrategicModule.findNearestSafeJumpPoint`, expired `JumpPlan`, jump/location topology mutators | budgeted ordered index keyed by destination `LocationAPI` identity | requires destination-first; no location type/size admission rule; cold/dirty work is deferred under one global frame budget |
@@ -480,26 +480,57 @@ location path не выполняет synchronized lookup глобальной w
 остаётся authoritative. Unchanged periodic audit лишь переносит deadline и не создаёт новый
 fingerprint.
 
-### CoreScript core-worlds extent cache
+### Incremental core-worlds extent index
 
-`patch.coreWorldsExtentCache` structurally matches `CoreScript.advance(F)V` and replaces exactly one
-terminal `Misc.computeCoreWorldsExtent()` call with
-`StarsectorPrepatcherCoreWorldsRuntime.update(SectorAPI)`. No class/JAR digest participates in the
-decision. The matcher proves a unique `Global.getSector()` result stored in one object local, verifies
-that `SectorAPI.isPaused()` and `getClock()` use that same local, requires the target call immediately
-after `RouteManager.advance(F)V` and before terminal `RETURN`, and derives the local slot rather than
-assuming slot `2`. Partial or foreign hook-shaped states fail open with `SKIPPED_STRUCTURAL`.
-No other shipped patch targets `CoreScript` or this `advance(F)V` region, so the surface is independent
-and does not require an ordered atomic group with another transformation.
+`patch.coreWorldsExtentCache` is one fail-closed contract across three vanilla classes:
 
-The runtime preserves vanilla origin-inclusive `+0.0f` min/max arithmetic and publication order for
-`$coreWorldsMin`, `$coreWorldsMax`, and `$coreWorldsCenter`. It holds only weak references to the
-sector and published vectors, compares raw float bits, immediately repairs deletion, replacement or
-mutation, and optionally repairs timed expiration. Unchanged bounds avoid three `Vector2f`
-allocations and three `MemoryAPI.set` calls. `coreWorlds.skipFastForwardIterations=true` additionally
-skips global system scans on intact extra fast-forward substeps; `false` is the conservative
-per-substep mode. `coreWorlds.validationFrames` defaults to `1`; larger values intentionally allow
-bounded stale geometry and are not used by shipped profiles.
+1. `CoreScript.advance(F)V` replaces the single terminal `Misc.computeCoreWorldsExtent()` after
+   `RouteManager.advance(F)V` with `StarsectorPrepatcherCoreWorldsRuntime.update(SectorAPI)`;
+2. `CampaignEngine.createStarSystem(String)` and `removeStarSystem(StarSystemAPI)` publish the two
+   authoritative system-list mutations after the original mutation succeeds;
+3. `BaseLocation.addTag(String)`, `removeTag(String)` and `clearTags()` publish all normal tag API
+   exits so changes of `theme_core` update membership immediately.
+
+Every matcher proves the local mutation/data-flow shape, exact hook multiplicity, owner marker,
+idempotent postcondition and ASM verification without a class/JAR digest or fixed local slot. The
+runtime enables the incremental path only after both mutation-hook class statuses are `APPLIED` or
+`ALREADY_APPLIED`. A missing, partial or structurally changed surface therefore does not produce a
+partially coherent cache: `CoreScript` calls the preserved vanilla computation until the complete
+capability is available, and a terminal structural failure leaves it on that fallback.
+
+The first update for a campaign identity obtains one defensive `SectorAPI.getStarSystems()` snapshot
+and builds two process-local indexes: all systems and the subset currently tagged `theme_core`.
+Entries hold only `WeakReference<StarSystemAPI>`. Normal create/remove/tag events update the indexes
+incrementally. Since `StarSystemAPI.getLocation()` exposes a mutable `Vector2f`, each validated frame
+still reads every known core-system coordinate; this is required to preserve direct coordinate
+mutation semantics. Direct removal of `theme_core` from the live `getTags()` set is detected in that
+same O(C) pass. Direct addition through the live set bypasses every setter, so a rotating audit checks
+at most `coreWorlds.auditSystemsPerFrame` entries per validated outer frame (default `64`).
+
+With `S` total systems, `C` core systems and audit budget `B`, the old implementation performed
+Θ(S) traversal plus a fresh Θ(S)-reference `ArrayList` allocation every invocation. The incremental
+runtime performs Θ(S) work/allocation once at campaign initialization or explicit anomaly recovery,
+then Θ(C+B) work and no full-list allocation in steady state. At `S=2559`, `B=64`, a direct unhooked
+core-tag addition is discovered within at most `ceil(S/B)` validated outer frames (about 40 with the
+shipped values); API mutations are immediate. Rare create/remove/tag event lookup is O(S), but it is
+outside the per-frame hot path and never materializes `SectorAPI.getStarSystems()`.
+
+Vanilla origin-inclusive `+0.0f` min/max arithmetic and publication order for `$coreWorldsMin`,
+`$coreWorldsMax`, and `$coreWorldsCenter` are preserved. Raw float-bit comparison suppresses the three
+`Vector2f` allocations and `MemoryAPI.set` calls when bounds are unchanged. Deletion, replacement or
+mutation of published vectors and optional timed expiry are repaired. `coreWorlds.validationFrames`
+defaults to `1`; larger values intentionally allow bounded coordinate/membership staleness.
+`coreWorlds.skipFastForwardIterations=true` skips intact extra fast-forward substeps, while safe mode
+keeps O(C) coordinate validation on every substep without returning to an O(S) sector scan.
+
+Lifecycle reset replaces both index containers at campaign boundaries, releasing their
+backing-array high-water marks. Static state contains weak sector, system and published-vector
+references only; there is no static game-object map, `ThreadLocal`,
+game-instance field or serialized state. Runtime failures clear the index, execute the vanilla
+calculation for the current call and rebuild from one authoritative snapshot on the next call.
+
+Design rationale, complexity and release evidence:
+[release report 0.12.0](releases/0.12.0.md#incremental-core-worlds-extent-index).
 
 ## Fast-forward presentation coalescing
 
@@ -670,5 +701,6 @@ Optional Nex class не добавляется в обязательный core 
 Target: clean game `BaseIndustry.getMaxDeficit(String...)`.
 
 The patch preserves the original method under a private synthetic name and installs a thin
-resolver wrapper. Without an active AoTD Stage 8 contract, the original vanilla code is called.
+resolver wrapper. Without the complete active AoTD native contract, the original vanilla code is
+called.
 With the complete `0xff` contract, the source-level AoTD priority-deficit resolver is used.

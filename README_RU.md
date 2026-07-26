@@ -2,7 +2,7 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Текущая версия: **0.11.0**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
+Текущая версия: **0.12.0**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
 
 [![Без препатчера и с ним](media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
@@ -21,7 +21,7 @@ StarsectorPrepatcher — compatibility-first слой ранних патчей 
 - хранить зависимое от версии игры знание о bytecode внутри prepatcher, а не размножать его по
   игровым модам.
 
-Публичный API в `0.11.0` ещё не выпущен и остаётся пунктом roadmap. Планируемый namespace —
+Публичный API в `0.12.0` ещё не выпущен и остаётся пунктом roadmap. Планируемый namespace —
 `com.starsector.prepatcher.api`; типы станут поддерживаемым контрактом только после появления
 документации и compatibility-тестов.
 
@@ -58,6 +58,11 @@ Bootstrap plugin не меняет bytecode. Он выводит состоян�
 2. Распакуйте каталог как `<Starsector>\mods\StarsectorPrepatcher`.
 3. Установите agent для используемого способа запуска (команды ниже).
 4. Включите **StarsectorPrepatcher** в launcher и запустите игру.
+
+Если установлен **AoTD — Theory of Toolbox**, используйте поддерживаемый
+[Scheduler Fork](https://github.com/cyrrp/AoTD-Theory-Of-Toolbox-Scheduler-Fork) выпуска
+`1.0.14-spp1` или новее. Форк необходим для оптимальной производительности AoTD и поддерживаемого
+native scheduler/capability path. Без AoTD форк не требуется.
 
 В Windows запустите двойным щелчком `StarsectorPrepatcher.bat`, выберите
 **Install javaagent**, затем Vanilla, Faster Rendering или оба варианта. Интерфейс BAT-файла
@@ -99,7 +104,8 @@ Prepatcher не изменяет формат сохранений, а его ru
   fingerprint, ordered fast path неактивных commodities вместе с direct expiry-aware scheduler
   `MutableStatWithTempMods`, guarded fast path для dormant-наследников `BaseIndustry`, подавление
   повторного удаления уже отсутствующего commodity event mod, fast paths для пустых scripts/Memory,
-  structural cache границ core worlds в `CoreScript` и comm-relay candidates;
+  fail-closed инкрементальный индекс границ core worlds с hooks в `CampaignEngine`/`BaseLocation`,
+  bounded audit прямых изменений тегов и comm-relay candidates;
 - routing: упорядоченные jump-point/system indexes с vanilla selection/fallback;
 - combat и particles: внутренние scratch collections и стабильная deferred cleanup;
 - fast-forward presentation: final-substep coalescing защищённых campaign visuals и continuous
@@ -223,18 +229,23 @@ Rendering. Сборка описана в [`BUILDING.md`](BUILDING.md).
 - [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) — structural matching и fail-open правила;
 - [`docs/VALIDATION.md`](docs/VALIDATION.md) — playbook регрессионных и performance-проверок;
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — план structural discovery, архитектуры, tooling и платформ;
-- [`docs/releases/0.11.0.md`](docs/releases/0.11.0.md) — подробный отчёт текущего выпуска.
+- [`docs/releases/0.12.0.md`](docs/releases/0.12.0.md) — подробный отчёт текущего выпуска.
 
 Условия распространения находятся в [`LICENSE`](LICENSE).
 
 ## Интеграция с AoTD Scheduler Fork
 
-Prepatcher 0.11.0 устанавливает clean wrapper на оригинальный `BaseIndustry.getMaxDeficit()`.
+Prepatcher 0.12.0 устанавливает clean wrapper на оригинальный `BaseIndustry.getMaxDeficit()`.
 Vanilla-реализация сохраняется и используется, пока совместимый AoTD Scheduler Fork не зарегистрирует
 полный native-профиль `0x1ff`. Bridge schema V6 публикует campaign/economy epoch и читает актуальную
 runtime capability mask. Поздние callbacks старой эпохи отклоняются, а fail-stop listener запускает
 однократную синхронизацию поколений перед включением fallback dirtying. Старый изменённый
 `starfarer.api.jar` устанавливать нельзя.
+
+При установленном AoTD Theory of Toolbox поддерживаемый Scheduler Fork `1.0.14-spp1` необходим для
+оптимальной производительности. В остальных конфигурациях Prepatcher не требует ни AoTD, ни форк.
+Исходная сборка AoTD может использовать сохранённые fail-closed/raw пути, но не предоставляет полный
+поддерживаемый native scheduler contract.
 
 P0/P0.5/P1 для market share также явно поддерживают принадлежащий проекту
 `AoTDCommodityMarketData`. Loader-local `ClassValue` допускает текущий fork только пока пять

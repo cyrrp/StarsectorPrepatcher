@@ -125,7 +125,7 @@ Review не считается завершённым без следующих 
 Численное performance-заявление делается только после этих gates и одинакового A/B-прогона. Если
 какой-либо gate временно неприменим, патч остаётся experimental/disabled by default. Исключение
 допустимо только по явному решению владельца релиза, при наличии отдельного kill switch и записи
-причины/остаточного риска в отчёте соответствующего выпуска из [`releases/`](releases/0.11.0.md).
+причины/остаточного риска в отчёте соответствующего выпуска из [`releases/`](releases/0.12.0.md).
 
 ## Матрица запуска vanilla и Faster Rendering
 
@@ -185,19 +185,28 @@ original+wrapper state, foreign hooks без owner либо mask mismatch даю
 semantic region относительно sensor-range presentation, а не по порядковому номеру Fader-вызова.
 Safe baseline остаётся `20` классов/`59` wrapper sites, aggressive — `24`/`71`.
 
-### CoreScript core-worlds extent cache
+### Incremental core-worlds extent index
 
 Для `patch.coreWorldsExtentCache` обязательны:
 
-1. structural transform фактического `CoreScript.class` без hash allowlist;
-2. idempotent second pass с owner marker и полной hook postcondition;
-3. unique `Global.getSector()` → `ASTORE` data-local proof без фиксированного slot number;
-4. единственный terminal `Misc.computeCoreWorldsExtent()` непосредственно после
-   `RouteManager.advance(F)V`; duplicate, moved или foreign hook state должен дать fail-open;
-5. runtime regression origin-inclusive min/max, unchanged no-write path, mutation/identity repair,
-   radical fast-forward deferral, timed-expiry repair и GC proof, что активное static state не
-   удерживает sector, memory, system list или опубликованные vectors;
-6. target-loader payload/FR loader inventory с `StarsectorPrepatcherCoreWorldsRuntime`.
+1. structural transform фактических `CoreScript`, `CampaignEngine` и `BaseLocation` без hash
+   allowlist; все три класса публикуют один patch ID, но коммитятся независимо и проверяются
+   runtime capability gate;
+2. idempotent second pass с owner marker и полной postcondition на каждом классе;
+3. в `CoreScript`: unique `Global.getSector()` → `ASTORE` data-local proof без фиксированного slot,
+   единственный terminal `Misc.computeCoreWorldsExtent()` после `RouteManager.advance(F)V`;
+4. в `CampaignEngine`: source-proven `StarSystem` local, добавленный в внутренний `List`, и exact
+   argument, удаляемый из внутреннего `List`; hooks стоят на единственных normal return boundaries;
+5. в `BaseLocation`: exact `HashSet.add/remove/clear` над tag field и hooks на всех normal returns;
+   duplicate, partial, foreign или изменённая mutation shape обязана дать fail-open;
+6. runtime regression: ровно один full snapshot в steady state, O(C+B) operation bound,
+   create/remove/tag events, direct mutable coordinate, direct live-tag add/remove, memory identity/
+   mutation/expiry repair, fast-forward, one-shot anomaly rebuild и совпадение vanilla bounds;
+7. fail-closed capability test при отсутствии одного mutation-hook status, actual-agent загрузка всех
+   трёх targets и payload/FR loader inventory с `StarsectorPrepatcherCoreWorldsRuntime`;
+8. weak-reachability proof для sector, memory, system list, core system и опубликованных vectors;
+   lifecycle reset заменяет обе wrapper-list containers, а runtime/game classes не получают
+   persistent instance fields или save schema.
 
 ## Матрица целевых сценариев
 
@@ -217,7 +226,7 @@ Safe baseline остаётся `20` классов/`59` wrapper sites, aggressiv
 | `patch.campaignListenerThrottle` | закрытая карта, создание/удаление системы и custom list mutation | `campaignListenerRuns`, `campaignListenerSkips` | repositories получают listener сразу при обычном изменении и не позже audit при прямой мутации |
 | `patch.campaignSnapshotReuse` | campaign advance в hyperspace/системах, paused/reentrant/throwing callbacks | JFR allocation stacks; counts пяти snapshot hooks | тот же point-in-time набор и порядок; no escape; все exits обнуляют campaign refs |
 | `patch.entityScriptSnapshotReuse` | scripts добавляют/удаляют scripts и бросают exception | JFR allocation stacks; отсутствие scratch hooks на empty path | guard читает ровно `this.scripts` и входит перед исходным snapshot без обхода стороннего пролога; non-empty snapshot/order/call count остаются vanilla |
-| `patch.coreWorldsExtentCache` | CoreScript при 1× и fast-forward N×, неизменная/изменённая геометрия, замена/мутация memory-векторов, timed expiry и GC активного cache state | `coreWorldsCalls/SystemScans/SystemsVisited/FastForwardSkips/UnchangedSkips/Publishes/IntegrityRepairs/Fallbacks`; weak-reachability harness | origin-inclusive bounds и порядок min/max/center совпадают; unchanged path не пишет memory; repair немедленный; safe сканирует каждый substep, radical — первый substep внешнего frame; static state не удерживает sector/memory/systems/vectors; unrelated class changes не блокируют structural match |
+| `patch.coreWorldsExtentCache` | 2500+ systems, few core systems; create/remove, API/direct tag edits, mutable coordinates, 1×/fast-forward, memory mutation/expiry, campaign reload | `coreWorldsSystemScans/SystemsVisited/CoreSystemChecks/MembershipAuditChecks/Sweeps/MembershipChanges/SystemAddEvents/SystemRemoveEvents/TagEvents/RebuildRequests/CapabilityFallbacks/FastForwardSkips/UnchangedSkips/Publishes/IntegrityRepairs/EventFailures/Fallbacks`; JFR path + weak-reachability | после первого/recovery snapshot нет повторного `getStarSystems()` в steady state; работа ≤ O(C+B), bounds/order совпадают с vanilla; API events immediate, direct addition bounded by audit, direct removal/location immediate on validation; incomplete hooks fail closed; static state не удерживает campaign objects |
 | `patch.emptyMemoryAdvanceFastPath` | тысячи пустых `Memory` плюс expire/require entries | CPU/allocation stacks; отсутствие двух retired iterator hooks | guard после restoration/pause читает `this.expire` + `this.require`; conversion, expiration/require cleanup/order на непустом пути совпадают с vanilla |
 | `patch.routeJumpPointIndex` | маршруты внутри/между системами, wormholes и одинаковые anchors | route index hits/builds/fallbacks | destination, distance и tie-break совпадают; malformed/custom getter использует полный список |
 | `patch.strategicJumpDestinationFirst` | system→hyperspace, hyperspace→system, system A→B, null target; 0/1/multiple accepted destinations | hostile-market call location/count and campaign frame tails | выбранный candidate и early-return совпадают; 0 scans для rejected jump points и ровно 1 для accepted jump point |
@@ -288,7 +297,7 @@ Safe baseline остаётся `20` классов/`59` wrapper sites, aggressiv
 - reverse-order offline test: локально доказанная surface применяется, несовместимая получает `SKIPPED_STRUCTURAL`;
 - actual-javaagent status `presentationStructuralComposition=PASSED`.
 
-## Stage 8 AoTD production profile
+## AoTD production profile
 
 Required gates:
 
