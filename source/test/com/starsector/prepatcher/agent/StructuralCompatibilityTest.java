@@ -2408,6 +2408,92 @@ public final class StructuralCompatibilityTest {
         return write(node);
     }
 
+
+    private static void assertMarketSharePatches(byte[] bytes) {
+        ClassNode node = read(bytes);
+        require(hasOwnershipMarker(node, "marketShareLinearAggregation"),
+                "market-share linear ownership marker missing");
+        require(hasOwnershipMarker(node, "marketShareDataPutElision"),
+                "market-share put-elision ownership marker missing");
+        MethodNode wrapper = method(node, "getMarketSharePercentPerFaction",
+                "()Ljava/util/Map;");
+        MethodNode raw = method(node,
+                "spp$commodityMarketDataRawMarketSharePerFaction",
+                "()Ljava/util/Map;");
+        require((raw.access & (Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC))
+                        == (Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC),
+                "market-share raw fallback metadata changed");
+        require(countCalls(wrapper, Opcodes.INVOKEVIRTUAL,
+                        PrepatcherTransformer.COMMODITY_MARKET_DATA,
+                        "getMarkets", "()Ljava/util/List;") == 1,
+                "market-share wrapper getMarkets count changed");
+        require(countCalls(wrapper, Opcodes.INVOKEVIRTUAL,
+                        PrepatcherTransformer.COMMODITY_MARKET_DATA,
+                        "getMarketSharePercent",
+                        "(Lcom/fs/starfarer/api/campaign/FactionAPI;)I") == 0,
+                "market-share wrapper retained repeated single-faction scan");
+        require(countCalls(wrapper, Opcodes.INVOKEVIRTUAL,
+                        PrepatcherTransformer.COMMODITY_MARKET_DATA,
+                        "getExportMarketSharePercent",
+                        "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)I") == 1,
+                "market-share wrapper export-share pass changed");
+
+        MethodNode data = method(node, "getMarketShareData",
+                "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)"
+                        + "Lcom/fs/starfarer/campaign/econ/reach/MarketShareData;");
+        MethodInsnNode put = uniqueCall(data, Opcodes.INVOKEVIRTUAL,
+                "java/util/LinkedHashMap", "put",
+                "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+        JumpInsnNode guard = null;
+        for (AbstractInsnNode insn : data.instructions.toArray()) {
+            if (insn instanceof JumpInsnNode jump
+                    && jump.getOpcode() == Opcodes.IFNONNULL) {
+                require(guard == null, "duplicate market-share non-null guard");
+                guard = jump;
+            }
+        }
+        require(guard != null, "market-share non-null guard missing");
+        require(data.instructions.indexOf(put) < data.instructions.indexOf(guard.label),
+                "market-share put is not inside the null branch");
+    }
+
+    private static void assertPunitivePlayerSharePatch(byte[] bytes, String owner) {
+        ClassNode node = read(bytes);
+        require(hasOwnershipMarker(node, "punitivePlayerShareLocalCache"),
+                "punitive player-share ownership marker missing");
+        MethodNode reasons = method(node, "getExpeditionReasons",
+                "(Lcom/fs/starfarer/api/impl/campaign/intel/punitive/"
+                        + "PunitiveExpeditionManager$PunExData;)Ljava/util/List;");
+        String helperDesc = "(Lcom/fs/starfarer/api/campaign/econ/CommodityMarketDataAPI;"
+                + "Lcom/fs/starfarer/api/campaign/FactionAPI;Ljava/util/Map;"
+                + "Ljava/util/IdentityHashMap;)I";
+        MethodNode helper = method(node, "spp$punitiveCachedPlayerShare", helperDesc);
+        require((helper.access & (Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC
+                        | Opcodes.ACC_SYNTHETIC))
+                        == (Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC
+                        | Opcodes.ACC_SYNTHETIC),
+                "punitive player-share helper metadata changed");
+        require(countCalls(reasons, Opcodes.INVOKESTATIC, owner,
+                        "spp$punitiveCachedPlayerShare", helperDesc) == 2,
+                "punitive cached player-share call count changed");
+        require(countCalls(reasons, Opcodes.INVOKEINTERFACE,
+                        "com/fs/starfarer/api/campaign/econ/CommodityMarketDataAPI",
+                        "getMarketSharePercent",
+                        "(Lcom/fs/starfarer/api/campaign/FactionAPI;)I") == 0,
+                "punitive direct player-share calls remain");
+        int allocations = 0;
+        for (AbstractInsnNode insn : reasons.instructions.toArray()) {
+            if (insn instanceof TypeInsnNode type && type.getOpcode() == Opcodes.NEW
+                    && type.desc.equals("java/util/IdentityHashMap")) allocations++;
+        }
+        require(allocations == 1,
+                "punitive invocation-local cache allocation count changed: " + allocations);
+        for (FieldNode field : node.fields) {
+            require(!field.name.startsWith("spp$punitive"),
+                    "punitive patch added retained state field " + field.name);
+        }
+    }
+
     private static void assertExpectedHooks(String className, byte[] bytes) {
         Map<String, Integer> expected = new LinkedHashMap<>();
         switch (className) {
@@ -2487,6 +2573,10 @@ public final class StructuralCompatibilityTest {
                 expected.put("flushPendingMarketBeforeMutation", 3);
                 expected.put("registerMarketSchedulerComponent", 1);
             }
+            case PrepatcherTransformer.COMMODITY_MARKET_DATA ->
+                    assertMarketSharePatches(bytes);
+            case PrepatcherTransformer.PUNITIVE_EXPEDITION_MANAGER ->
+                    assertPunitivePlayerSharePatch(bytes, className);
             case PrepatcherTransformer.BASE_INDUSTRY -> {
                 expected.put("isBaseIndustryDormantFastPathEligible", 1);
                 expected.put("flushPendingMarketBeforeMutation", 4);

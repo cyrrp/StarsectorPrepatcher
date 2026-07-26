@@ -81,6 +81,34 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             "com/starsector/prepatcher/agent/templates/BaseIndustryDeficitTemplate";
     private static final String AOTD_DEFICIT_TEMPLATE_RESOURCE =
             "/" + AOTD_DEFICIT_TEMPLATE_OWNER + ".class";
+    private static final String MARKET_SHARE_LINEAR_PATCH_ID =
+            "marketShareLinearAggregation";
+    private static final String MARKET_SHARE_DATA_PUT_ELISION_PATCH_ID =
+            "marketShareDataPutElision";
+    private static final String PUNITIVE_PLAYER_SHARE_PATCH_ID =
+            "punitivePlayerShareLocalCache";
+    private static final String MARKET_SHARE_RAW_METHOD =
+            "spp$commodityMarketDataRawMarketSharePerFaction";
+    private static final String MARKET_SHARE_METHOD_DESC = "()Ljava/util/Map;";
+    private static final String MARKET_SHARE_TEMPLATE_OWNER =
+            "com/starsector/prepatcher/agent/templates/CommodityMarketShareTemplate";
+    private static final String MARKET_SHARE_TEMPLATE_RESOURCE =
+            "/" + MARKET_SHARE_TEMPLATE_OWNER + ".class";
+    private static final String MARKET_SHARE_RUNTIME =
+            "com/fs/starfarer/api/StarsectorPrepatcherMarketShareRuntime";
+    private static final String MARKET_SHARE_ELIGIBILITY_METHOD = "isEligible";
+    private static final String MARKET_SHARE_ELIGIBILITY_DESC =
+            "(Ljava/lang/Object;)Z";
+    private static final String PUNITIVE_TEMPLATE_OWNER =
+            "com/starsector/prepatcher/agent/templates/PunitivePlayerShareTemplate";
+    private static final String PUNITIVE_TEMPLATE_RESOURCE =
+            "/" + PUNITIVE_TEMPLATE_OWNER + ".class";
+    private static final String PUNITIVE_HELPER_METHOD =
+            "spp$punitiveCachedPlayerShare";
+    private static final String PUNITIVE_HELPER_DESC =
+            "(Lcom/fs/starfarer/api/campaign/econ/CommodityMarketDataAPI;"
+                    + "Lcom/fs/starfarer/api/campaign/FactionAPI;Ljava/util/Map;"
+                    + "Ljava/util/IdentityHashMap;)I";
     private static final String RUNTIME_BRIDGE =
             "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
     static final String H = "com/fs/starfarer/coreui/A/H";
@@ -104,6 +132,23 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     static final String MARKET = "com/fs/starfarer/campaign/econ/Market";
     static final String BASE_INDUSTRY =
             "com/fs/starfarer/api/impl/campaign/econ/impl/BaseIndustry";
+    static final String COMMODITY_MARKET_DATA =
+            "com/fs/starfarer/campaign/econ/reach/CommodityMarketData";
+    static final String PUNITIVE_EXPEDITION_MANAGER =
+            "com/fs/starfarer/api/impl/campaign/intel/punitive/PunitiveExpeditionManager";
+    static final String NEX_PUNITIVE_EXPEDITION_MANAGER =
+            "exerelin/campaign/intel/Nex_PunitiveExpeditionManager";
+    private static final String COMMODITY_MARKET_DATA_API =
+            "com/fs/starfarer/api/campaign/econ/CommodityMarketDataAPI";
+    private static final String FACTION_API =
+            "com/fs/starfarer/api/campaign/FactionAPI";
+    private static final String SECTOR_API =
+            "com/fs/starfarer/api/campaign/SectorAPI";
+    private static final String MARKET_SHARE_DATA =
+            "com/fs/starfarer/campaign/econ/reach/MarketShareData";
+    private static final String PUNITIVE_REASONS_DESC =
+            "(Lcom/fs/starfarer/api/impl/campaign/intel/punitive/"
+                    + "PunitiveExpeditionManager$PunExData;)Ljava/util/List;";
     static final String MILITARY_BASE =
             "com/fs/starfarer/api/impl/campaign/econ/impl/MilitaryBase";
     static final String LIONS_GUARD_HQ =
@@ -175,10 +220,11 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             "com/fs/starfarer/api/impl/campaign/rulecmd/PK_CMD";
     static final Set<String> TARGET_CLASSES = Set.of(H, A, Z, EVENTS, CAMPAIGN_STATE,
             CAMPAIGN_ENGINE,
-            COURSE_WIDGET, STRATEGIC_MODULE, JUMP_POINT, JUMP_DESTINATION, BASE_LOCATION, BASE_CAMPAIGN_ENTITY,
-            MEMORY, CORE_SCRIPT, ECONOMY,
-            MARKET, BASE_INDUSTRY, MILITARY_BASE, LIONS_GUARD_HQ, RECENT_UNREST,
-            CONSTRUCTION_QUEUE, COMMODITY_ON_MARKET, MUTABLE_STAT, MUTABLE_STAT_WITH_TEMP_MODS,
+            COURSE_WIDGET, STRATEGIC_MODULE, JUMP_POINT, JUMP_DESTINATION, BASE_LOCATION,
+            BASE_CAMPAIGN_ENTITY, MEMORY, CORE_SCRIPT, ECONOMY,
+            MARKET, BASE_INDUSTRY, COMMODITY_MARKET_DATA, PUNITIVE_EXPEDITION_MANAGER,
+            MILITARY_BASE, LIONS_GUARD_HQ, RECENT_UNREST, CONSTRUCTION_QUEUE,
+            COMMODITY_ON_MARKET, MUTABLE_STAT, MUTABLE_STAT_WITH_TEMP_MODS,
             INTEL_MANAGER, SHIP,
             DYNAMIC_PARTICLE_GROUP, LOADING_UTILS,
             SCRIPT_STORE_RUNNER, RULES, SPEC_STORE, TEXTURE_LOADER, SOUND,
@@ -232,6 +278,8 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             "(Lcom/fs/starfarer/api/campaign/CampaignFleetAPI;"
                     + "Lcom/fs/starfarer/api/campaign/SectorEntityToken;F)I";
     private static final int STRATEGIC_JUMP_UNCOMPUTED = Integer.MIN_VALUE;
+    static final Set<String> OPTIONAL_TARGET_CLASSES =
+            Set.of(NEX_PUNITIVE_EXPEDITION_MANAGER);
     private static final String ENTITY_TOKEN_DESC = "Lcom/fs/starfarer/api/campaign/SectorEntityToken;";
     private static final String MAP_API_DESC = "Lcom/fs/starfarer/api/ui/SectorMapAPI;";
     private static final String INTEL_DESC = "Lcom/fs/starfarer/api/campaign/comm/IntelInfoPlugin;";
@@ -270,7 +318,9 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     @Override
     public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
                             ProtectionDomain protectionDomain, byte[] classfileBuffer) {
-        if (!TARGET_CLASSES.contains(className) || !isTargetEnabled(className)) return null;
+        if ((!TARGET_CLASSES.contains(className)
+                && !OPTIONAL_TARGET_CLASSES.contains(className))
+                || !isTargetEnabled(className)) return null;
         // FR child-loads com.fs.* while keeping javaagents in a sibling loader.
         // Never emit a typed hook call unless caller and hook are owned by the
         // exact same loader; a mismatch would otherwise become a late
@@ -379,6 +429,25 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
                     economyAdvancePlanEnabled(), this::patchEconomyAdvancePlan);
             case MARKET -> apply(state, MARKET_ADVANCE_PLAN_PATCH_ID,
                     marketAdvancePlanEnabled(), this::patchMarketAdvancePlan);
+            case COMMODITY_MARKET_DATA -> {
+                // Both patches touch the same class. The linear wrapper is installed first;
+                // put-elision then consumes that current state and composition validation
+                // rechecks the wrapper before the class is committed.
+                apply(state, MARKET_SHARE_LINEAR_PATCH_ID,
+                        config.marketShareLinearAggregation,
+                        this::patchMarketShareLinearAggregation);
+                apply(state, MARKET_SHARE_DATA_PUT_ELISION_PATCH_ID,
+                        config.marketShareDataPutElision,
+                        this::patchMarketShareDataPutElision);
+            }
+            case PUNITIVE_EXPEDITION_MANAGER ->
+                    apply(state, PUNITIVE_PLAYER_SHARE_PATCH_ID,
+                            config.punitivePlayerShareLocalCache,
+                            this::patchPunitivePlayerShareLocalCache);
+            case NEX_PUNITIVE_EXPEDITION_MANAGER ->
+                    apply(state, PUNITIVE_PLAYER_SHARE_PATCH_ID,
+                            config.nexPunitivePlayerShareLocalCache,
+                            this::patchPunitivePlayerShareLocalCache);
             case BASE_INDUSTRY -> {
                 apply(state, AOTD_DEFICIT_PATCH_ID, config.aotdCleanDeficitPath,
                         this::patchAoTDCleanDeficitPath);
@@ -752,6 +821,12 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             case MARKET -> config.economyPersistentSnapshots
                     || config.commodityTemporalFastPath || config.directMarketObservation
                     || config.marketScheduler;
+            case COMMODITY_MARKET_DATA -> config.marketShareLinearAggregation
+                    || config.marketShareDataPutElision;
+            case PUNITIVE_EXPEDITION_MANAGER ->
+                    config.punitivePlayerShareLocalCache;
+            case NEX_PUNITIVE_EXPEDITION_MANAGER ->
+                    config.nexPunitivePlayerShareLocalCache;
             case BASE_INDUSTRY -> config.aotdCleanDeficitPath || (config.marketNoOpCallbacks
                     && config.marketNoOpIndustryAuditFrames > 0) || config.marketScheduler;
             case MILITARY_BASE, LIONS_GUARD_HQ, RECENT_UNREST, CONSTRUCTION_QUEUE ->
@@ -6822,6 +6897,620 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     private record MarketCommodityLoop(AbstractInsnNode start, AbstractInsnNode end,
                                        int daysLocal) {}
 
+
+
+    // ---------------------------------------------------------------------
+    // Market-share aggregation and punitive-expedition callers
+    // ---------------------------------------------------------------------
+
+    private PatchReport patchMarketShareLinearAggregation(ClassNode node) {
+        MethodNode wrapper = requireMethod(node, "getMarketSharePercentPerFaction",
+                MARKET_SHARE_METHOD_DESC);
+        List<MethodNode> rawMethods = methods(node, MARKET_SHARE_RAW_METHOD,
+                MARKET_SHARE_METHOD_DESC);
+        if (!rawMethods.isEmpty()) {
+            requireCount("market-share raw method", rawMethods.size(), 1);
+            requireMarketShareLinearPostcondition(node, wrapper, rawMethods.get(0));
+            throw already("linear market-share aggregation postcondition matches");
+        }
+
+        if ((wrapper.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0
+                || wrapper.instructions == null || wrapper.instructions.size() == 0) {
+            throw mismatch("CommodityMarketData.getMarketSharePercentPerFaction has no concrete code");
+        }
+        requireCount("original market-share getMarkets call",
+                countCalls(wrapper, Opcodes.INVOKEVIRTUAL, node.name,
+                        "getMarkets", "()Ljava/util/List;"), 1);
+        requireCount("original market-share single-faction call",
+                countCalls(wrapper, Opcodes.INVOKEVIRTUAL, node.name,
+                        "getMarketSharePercent",
+                        "(L" + FACTION_API + ";)I"), 1);
+        requireCount("original market-share containsKey call",
+                countCalls(wrapper, Opcodes.INVOKEINTERFACE, "java/util/Map",
+                        "containsKey", "(Ljava/lang/Object;)Z"), 1);
+        requireCount("original market-share Map.put call",
+                countCalls(wrapper, Opcodes.INVOKEINTERFACE, "java/util/Map",
+                        "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"), 1);
+        requireCount("original market-share LinkedHashMap allocation",
+                countTypeInstructions(wrapper, Opcodes.NEW, "java/util/LinkedHashMap"), 1);
+        requireCount("original market-share export-share call",
+                countCalls(wrapper, Opcodes.INVOKEVIRTUAL, node.name,
+                        "getExportMarketSharePercent",
+                        "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)I"), 0);
+
+        int originalAccess = wrapper.access;
+        String originalSignature = wrapper.signature;
+        String[] originalExceptions = exceptions(wrapper);
+        wrapper.name = MARKET_SHARE_RAW_METHOD;
+        wrapper.access = (wrapper.access
+                & ~(Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED))
+                | Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC;
+
+        ClassNode template = loadOwnedTemplate(MARKET_SHARE_TEMPLATE_OWNER,
+                MARKET_SHARE_TEMPLATE_RESOURCE, "market-share aggregation");
+        MethodNode templateWrapper = requireMethod(template,
+                "getMarketSharePercentPerFaction", MARKET_SHARE_METHOD_DESC);
+        MethodNode installed = cloneAndRemapOwnedTemplateMethod(templateWrapper,
+                MARKET_SHARE_TEMPLATE_OWNER, node.name, "market-share aggregation");
+        installed.access = originalAccess;
+        installed.signature = originalSignature;
+        installed.exceptions = originalExceptions == null
+                ? null : new ArrayList<>(List.of(originalExceptions));
+        node.methods.add(installed);
+
+        requireMarketShareLinearPostcondition(node, installed, wrapper);
+        PatchReport report = new PatchReport();
+        report.add("linear market-share aggregation", 1);
+        report.add("preserved vanilla market-share fallback", 1);
+        return report;
+    }
+
+    private static void requireMarketShareLinearPostcondition(
+            ClassNode node, MethodNode wrapper, MethodNode raw) {
+        if ((raw.access & Opcodes.ACC_PRIVATE) == 0
+                || (raw.access & Opcodes.ACC_SYNTHETIC) == 0
+                || (raw.access & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED)) != 0) {
+            throw mismatch("market-share raw method metadata changed");
+        }
+        requireCount("linear market-share raw fallback calls",
+                countCalls(wrapper, -1, node.name,
+                        MARKET_SHARE_RAW_METHOD, MARKET_SHARE_METHOD_DESC), 2);
+        requireCount("linear market-share getMarkets call",
+                countCalls(wrapper, Opcodes.INVOKEVIRTUAL, node.name,
+                        "getMarkets", "()Ljava/util/List;"), 1);
+        requireCount("linear market-share export-share call",
+                countCalls(wrapper, Opcodes.INVOKEVIRTUAL, node.name,
+                        "getExportMarketSharePercent",
+                        "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)I"), 1);
+        requireCount("linear market-share single-faction calls",
+                countCalls(wrapper, -1, node.name, "getMarketSharePercent",
+                        "(L" + FACTION_API + ";)I"), 0);
+        requireCount("linear market-share runtime eligibility guard",
+                countCalls(wrapper, Opcodes.INVOKESTATIC, MARKET_SHARE_RUNTIME,
+                        MARKET_SHARE_ELIGIBILITY_METHOD,
+                        MARKET_SHARE_ELIGIBILITY_DESC), 1);
+        requireCount("linear market-share exact-class literals",
+                countClassLiterals(wrapper, node.name), 0);
+        requireCount("linear market-share direct getClass guards",
+                countCalls(wrapper, Opcodes.INVOKEVIRTUAL, "java/lang/Object",
+                        "getClass", "()Ljava/lang/Class;"), 0);
+        requireCount("linear market-share LinkedHashMap allocation",
+                countTypeInstructions(wrapper, Opcodes.NEW, "java/util/LinkedHashMap"), 1);
+        requireCount("linear market-share local identity maps",
+                countTypeInstructions(wrapper, Opcodes.NEW, "java/util/IdentityHashMap"), 2);
+        requireNoOwnedTemplateReferences(node, MARKET_SHARE_TEMPLATE_OWNER,
+                "market-share aggregation");
+    }
+
+    private PatchReport patchMarketShareDataPutElision(ClassNode node) {
+        MarketSharePutShape shape = requireMarketSharePutShape(node);
+        if (shape.optimized()) {
+            throw already("market-share data put-elision postcondition matches");
+        }
+
+        Set<AbstractInsnNode> moving = new LinkedHashSet<>();
+        AbstractInsnNode cursor = shape.start();
+        while (cursor != null) {
+            if (cursor instanceof LabelNode || cursor instanceof FrameNode) {
+                throw mismatch("market-share put sequence contains a control-flow boundary");
+            }
+            moving.add(cursor);
+            if (cursor == shape.end()) break;
+            cursor = cursor.getNext();
+        }
+        if (cursor == null) throw mismatch("market-share put sequence is not contiguous");
+        for (AbstractInsnNode insn : shape.method().instructions.toArray()) {
+            if (moving.contains(insn)) continue;
+            if (insn instanceof JumpInsnNode jump && moving.contains(jump.label)) {
+                throw mismatch("market-share put sequence has an external jump target");
+            }
+        }
+        for (TryCatchBlockNode block : shape.method().tryCatchBlocks) {
+            if (moving.contains(block.start) || moving.contains(block.end)
+                    || moving.contains(block.handler)) {
+                throw mismatch("market-share put sequence crosses an exception-handler boundary");
+            }
+        }
+
+        InsnList moved = new InsnList();
+        cursor = shape.start();
+        while (cursor != null) {
+            AbstractInsnNode next = cursor.getNext();
+            shape.method().instructions.remove(cursor);
+            moved.add(cursor);
+            if (cursor == shape.end()) break;
+            cursor = next;
+        }
+        shape.method().instructions.insertBefore(shape.guard().label, moved);
+
+        MarketSharePutShape post = requireMarketSharePutShape(node);
+        if (!post.optimized()) {
+            throw mismatch("market-share put sequence did not move inside the null branch");
+        }
+        PatchReport report = new PatchReport();
+        report.add("existing-entry market-share put elision", 1);
+        return report;
+    }
+
+    private static MarketSharePutShape requireMarketSharePutShape(ClassNode node) {
+        String desc = "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)L"
+                + MARKET_SHARE_DATA + ";";
+        MethodNode method = requireMethod(node, "getMarketShareData", desc);
+        if ((method.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
+            throw mismatch("CommodityMarketData.getMarketShareData has no concrete code");
+        }
+        MethodInsnNode get = only(calls(method, Opcodes.INVOKEVIRTUAL,
+                "java/util/LinkedHashMap", "get",
+                "(Ljava/lang/Object;)Ljava/lang/Object;"),
+                "market-share data LinkedHashMap.get");
+        MethodInsnNode put = only(calls(method, Opcodes.INVOKEVIRTUAL,
+                "java/util/LinkedHashMap", "put",
+                "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"),
+                "market-share data LinkedHashMap.put");
+        requireCount("market-share data allocation",
+                countTypeInstructions(method, Opcodes.NEW, MARKET_SHARE_DATA), 1);
+
+        AbstractInsnNode cast = nextMeaningful(get);
+        if (!(cast instanceof TypeInsnNode type) || cast.getOpcode() != Opcodes.CHECKCAST
+                || !type.desc.equals(MARKET_SHARE_DATA)) {
+            throw mismatch("market-share data get result cast changed");
+        }
+        AbstractInsnNode storeInsn = nextMeaningful(cast);
+        if (!(storeInsn instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE) {
+            throw mismatch("market-share data local store changed");
+        }
+        int dataLocal = store.var;
+
+        List<JumpInsnNode> guards = new ArrayList<>();
+        for (AbstractInsnNode insn : method.instructions.toArray()) {
+            if (!(insn instanceof JumpInsnNode jump)
+                    || jump.getOpcode() != Opcodes.IFNONNULL) continue;
+            AbstractInsnNode loadInsn = previousMeaningful(jump);
+            if (loadInsn instanceof VarInsnNode load
+                    && load.getOpcode() == Opcodes.ALOAD && load.var == dataLocal) {
+                guards.add(jump);
+            }
+        }
+        JumpInsnNode guard = only(guards, "market-share data non-null guard");
+
+        AbstractInsnNode end = nextMeaningful(put);
+        if (end == null || end.getOpcode() != Opcodes.POP) {
+            throw mismatch("market-share data put result discard changed");
+        }
+        AbstractInsnNode valueLoad = previousMeaningful(put);
+        AbstractInsnNode keyLoad = previousMeaningful(valueLoad);
+        AbstractInsnNode fieldRead = previousMeaningful(keyLoad);
+        AbstractInsnNode thisLoad = previousMeaningful(fieldRead);
+        if (!(valueLoad instanceof VarInsnNode value)
+                || value.getOpcode() != Opcodes.ALOAD || value.var != dataLocal
+                || !(keyLoad instanceof VarInsnNode key)
+                || key.getOpcode() != Opcodes.ALOAD || key.var != 1
+                || !(fieldRead instanceof FieldInsnNode field)
+                || field.getOpcode() != Opcodes.GETFIELD || !field.owner.equals(node.name)
+                || !field.desc.equals("Ljava/util/LinkedHashMap;")
+                || !(thisLoad instanceof VarInsnNode self)
+                || self.getOpcode() != Opcodes.ALOAD || self.var != 0) {
+            throw mismatch("market-share data put operand sequence changed");
+        }
+
+        int targetIndex = method.instructions.indexOf(guard.label);
+        int startIndex = method.instructions.indexOf(thisLoad);
+        int endIndex = method.instructions.indexOf(end);
+        if (targetIndex < 0 || startIndex < 0 || endIndex < startIndex) {
+            throw mismatch("market-share data put indices are invalid");
+        }
+        boolean original = targetIndex < startIndex
+                && nextMeaningful(guard.label) == thisLoad;
+        boolean optimized = startIndex < targetIndex
+                && previousMeaningful(guard.label) == end;
+        if (!original && !optimized) {
+            throw mismatch("market-share data put is neither vanilla nor optimized shape");
+        }
+        AbstractInsnNode returnLoad = nextMeaningful(guard.label);
+        if (optimized) {
+            if (!(returnLoad instanceof VarInsnNode load)
+                    || load.getOpcode() != Opcodes.ALOAD || load.var != dataLocal
+                    || nextMeaningful(returnLoad) == null
+                    || nextMeaningful(returnLoad).getOpcode() != Opcodes.ARETURN) {
+                throw mismatch("market-share data optimized return path changed");
+            }
+        }
+        return new MarketSharePutShape(method, guard, thisLoad, end, optimized);
+    }
+
+    private record MarketSharePutShape(MethodNode method, JumpInsnNode guard,
+                                       AbstractInsnNode start, AbstractInsnNode end,
+                                       boolean optimized) {}
+
+    private PatchReport patchPunitivePlayerShareLocalCache(ClassNode node) {
+        MethodNode original = requireMethod(node, "getExpeditionReasons",
+                PUNITIVE_REASONS_DESC);
+        List<MethodNode> helpers = methods(node, PUNITIVE_HELPER_METHOD,
+                PUNITIVE_HELPER_DESC);
+        if (!helpers.isEmpty()) {
+            requireCount("punitive player-share helper", helpers.size(), 1);
+            requirePunitivePlayerSharePostcondition(node, original, helpers.get(0));
+            throw already("punitive local player-share cache postcondition matches");
+        }
+
+        PunitiveShareSites originalSites = requireOriginalPunitiveShareSites(node.name, original);
+        ClassNode expandedClass = readClassExpanded(writeClass(node));
+        MethodNode expanded = requireMethod(expandedClass, "getExpeditionReasons",
+                PUNITIVE_REASONS_DESC);
+        PunitiveShareSites sites = requireOriginalPunitiveShareSites(node.name, expanded);
+        if (sites.sharesLocal() != originalSites.sharesLocal()
+                || sites.playerLocal() != originalSites.playerLocal()) {
+            throw mismatch("punitive player-share locals changed while expanding frames");
+        }
+
+        int cacheLocal = expanded.maxLocals;
+        appendInitializedLocalToExpandedFrames(expanded, cacheLocal,
+                "java/util/IdentityHashMap");
+        InsnList initialization = new InsnList();
+        initialization.add(new TypeInsnNode(Opcodes.NEW, "java/util/IdentityHashMap"));
+        initialization.add(new InsnNode(Opcodes.DUP));
+        initialization.add(new MethodInsnNode(Opcodes.INVOKESPECIAL,
+                "java/util/IdentityHashMap", "<init>", "()V", false));
+        initialization.add(new VarInsnNode(Opcodes.ASTORE, cacheLocal));
+        AbstractInsnNode entry = expanded.instructions.getFirst();
+        if (entry == null) throw mismatch("punitive getExpeditionReasons has no code");
+        expanded.instructions.insertBefore(entry, initialization);
+        expanded.maxLocals = cacheLocal + 1;
+
+        MethodInsnNode competitive = sites.directCalls().get(0);
+        InsnList competitiveArgs = new InsnList();
+        competitiveArgs.add(new VarInsnNode(Opcodes.ALOAD, sites.sharesLocal()));
+        competitiveArgs.add(new VarInsnNode(Opcodes.ALOAD, cacheLocal));
+        expanded.instructions.insertBefore(competitive, competitiveArgs);
+        makeStatic(competitive, node.name, PUNITIVE_HELPER_METHOD,
+                PUNITIVE_HELPER_DESC);
+
+        MethodInsnNode freePort = sites.directCalls().get(1);
+        InsnList freePortArgs = new InsnList();
+        freePortArgs.add(new InsnNode(Opcodes.ACONST_NULL));
+        freePortArgs.add(new VarInsnNode(Opcodes.ALOAD, cacheLocal));
+        expanded.instructions.insertBefore(freePort, freePortArgs);
+        makeStatic(freePort, node.name, PUNITIVE_HELPER_METHOD,
+                PUNITIVE_HELPER_DESC);
+
+        int methodIndex = node.methods.indexOf(original);
+        if (methodIndex < 0) throw mismatch("punitive method replacement index missing");
+        node.methods.set(methodIndex, expanded);
+
+        ClassNode template = loadOwnedTemplate(PUNITIVE_TEMPLATE_OWNER,
+                PUNITIVE_TEMPLATE_RESOURCE, "punitive player-share cache");
+        MethodNode templateHelper = requireMethod(template, PUNITIVE_HELPER_METHOD,
+                PUNITIVE_HELPER_DESC);
+        MethodNode installedHelper = cloneAndRemapOwnedTemplateMethod(templateHelper,
+                PUNITIVE_TEMPLATE_OWNER, node.name, "punitive player-share cache");
+        installedHelper.access = Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC
+                | Opcodes.ACC_SYNTHETIC;
+        node.methods.add(installedHelper);
+
+        requirePunitivePlayerSharePostcondition(node, expanded, installedHelper);
+        PatchReport report = new PatchReport();
+        report.add("punitive competitive player-share reuse", 1);
+        report.add("punitive free-port local identity cache", 1);
+        return report;
+    }
+
+    private static PunitiveShareSites requireOriginalPunitiveShareSites(
+            String owner, MethodNode method) {
+        if ((method.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0
+                || method.instructions == null || method.instructions.size() == 0) {
+            throw mismatch("punitive getExpeditionReasons has no concrete code");
+        }
+        MethodInsnNode perFaction = only(calls(method, Opcodes.INVOKEINTERFACE,
+                COMMODITY_MARKET_DATA_API, "getMarketSharePercentPerFaction",
+                MARKET_SHARE_METHOD_DESC), "punitive per-faction share call");
+        List<MethodInsnNode> direct = calls(method, Opcodes.INVOKEINTERFACE,
+                COMMODITY_MARKET_DATA_API, "getMarketSharePercent",
+                "(L" + FACTION_API + ";)I");
+        requireCount("punitive direct player-share calls", direct.size(), 2);
+        direct.sort((left, right) -> Integer.compare(
+                method.instructions.indexOf(left), method.instructions.indexOf(right)));
+        int perFactionIndex = method.instructions.indexOf(perFaction);
+        if (perFactionIndex >= method.instructions.indexOf(direct.get(0))
+                || method.instructions.indexOf(direct.get(0))
+                >= method.instructions.indexOf(direct.get(1))) {
+            throw mismatch("punitive market-share call order changed");
+        }
+
+        AbstractInsnNode sharesStoreInsn = nextMeaningful(perFaction);
+        if (!(sharesStoreInsn instanceof VarInsnNode sharesStore)
+                || sharesStore.getOpcode() != Opcodes.ASTORE) {
+            throw mismatch("punitive per-faction shares are not stored in one local");
+        }
+        int sharesLocal = sharesStore.var;
+
+        Frame<SourceValue>[] frames = sourceFrames(owner, method);
+        int perFactionDataLocal = requireLoadedLocal(
+                receiverSource(method, perFaction, frames), Opcodes.ALOAD,
+                "punitive per-faction data receiver");
+        int firstDataLocal = requireLoadedLocal(
+                receiverSource(method, direct.get(0), frames), Opcodes.ALOAD,
+                "punitive competitive data receiver");
+        if (firstDataLocal != perFactionDataLocal) {
+            throw mismatch("punitive competitive share does not reuse per-faction data object");
+        }
+        int playerLocal = requireLoadedLocal(
+                argumentSource(method, direct.get(0), frames, 0), Opcodes.ALOAD,
+                "punitive competitive player faction");
+        int freePortPlayerLocal = requireLoadedLocal(
+                argumentSource(method, direct.get(1), frames, 0), Opcodes.ALOAD,
+                "punitive free-port player faction");
+        if (playerLocal != freePortPlayerLocal) {
+            throw mismatch("punitive player-share calls use different player locals");
+        }
+
+        List<MethodInsnNode> playerGetters = calls(method, Opcodes.INVOKEINTERFACE,
+                SECTOR_API, "getPlayerFaction", "()L" + FACTION_API + ";");
+        int matchingPlayerStores = 0;
+        for (MethodInsnNode getter : playerGetters) {
+            AbstractInsnNode next = nextMeaningful(getter);
+            if (next instanceof VarInsnNode store && store.getOpcode() == Opcodes.ASTORE
+                    && store.var == playerLocal) {
+                matchingPlayerStores++;
+            }
+        }
+        requireCount("punitive player-faction local initialization",
+                matchingPlayerStores, 1);
+        return new PunitiveShareSites(perFaction, direct, sharesLocal, playerLocal);
+    }
+
+    private static void requirePunitivePlayerSharePostcondition(
+            ClassNode node, MethodNode method, MethodNode helper) {
+        if ((helper.access & (Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC
+                | Opcodes.ACC_SYNTHETIC))
+                != (Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC)
+                || (helper.access & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED)) != 0) {
+            throw mismatch("punitive player-share helper metadata changed");
+        }
+        requireCount("punitive original player-share calls",
+                countCalls(method, Opcodes.INVOKEINTERFACE,
+                        COMMODITY_MARKET_DATA_API, "getMarketSharePercent",
+                        "(L" + FACTION_API + ";)I"), 0);
+        requireCount("punitive cached player-share calls",
+                countCalls(method, Opcodes.INVOKESTATIC, node.name,
+                        PUNITIVE_HELPER_METHOD, PUNITIVE_HELPER_DESC), 2);
+        requireCount("punitive per-faction share call",
+                countCalls(method, Opcodes.INVOKEINTERFACE,
+                        COMMODITY_MARKET_DATA_API, "getMarketSharePercentPerFaction",
+                        MARKET_SHARE_METHOD_DESC), 1);
+        requireCount("punitive local IdentityHashMap allocation",
+                countTypeInstructions(method, Opcodes.NEW, "java/util/IdentityHashMap"), 1);
+        requireCount("punitive local IdentityHashMap construction",
+                countCalls(method, Opcodes.INVOKESPECIAL, "java/util/IdentityHashMap",
+                        "<init>", "()V"), 1);
+        requireCount("punitive helper runtime eligibility guard",
+                countCalls(helper, Opcodes.INVOKESTATIC, MARKET_SHARE_RUNTIME,
+                        MARKET_SHARE_ELIGIBILITY_METHOD,
+                        MARKET_SHARE_ELIGIBILITY_DESC), 1);
+        requireCount("punitive helper concrete-class literals",
+                countClassLiterals(helper, COMMODITY_MARKET_DATA), 0);
+        requireCount("punitive helper direct fallback calls",
+                countCalls(helper, Opcodes.INVOKEINTERFACE,
+                        COMMODITY_MARKET_DATA_API, "getMarketSharePercent",
+                        "(L" + FACTION_API + ";)I"), 2);
+        requireCount("punitive helper static fields", countPunitiveRetainedFields(node), 0);
+        requireNoOwnedTemplateReferences(node, PUNITIVE_TEMPLATE_OWNER,
+                "punitive player-share cache");
+    }
+
+    private static int countPunitiveRetainedFields(ClassNode node) {
+        int count = 0;
+        for (FieldNode field : node.fields) {
+            if ((field.access & Opcodes.ACC_STATIC) != 0
+                    && field.name.startsWith("spp$punitive")) count++;
+        }
+        return count;
+    }
+
+    private record PunitiveShareSites(MethodInsnNode perFactionCall,
+                                      List<MethodInsnNode> directCalls,
+                                      int sharesLocal, int playerLocal) {}
+
+    private static void appendInitializedLocalToExpandedFrames(
+            MethodNode method, int localSlot, String localType) {
+        for (AbstractInsnNode insn : method.instructions.toArray()) {
+            if (!(insn instanceof FrameNode frame)) continue;
+            if (frame.type != Opcodes.F_NEW) {
+                throw mismatch("punitive frame expansion did not produce full frames");
+            }
+            if (frame.local == null) frame.local = new ArrayList<>();
+            int slots = frameLocalSlots(frame.local);
+            if (slots > localSlot) {
+                throw mismatch("punitive frame already extends beyond new cache local");
+            }
+            while (slots < localSlot) {
+                frame.local.add(Opcodes.TOP);
+                slots++;
+            }
+            frame.local.add(localType);
+        }
+    }
+
+    private static int frameLocalSlots(List<Object> locals) {
+        if (locals == null) return 0;
+        int slots = 0;
+        for (Object value : locals) {
+            slots += (Opcodes.LONG.equals(value) || Opcodes.DOUBLE.equals(value)) ? 2 : 1;
+        }
+        return slots;
+    }
+
+    private static ClassNode readClassExpanded(byte[] bytes) {
+        ClassNode node = new ClassNode(Opcodes.ASM8);
+        new ClassReader(bytes).accept(node, ClassReader.EXPAND_FRAMES);
+        return node;
+    }
+
+    private static ClassNode loadOwnedTemplate(String owner, String resource,
+                                               String label) {
+        try (InputStream input = PrepatcherTransformer.class.getResourceAsStream(resource)) {
+            if (input == null) throw mismatch("missing " + label + " template resource");
+            ClassNode template = readClass(input.readAllBytes());
+            if (!owner.equals(template.name)) {
+                throw mismatch(label + " template owner changed: " + template.name);
+            }
+            return template;
+        } catch (IOException ex) {
+            throw mismatch("unable to read " + label + " template: " + ex.getMessage());
+        }
+    }
+
+    private static MethodNode cloneAndRemapOwnedTemplateMethod(
+            MethodNode source, String templateOwner, String targetOwner, String label) {
+        MethodNode copy = new MethodNode(Opcodes.ASM8, source.access, source.name,
+                source.desc, source.signature, exceptions(source));
+        source.accept(copy);
+        remapOwnedTemplateMethod(copy, templateOwner, targetOwner, label);
+        return copy;
+    }
+
+    private static void remapOwnedTemplateMethod(MethodNode method,
+                                                 String templateOwner,
+                                                 String targetOwner,
+                                                 String label) {
+        method.desc = remapOwnedTemplateText(method.desc, templateOwner, targetOwner);
+        method.signature = remapOwnedTemplateText(method.signature,
+                templateOwner, targetOwner);
+        if (method.exceptions != null) {
+            for (int i = 0; i < method.exceptions.size(); i++) {
+                method.exceptions.set(i, remapOwnedTemplateText(
+                        method.exceptions.get(i), templateOwner, targetOwner));
+            }
+        }
+        for (AbstractInsnNode insn : method.instructions.toArray()) {
+            if (insn instanceof FieldInsnNode field) {
+                field.owner = remapOwnedTemplateText(field.owner, templateOwner, targetOwner);
+                field.desc = remapOwnedTemplateText(field.desc, templateOwner, targetOwner);
+            } else if (insn instanceof MethodInsnNode call) {
+                call.owner = remapOwnedTemplateText(call.owner, templateOwner, targetOwner);
+                call.desc = remapOwnedTemplateText(call.desc, templateOwner, targetOwner);
+            } else if (insn instanceof TypeInsnNode type) {
+                type.desc = remapOwnedTemplateText(type.desc, templateOwner, targetOwner);
+            } else if (insn instanceof LdcInsnNode ldc && ldc.cst instanceof Type type) {
+                ldc.cst = Type.getType(remapOwnedTemplateText(
+                        type.getDescriptor(), templateOwner, targetOwner));
+            } else if (insn instanceof MultiANewArrayInsnNode array) {
+                array.desc = remapOwnedTemplateText(array.desc, templateOwner, targetOwner);
+            } else if (insn instanceof FrameNode frame) {
+                remapOwnedTemplateFrameValues(frame.local, templateOwner, targetOwner);
+                remapOwnedTemplateFrameValues(frame.stack, templateOwner, targetOwner);
+            } else if (insn instanceof InvokeDynamicInsnNode) {
+                throw mismatch("unexpected invokedynamic in " + label + " template");
+            }
+        }
+        for (TryCatchBlockNode block : method.tryCatchBlocks) {
+            block.type = remapOwnedTemplateText(block.type, templateOwner, targetOwner);
+        }
+        if (method.localVariables != null) {
+            for (LocalVariableNode local : method.localVariables) {
+                local.desc = remapOwnedTemplateText(local.desc, templateOwner, targetOwner);
+                local.signature = remapOwnedTemplateText(local.signature,
+                        templateOwner, targetOwner);
+            }
+        }
+    }
+
+    private static void remapOwnedTemplateFrameValues(List<Object> values,
+                                                       String templateOwner,
+                                                       String targetOwner) {
+        if (values == null) return;
+        for (int i = 0; i < values.size(); i++) {
+            Object value = values.get(i);
+            if (value instanceof String text) {
+                values.set(i, remapOwnedTemplateText(text, templateOwner, targetOwner));
+            }
+        }
+    }
+
+    private static String remapOwnedTemplateText(String value,
+                                                  String templateOwner,
+                                                  String targetOwner) {
+        return value == null ? null : value.replace(templateOwner, targetOwner);
+    }
+
+    private static void requireNoOwnedTemplateReferences(ClassNode node,
+                                                          String templateOwner,
+                                                          String label) {
+        for (FieldNode field : node.fields) {
+            if (containsTemplateOwner(field.desc, templateOwner)
+                    || containsTemplateOwner(field.signature, templateOwner)) {
+                throw mismatch(label + " template field reference leaked");
+            }
+        }
+        for (MethodNode method : node.methods) {
+            if (containsTemplateOwner(method.desc, templateOwner)
+                    || containsTemplateOwner(method.signature, templateOwner)) {
+                throw mismatch(label + " template method signature leaked");
+            }
+            for (AbstractInsnNode insn : method.instructions.toArray()) {
+                if (insn instanceof FieldInsnNode field
+                        && (containsTemplateOwner(field.owner, templateOwner)
+                        || containsTemplateOwner(field.desc, templateOwner))) {
+                    throw mismatch(label + " template field instruction leaked");
+                }
+                if (insn instanceof MethodInsnNode call
+                        && (containsTemplateOwner(call.owner, templateOwner)
+                        || containsTemplateOwner(call.desc, templateOwner))) {
+                    throw mismatch(label + " template method instruction leaked");
+                }
+                if (insn instanceof TypeInsnNode type
+                        && containsTemplateOwner(type.desc, templateOwner)) {
+                    throw mismatch(label + " template type instruction leaked");
+                }
+                if (insn instanceof LdcInsnNode ldc && ldc.cst instanceof Type type
+                        && containsTemplateOwner(type.getDescriptor(), templateOwner)) {
+                    throw mismatch(label + " template class literal leaked");
+                }
+            }
+        }
+    }
+
+    private static boolean containsTemplateOwner(String value, String templateOwner) {
+        return value != null && value.contains(templateOwner);
+    }
+
+    private static int countTypeInstructions(MethodNode method, int opcode, String desc) {
+        int count = 0;
+        for (AbstractInsnNode insn : method.instructions.toArray()) {
+            if (insn instanceof TypeInsnNode type && type.getOpcode() == opcode
+                    && type.desc.equals(desc)) count++;
+        }
+        return count;
+    }
+
+    private static int countClassLiterals(MethodNode method, String internalName) {
+        int count = 0;
+        String descriptor = "L" + internalName + ";";
+        for (AbstractInsnNode insn : method.instructions.toArray()) {
+            if (insn instanceof LdcInsnNode ldc && ldc.cst instanceof Type type
+                    && type.getDescriptor().equals(descriptor)) count++;
+        }
+        return count;
+    }
 
     // ---------------------------------------------------------------------
     // ---------------------------------------------------------------------

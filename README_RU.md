@@ -236,4 +236,10 @@ runtime capability mask. Поздние callbacks старой эпохи отк
 однократную синхронизацию поколений перед включением fallback dirtying. Старый изменённый
 `starfarer.api.jar` устанавливать нельзя.
 
+P0/P0.5/P1 для market share также явно поддерживают принадлежащий проекту
+`AoTDCommodityMarketData`. Loader-local `ClassValue` допускает текущий fork только пока пять
+критических market-share методов наследуются из vanilla. Будущий override локально переводит
+данный runtime class на сохранённое raw-поведение, не отключает vanilla-патч и не удерживает
+classloader форка.
+
 Патч управляется ключом `patch.aotdCleanDeficitPath=true` и включён во всех поставляемых профилях.

@@ -80,6 +80,25 @@ known-disabled независимо от этого loader-исключения.
 Строковые литералы, constant-pool ordering, line numbers и debug metadata не являются частью
 решения о совместимости. Поэтому переводы и изменения несвязанных методов не блокируют патчи.
 
+## Owned fork как first-class compatibility surface
+
+AoTD Scheduler Fork принадлежит тому же проекту и рассматривается как обязательная compatibility
+surface для затрагиваемых vanilla-классов. Любой новый exact-class guard должен сопровождаться
+inventory fork subclasses/overrides. Возможны только четыре документированных результата: inherited
+optimized path, отдельная трансформация fork-owned метода, отсутствие соответствующего subclass,
+либо локальный fail-closed raw fallback. Проверки должны использовать реальный fork JAR и negative
+fixture будущего override; name-only allowlist недостаточен.
+
+## Owned AoTD market-share subclass
+
+`AoTDCommodityMarketData` является намеренно поддерживаемым subclass vanilla
+`CommodityMarketData`. P0/P1 не полагаются только на имя или версию форка: loader-local
+`StarsectorPrepatcherMarketShareRuntime` допускает его после одноразовой проверки, что весь
+critical market-share surface по-прежнему объявлен vanilla-классом. Изменение форка, добавляющее
+любой из этих overrides, локально возвращает raw behavior; P0.5 в унаследованном
+`getMarketShareData()` остаётся независимым. Решение хранится в `ClassValue`, поэтому child
+classloader не становится strong root.
+
 ## Статусы
 
 В `logs/prepatcher.log` для каждого загруженного target выводится один из статусов:
@@ -451,3 +470,14 @@ inventory. Structural stage проверяет их до анализа и по�
 The Stage 8 fork requires Prepatcher 0.11.0 and the original game `starfarer.api.jar`.
 A partial capability profile is intentionally rejected. The legacy AoTD core-JAR replacement is
 not compatible with this profile.
+
+## Optional Nexerelin market-share target
+
+`patch.nexPunitivePlayerShareLocalCache` независимо от vanilla-флага распознаёт
+`exerelin.campaign.intel.Nex_PunitiveExpeditionManager` по локальной структуре фактического
+classfile. Оба caller-флага включены по умолчанию; отключение Nex-флага не влияет на
+`patch.punitivePlayerShareLocalCache` и vanilla manager. Nexerelin не является обязательной зависимостью: имя optional target хранится как строка,
+а helper внедряется в mod-owned class без system-loader registry или reflection cache.
+Поддерживаемая приложенная версия содержит один per-faction call и два player-share call sites.
+Другая версия с изменённым data flow получает локальный `SKIPPED_STRUCTURAL`; core P0/P0.5 и
+vanilla P1 продолжают применяться независимо.

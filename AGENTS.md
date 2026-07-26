@@ -28,3 +28,23 @@ Every change to an overlapping transformation surface must include tests that co
 - a regression case proving that an earlier transformation cannot make a later enabled patch silently skip.
 
 Before adding a new patch, document its transformation surface and compare it with the surfaces of existing patches targeting the same class or method.
+
+## Owned AoTD fork compatibility
+
+The maintained AoTD Scheduler Fork is a first-class implementation, not an unknown third-party
+subclass. Before adding an exact-class guard or changing virtual-call multiplicity in a vanilla
+class, inventory the fork subclasses and overrides in the supplied fork source/JAR.
+
+For every affected owned-fork class:
+
+- use the optimized inherited path when the relevant semantic surface is identical;
+- transform the fork method explicitly when it owns a different but supported implementation;
+- otherwise fail closed only for that concrete runtime class, preserving the raw/original path;
+- test the real fork JAR, not a name-only stub;
+- add a future-override negative fixture so a fork update cannot silently receive unsafe semantics;
+- keep compatibility state loader-safe: no static strong `Class`, `Method`, `ClassLoader`, campaign
+  object, or mod-instance cache.
+
+A patch is not considered complete merely because vanilla tests pass while an owned fork subclass
+routes around it. The validation report must state whether fork support is inherited, directly
+transformed, intentionally unnecessary, or safely rejected.

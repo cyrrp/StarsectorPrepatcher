@@ -592,6 +592,67 @@ arguments или control-flow anchor, соответствующий класс 
 | `patch.starfieldCleanupBuffers` | parallax starfield implementation | reusable stale list | two-phase cleanup retained |
 | `patch.starfieldLinearRemoval` | same | thresholded stable iterator removal | order retained; equality-aware fallback |
 
+
+## Market share и punitive expeditions
+
+### `patch.marketShareLinearAggregation`
+
+Target: vanilla `com.fs.starfarer.campaign.econ.reach.CommodityMarketData`; его wrapper также
+обслуживает owned AoTD Scheduler Fork
+`data.kaysaar.aotd.tot.scripts.commoditydata.AoTDCommodityMarketData`.
+
+Исходный `getMarketSharePercentPerFaction()` для каждого впервые встреченного faction key
+повторно вызывает `getMarketSharePercent(faction)`, а тот снова материализует список рынков и
+обходит всю economy group. Wrapper сохраняет исходный метод как private synthetic raw fallback и
+выполняет один snapshot/проход для exact vanilla и подтверждённого AoTD-класса.
+
+AoTD eligibility вычисляется один раз на runtime class через loader-local `ClassValue<Boolean>`.
+Fork допускается только пока `getMarketSharePercentPerFaction`, `getMarketSharePercent`,
+`getMarkets`, `getExportMarketSharePercent` и `getMarketShareData` разрешаются непосредственно в
+vanilla `CommodityMarketData`. Любой будущий override, ошибка reflection или другой subclass
+автоматически выбирает raw fallback. ClassValue не хранит strong map по `Class`/`ClassLoader` и не
+мешает сборке optional mod loader.
+
+Сохраняются новый mutable `LinkedHashMap` на каждый вызов, порядок первого ключа, zero-share
+entries, `FactionAPI.equals()` для состава ключей, identity для ownership contribution,
+player-owned union, `int` overflow и существующее округление внутри
+`getExportMarketSharePercent()`.
+
+Все дополнительные `FactionAPI[]`, `IdentityHashMap` и accumulator arrays локальны одному вызову.
+Static/instance campaign cache, `ThreadLocal`, ссылки на sector/economy и изменения save schema
+отсутствуют.
+
+### `patch.marketShareDataPutElision`
+
+Target: concrete `CommodityMarketData.getMarketShareData(MarketAPI)`.
+
+Патч перемещает уже существующий `LinkedHashMap.put()` внутрь ветви `data == null`. Он не меняет
+key set, insertion order или identity возвращаемого `MarketShareData`; для существующей записи
+устраняется только лишний hash-table update. Патч имеет отдельный owner marker и после применения
+повторно проверяет postcondition линейного wrapper того же класса.
+
+### `patch.punitivePlayerShareLocalCache` и `patch.nexPunitivePlayerShareLocalCache`
+
+Первый флаг управляет только vanilla `PunitiveExpeditionManager`, второй — только
+optional `exerelin.campaign.intel.Nex_PunitiveExpeditionManager`. Оба включены по
+умолчанию. Трансформация и её fail-closed postcondition у targets одинаковы, но
+решение о попытке патча принимается независимо для каждого класса.
+
+В `getExpeditionReasons()` создаётся один method-local `IdentityHashMap`. Competitive branch
+извлекает player value из уже построенной per-faction map только при identity-совпадении ключа;
+при отсутствии ключа выполняется исходный single-faction getter. Free-port call site использует
+тот же local cache, поэтому повторные loop iterations для одного `CommodityMarketData` выполняют
+исходный getter один раз. Exact vanilla и структурно совместимый owned AoTD
+`AoTDCommodityMarketData` используют cache; неизвестная API-реализация, другой subclass или
+будущая AoTD-версия с critical override остаются на прямом пути и сохраняют исходную кратность
+вызовов.
+
+Optional Nex class не добавляется в обязательный core target inventory и не хранится как
+`Class<?>`, `Method`, `ClassLoader` или runtime object. Helper внедряется private static synthetic
+непосредственно в target class; cache живёт только до возврата метода. Если точная data-flow
+структура двух call sites не доказана, весь P1 target получает `SKIPPED_STRUCTURAL` без частичной
+модификации.
+
 ## Намеренно не реализовано
 
 - storm/automaton update throttling;

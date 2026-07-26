@@ -67,6 +67,41 @@ java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
   "$VERIFICATION_CONFIG" "$CORE/starfarer.api.jar" \
   2>&1 | tee "$REPORT_DIR/core-worlds-structural-matcher.txt"
 
+NEX_JAR="${NEXERELIN_JAR:-$GAME_ROOT/mods/Nexerelin/jars/ExerelinCore.jar}"
+AOTD_JAR="${AOTD_TOOLBOX_JAR:-$GAME_ROOT/mods/AoTD-Theory-Of-Toolbox-Scheduler-Fork/jars/AoTDToolboxTheory.jar}"
+if [[ -f "$NEX_JAR" ]]; then
+  java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+    com.starsector.prepatcher.agent.MarketShareOptionalCompatibilityTest \
+    "$NEX_JAR" \
+    2>&1 | tee "$REPORT_DIR/market-share-optional-nex.txt"
+else
+  echo "SKIPPED optional Nexerelin market-share compatibility: $NEX_JAR not found" | \
+    tee "$REPORT_DIR/market-share-optional-nex.txt"
+fi
+
+MARKET_SHARE_LOAD_ARGS=("$CORE/starfarer_obf.jar" "$CORE/starfarer.api.jar")
+if [[ -f "$NEX_JAR" ]]; then
+  MARKET_SHARE_LOAD_ARGS+=("$NEX_JAR")
+fi
+java "${EXPORTS[@]}" -Xverify:all -cp "$TEST_CLASSES:$TEST_CP" \
+  com.starsector.prepatcher.agent.MarketShareClassLoadSmokeTest \
+  "${MARKET_SHARE_LOAD_ARGS[@]}" \
+  2>&1 | tee "$REPORT_DIR/market-share-class-load.txt"
+
+java -cp "$TEST_CLASSES" \
+  com.starsector.prepatcher.agent.MarketShareAlgorithmDifferentialTest \
+  2>&1 | tee "$REPORT_DIR/market-share-algorithm-differential.txt"
+
+if [[ -f "$AOTD_JAR" ]]; then
+  java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
+    com.starsector.prepatcher.agent.MarketShareAoTDForkCompatibilityTest \
+    "$AOTD_JAR" \
+    2>&1 | tee "$REPORT_DIR/market-share-aotd-fork.txt"
+else
+  echo "SKIPPED AoTD market-share compatibility: $AOTD_JAR not found" | \
+    tee "$REPORT_DIR/market-share-aotd-fork.txt"
+fi
+
 java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
   com.starsector.prepatcher.agent.StrategicJumpDestinationFirstTransformerTest \
   "$VERIFICATION_CONFIG" "$CORE/starfarer_obf.jar" \
@@ -154,6 +189,37 @@ java \
   -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.runtime.MarketStepReplayActualAgentSmokeTest \
   2>&1 | tee "$REPORT_DIR/market-step-replay-actual-agent-smoke.txt"
+
+# Exercise P0, P0.5 and P1 through the real javaagent with all unrelated
+# bytecode patches disabled. Nexerelin remains an optional target.
+MARKET_SHARE_AGENT_CONFIG="$BUILD/market-share-agent-smoke.properties"
+sed -E \
+  -e 's/^(patch\.[^=]+)=.*/\1=false/' \
+  -e 's/^logging\.statsIntervalSeconds=.*/logging.statsIntervalSeconds=0/' \
+  "$MOD_ROOT/prepatcher.properties" | \
+  sed -E \
+    -e 's/^patch\.marketShareLinearAggregation=false/patch.marketShareLinearAggregation=true/' \
+    -e 's/^patch\.marketShareDataPutElision=false/patch.marketShareDataPutElision=true/' \
+    -e 's/^patch\.punitivePlayerShareLocalCache=false/patch.punitivePlayerShareLocalCache=true/' \
+    -e 's/^patch\.nexPunitivePlayerShareLocalCache=false/patch.nexPunitivePlayerShareLocalCache=true/' \
+  > "$MARKET_SHARE_AGENT_CONFIG"
+MARKET_SHARE_AGENT_CP="$RUNTIME_CP"
+MARKET_SHARE_AGENT_ARGS=()
+if [[ -f "$NEX_JAR" ]]; then
+  MARKET_SHARE_AGENT_CP="$MARKET_SHARE_AGENT_CP:$NEX_JAR"
+  MARKET_SHARE_AGENT_ARGS+=(nex)
+fi
+if [[ -f "$AOTD_JAR" ]]; then
+  MARKET_SHARE_AGENT_CP="$MARKET_SHARE_AGENT_CP:$AOTD_JAR"
+  MARKET_SHARE_AGENT_ARGS+=(aotd)
+fi
+java -Xverify:all \
+  -Dstarsector.prepatcher.sessionOrigin=market-share-smoke \
+  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MARKET_SHARE_AGENT_CONFIG" \
+  -cp "$MARKET_SHARE_AGENT_CP" \
+  com.starsector.prepatcher.runtime.MarketShareActualAgentSmokeTest \
+  "${MARKET_SHARE_AGENT_ARGS[@]}" \
+  2>&1 | tee "$REPORT_DIR/market-share-actual-agent-smoke.txt"
 
 # Exercise the active-set dependency contract with every other patch, including
 # the standalone temp-mod switch, disabled. The transformer must still install

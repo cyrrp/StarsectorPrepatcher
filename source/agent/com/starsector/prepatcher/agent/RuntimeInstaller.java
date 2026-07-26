@@ -35,10 +35,13 @@ final class RuntimeInstaller {
             "com.fs.starfarer.api.StarsectorPrepatcherPresentationHooks";
     private static final String STRATEGIC_JUMP_INDEX_CLASS =
             "com.fs.starfarer.api.StarsectorPrepatcherStrategicJumpIndex";
+    private static final String MARKET_SHARE_RUNTIME_CLASS =
+            "com.fs.starfarer.api.StarsectorPrepatcherMarketShareRuntime";
     private static final Set<String> REQUIRED_CLASSES = Set.of(
             HOOKS_CLASS, HYPERSPACE_HOOKS_CLASS, BRIDGE_CLASS,
             CORE_WORLDS_RUNTIME_CLASS, TEMP_MOD_HOOKS_CLASS,
-            PRESENTATION_HOOKS_CLASS, STRATEGIC_JUMP_INDEX_CLASS);
+            PRESENTATION_HOOKS_CLASS, STRATEGIC_JUMP_INDEX_CLASS,
+            MARKET_SHARE_RUNTIME_CLASS);
 
     private RuntimeInstaller() {}
 

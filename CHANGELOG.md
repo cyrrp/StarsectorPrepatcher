@@ -28,6 +28,29 @@
   token bucket; retry LRU scan заменён indexed min-heap, audit scan — O(1) round-robin queue. Capacity
   pressure больше не вытесняет незавершённые builds. Добавлены phase/queue/maintenance-overrun и
   oldest deferred-route diagnostics для проверки gameplay latency debt.
+- Линейная агрегация market share в `CommodityMarketData` с сохранённым raw fallback,
+  точной identity/player-owned семантикой и рабочим путем для owned
+  `AoTDCommodityMarketData`.
+- Invocation-local identity cache для player share в vanilla и структурно подтверждённом
+  `Nex_PunitiveExpeditionManager`; optional Nex target не создаёт hard dependency.
+- Structural/idempotency/negative compatibility tests для core и приложенной версии Nexerelin.
+
+### Изменено
+
+- Vanilla и Nexerelin P1 получили независимые настройки:
+  `patch.punitivePlayerShareLocalCache` и
+  `patch.nexPunitivePlayerShareLocalCache`; обе включены по умолчанию.
+- `getMarketShareData()` больше не выполняет повторный `LinkedHashMap.put()` для уже
+  материализованной записи. Ни один из трёх патчей не добавляет campaign-lifetime cache,
+  instance field или `ThreadLocal`.
+
+### Исправлено
+
+- Exact-class guard P0/P1 заменён loader-safe `ClassValue` compatibility gate: текущий
+  AoTD Scheduler Fork наследует оптимизированный путь, а будущий critical override автоматически
+  возвращает только этот runtime class на raw behavior без structural failure.
+- Добавлен regression на реальном `AoTDToolboxTheory.jar`, synthetic future override и GC
+  disposable mod classloader.
 
 ## [0.11.0] - 2026-07-24
 

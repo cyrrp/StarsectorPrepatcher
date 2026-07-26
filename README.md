@@ -232,3 +232,9 @@ Bridge schema V6 publishes campaign/economy epochs and reads the live runtime ca
 Late callbacks from an older epoch are rejected; a listener fail-stop triggers one generation
 resynchronization before fallback dirtying is enabled. Do not install the obsolete modified
 `starfarer.api.jar`.
+
+The market-share P0/P0.5/P1 set also treats the owned
+`AoTDCommodityMarketData` as a supported implementation. A loader-local `ClassValue` admits the
+current fork only while all five critical market-share methods remain inherited from vanilla. A
+future fork override fails closed to the preserved raw implementation for that runtime class; it
+does not disable the vanilla patch or retain the fork classloader.

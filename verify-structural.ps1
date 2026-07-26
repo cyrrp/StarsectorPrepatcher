@@ -142,6 +142,136 @@ if ($coreWorldsStructuralExitCode -ne 0) {
     throw 'Core-worlds structural matcher verification failed.'
 }
 
+$nexJar = if ([string]::IsNullOrWhiteSpace($env:NEXERELIN_JAR)) {
+    Join-Path $gameRoot 'mods\Nexerelin\jars\ExerelinCore.jar'
+} else {
+    $env:NEXERELIN_JAR
+}
+$nexAvailable = Test-Path -LiteralPath $nexJar -PathType Leaf
+$aotdJar = if ([string]::IsNullOrWhiteSpace($env:AOTD_TOOLBOX_JAR)) {
+    Join-Path $gameRoot 'mods\AoTD-Theory-Of-Toolbox-Scheduler-Fork\jars\AoTDToolboxTheory.jar'
+} else {
+    $env:AOTD_TOOLBOX_JAR
+}
+$aotdAvailable = Test-Path -LiteralPath $aotdJar -PathType Leaf
+$marketShareOptionalReport =
+    Join-Path $reportDir 'market-share-optional-nex.txt'
+if ($nexAvailable) {
+    $ErrorActionPreference = 'Continue'
+    try {
+        $marketShareOptionalOutput = @(& java @exports -cp $classPath `
+            com.starsector.prepatcher.agent.MarketShareOptionalCompatibilityTest `
+            $nexJar 2>&1)
+        $marketShareOptionalExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    $marketShareOptionalLines = @(
+        $marketShareOptionalOutput | ForEach-Object { $_.ToString() })
+    $marketShareOptionalLines
+    [IO.File]::WriteAllLines(
+        $marketShareOptionalReport,
+        [string[]] $marketShareOptionalLines,
+        $utf8)
+    if ($marketShareOptionalExitCode -ne 0) {
+        throw 'Optional Nexerelin market-share compatibility verification failed.'
+    }
+} else {
+    $marketShareOptionalLines = @(
+        "SKIPPED optional Nexerelin market-share compatibility: $nexJar not found")
+    $marketShareOptionalLines
+    [IO.File]::WriteAllLines(
+        $marketShareOptionalReport,
+        [string[]] $marketShareOptionalLines,
+        $utf8)
+}
+
+$marketShareLoadArgs = @(
+    (Join-Path $core 'starfarer_obf.jar'),
+    (Join-Path $core 'starfarer.api.jar')
+)
+if ($nexAvailable) {
+    $marketShareLoadArgs += $nexJar
+}
+$marketShareClassLoadReport =
+    Join-Path $reportDir 'market-share-class-load.txt'
+$ErrorActionPreference = 'Continue'
+try {
+    $marketShareClassLoadCp =
+        @($testClasses, $testCp) -join [IO.Path]::PathSeparator
+    $marketShareClassLoadOutput = @(& java @exports -Xverify:all `
+        -cp $marketShareClassLoadCp `
+        com.starsector.prepatcher.agent.MarketShareClassLoadSmokeTest `
+        @marketShareLoadArgs 2>&1)
+    $marketShareClassLoadExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$marketShareClassLoadLines = @(
+    $marketShareClassLoadOutput | ForEach-Object { $_.ToString() })
+$marketShareClassLoadLines
+[IO.File]::WriteAllLines(
+    $marketShareClassLoadReport,
+    [string[]] $marketShareClassLoadLines,
+    $utf8)
+if ($marketShareClassLoadExitCode -ne 0) {
+    throw 'Market-share class-loading verification failed.'
+}
+
+$marketShareAlgorithmReport =
+    Join-Path $reportDir 'market-share-algorithm-differential.txt'
+$ErrorActionPreference = 'Continue'
+try {
+    $marketShareAlgorithmOutput = @(& java -cp $testClasses `
+        com.starsector.prepatcher.agent.MarketShareAlgorithmDifferentialTest 2>&1)
+    $marketShareAlgorithmExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$marketShareAlgorithmLines = @(
+    $marketShareAlgorithmOutput | ForEach-Object { $_.ToString() })
+$marketShareAlgorithmLines
+[IO.File]::WriteAllLines(
+    $marketShareAlgorithmReport,
+    [string[]] $marketShareAlgorithmLines,
+    $utf8)
+if ($marketShareAlgorithmExitCode -ne 0) {
+    throw 'Market-share algorithm differential verification failed.'
+}
+
+$marketShareAoTDReport = Join-Path $reportDir 'market-share-aotd-fork.txt'
+if ($aotdAvailable) {
+    $marketShareAoTDCp =
+        @($testClasses, $testCp) -join [IO.Path]::PathSeparator
+    $ErrorActionPreference = 'Continue'
+    try {
+        $marketShareAoTDOutput = @(& java @exports -cp $marketShareAoTDCp `
+            com.starsector.prepatcher.agent.MarketShareAoTDForkCompatibilityTest `
+            $aotdJar 2>&1)
+        $marketShareAoTDExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    $marketShareAoTDLines = @(
+        $marketShareAoTDOutput | ForEach-Object { $_.ToString() })
+    $marketShareAoTDLines
+    [IO.File]::WriteAllLines(
+        $marketShareAoTDReport,
+        [string[]] $marketShareAoTDLines,
+        $utf8)
+    if ($marketShareAoTDExitCode -ne 0) {
+        throw 'AoTD market-share compatibility verification failed.'
+    }
+} else {
+    $marketShareAoTDLines = @(
+        "SKIPPED AoTD market-share compatibility: $aotdJar not found")
+    $marketShareAoTDLines
+    [IO.File]::WriteAllLines(
+        $marketShareAoTDReport,
+        [string[]] $marketShareAoTDLines,
+        $utf8)
+}
+
 $strategicJumpReport =
     Join-Path $reportDir 'strategic-jump-destination-first.txt'
 $ErrorActionPreference = 'Continue'
@@ -391,6 +521,70 @@ $marketStepReplayLines
     $marketStepReplayReport, [string[]] $marketStepReplayLines, $utf8)
 if ($marketStepReplayExitCode -ne 0) {
     throw 'Market step-replay actual-agent smoke failed.'
+}
+
+# Exercise P0, P0.5 and P1 through the real javaagent with all unrelated
+# bytecode patches disabled. Nexerelin remains an optional target.
+$marketShareAgentConfig = Join-Path $build 'market-share-agent-smoke.properties'
+$marketShareAgentText = [IO.File]::ReadAllText(
+    (Join-Path $modRoot 'prepatcher.properties'))
+$marketShareAgentText = [regex]::Replace(
+    $marketShareAgentText,
+    '(?m)^(patch\.[^=\r\n]+)=.*$',
+    { param($match) $match.Groups[1].Value + '=false' })
+foreach ($key in @(
+    'patch.marketShareLinearAggregation',
+    'patch.marketShareDataPutElision',
+    'patch.punitivePlayerShareLocalCache',
+    'patch.nexPunitivePlayerShareLocalCache'
+)) {
+    $marketShareAgentText = [regex]::Replace(
+        $marketShareAgentText,
+        '(?m)^' + [regex]::Escape($key) + '=false$',
+        "$key=true")
+}
+$marketShareAgentText = [regex]::Replace(
+    $marketShareAgentText,
+    '(?m)^logging\.statsIntervalSeconds=.*$',
+    'logging.statsIntervalSeconds=0')
+[IO.File]::WriteAllText(
+    $marketShareAgentConfig,
+    $marketShareAgentText,
+    $utf8)
+
+$marketShareAgentCp = $runtimeCp
+$marketShareAgentArgs = @()
+if ($nexAvailable) {
+    $marketShareAgentCp += [IO.Path]::PathSeparator + $nexJar
+    $marketShareAgentArgs += 'nex'
+}
+if ($aotdAvailable) {
+    $marketShareAgentCp += [IO.Path]::PathSeparator + $aotdJar
+    $marketShareAgentArgs += 'aotd'
+}
+$marketShareAgentReport =
+    Join-Path $reportDir 'market-share-actual-agent-smoke.txt'
+$ErrorActionPreference = 'Continue'
+try {
+    $marketShareAgentOutput = @(& java -Xverify:all `
+        '-Dstarsector.prepatcher.sessionOrigin=market-share-smoke' `
+        "-javaagent:$mainAgentJar=config=$marketShareAgentConfig" `
+        -cp $marketShareAgentCp `
+        com.starsector.prepatcher.runtime.MarketShareActualAgentSmokeTest `
+        @marketShareAgentArgs 2>&1)
+    $marketShareAgentExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$marketShareAgentLines = @(
+    $marketShareAgentOutput | ForEach-Object { $_.ToString() })
+$marketShareAgentLines
+[IO.File]::WriteAllLines(
+    $marketShareAgentReport,
+    [string[]] $marketShareAgentLines,
+    $utf8)
+if ($marketShareAgentExitCode -ne 0) {
+    throw 'Market-share actual-agent smoke failed.'
 }
 
 $commoditySmokeConfig = Join-Path $build 'commodity-temporal-agent-smoke.properties'
