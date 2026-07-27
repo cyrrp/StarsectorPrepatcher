@@ -1,0 +1,14 @@
+scenario,codex,aotdEnabled,targetId,commodity,available,targetDemand,industries,expectedSelectedCommodity,expectedDeficit,note
+codex-short-circuit,true,true,target,food,0,10,pre|1|9;target|2|0,,0,codex returns empty result
+vanilla-deficit,false,false,target,food,3,7,pre|1|99;target|2|0,food,4,AoTD-disabled ignores industry ordering
+prior-industry-demand,false,true,target,food,10,8,pre|1|5;target|2|0;after|3|100,food,3,only prior industry consumes availability
+target-stops-scan,false,true,target,food,2,5,target|1|0;after|2|100,food,3,post-target demand is ignored
+stable-equal-order,false,true,target,food,5,4,first|1|3;target|1|0,food,2,equal order remains stable
+float-and-negative,false,true,target,food,4,5.9,negative|0|-3;fractional|1|2.9;target|2|0,food,3,Java truncation and nonnegative clamp
+multi-maximum,false,true,target,food,3,6,target|1|0,organics,6,largest deficit wins
+multi-maximum,false,true,target,organics,1,7,target|1|0,organics,6,largest deficit wins
+multi-tie-first,false,true,target,food,1,5,target|1|0,food,4,strict greater preserves first commodity
+multi-tie-first,false,true,target,organics,0,4,target|1|0,food,4,strict greater preserves first commodity
+deficit-capped-to-demand,false,true,target,food,1,3,pre|1|10;target|2|0,food,3,deficit is capped at demand
+no-deficit,false,true,target,food,20,3,pre|1|2;target|2|0,,0,no commodity selected when deficit is zero
+target-missing,false,true,target,food,8,5,one|1|4;two|2|3,food,4,all industries are scanned when target is absent

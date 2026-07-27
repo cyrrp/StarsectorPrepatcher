@@ -18,7 +18,7 @@ public final class AoTDDeliveryListenerFailStopTest {
         };
 
         long negotiated = StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract(
-                "aotd_theory_of_toolbox", 1, "stage8.3-hotfix-test", requested, broken);
+                "aotd_theory_of_toolbox", 1, "delivery-fail-stop-test", requested, broken);
         require((negotiated & StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_NATIVE_DELIVERY_EVENTS) != 0L,
                 "delivery capability was not initially negotiated");
 

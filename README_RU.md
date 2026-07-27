@@ -2,7 +2,7 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Текущая версия: **0.12.0**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
+Текущая версия: **0.13.0**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
 
 [![Без препатчера и с ним](media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
@@ -21,7 +21,7 @@ StarsectorPrepatcher — compatibility-first слой ранних патчей 
 - хранить зависимое от версии игры знание о bytecode внутри prepatcher, а не размножать его по
   игровым модам.
 
-Публичный API в `0.12.0` ещё не выпущен и остаётся пунктом roadmap. Планируемый namespace —
+Публичный API в `0.13.0` ещё не выпущен и остаётся пунктом roadmap. Планируемый namespace —
 `com.starsector.prepatcher.api`; типы станут поддерживаемым контрактом только после появления
 документации и compatibility-тестов.
 
@@ -61,7 +61,7 @@ Bootstrap plugin не меняет bytecode. Он выводит состоян�
 
 Если установлен **AoTD — Theory of Toolbox**, используйте поддерживаемый
 [Scheduler Fork](https://github.com/cyrrp/AoTD-Theory-Of-Toolbox-Scheduler-Fork) выпуска
-`1.0.14-spp1` или новее. Форк необходим для оптимальной производительности AoTD и поддерживаемого
+`1.0.14-spp2` или новее. Форк необходим для оптимальной производительности AoTD и поддерживаемого
 native scheduler/capability path. Без AoTD форк не требуется.
 
 В Windows запустите двойным щелчком `StarsectorPrepatcher.bat`, выберите
@@ -229,20 +229,20 @@ Rendering. Сборка описана в [`BUILDING.md`](BUILDING.md).
 - [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) — structural matching и fail-open правила;
 - [`docs/VALIDATION.md`](docs/VALIDATION.md) — playbook регрессионных и performance-проверок;
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — план structural discovery, архитектуры, tooling и платформ;
-- [`docs/releases/0.12.0.md`](docs/releases/0.12.0.md) — подробный отчёт текущего выпуска.
+- [`docs/releases/0.13.0.md`](docs/releases/0.13.0.md) — подробный отчёт текущего выпуска.
 
 Условия распространения находятся в [`LICENSE`](LICENSE).
 
 ## Интеграция с AoTD Scheduler Fork
 
-Prepatcher 0.12.0 устанавливает clean wrapper на оригинальный `BaseIndustry.getMaxDeficit()`.
+Prepatcher 0.13.0 устанавливает clean wrapper на оригинальный `BaseIndustry.getMaxDeficit()`.
 Vanilla-реализация сохраняется и используется, пока совместимый AoTD Scheduler Fork не зарегистрирует
 полный native-профиль `0x1ff`. Bridge schema V6 публикует campaign/economy epoch и читает актуальную
 runtime capability mask. Поздние callbacks старой эпохи отклоняются, а fail-stop listener запускает
 однократную синхронизацию поколений перед включением fallback dirtying. Старый изменённый
 `starfarer.api.jar` устанавливать нельзя.
 
-При установленном AoTD Theory of Toolbox поддерживаемый Scheduler Fork `1.0.14-spp1` необходим для
+При установленном AoTD Theory of Toolbox поддерживаемый Scheduler Fork `1.0.14-spp2` необходим для
 оптимальной производительности. В остальных конфигурациях Prepatcher не требует ни AoTD, ни форк.
 Исходная сборка AoTD может использовать сохранённые fail-closed/raw пути, но не предоставляет полный
 поддерживаемый native scheduler contract.
@@ -252,5 +252,28 @@ P0/P0.5/P1 для market share также явно поддерживают пр
 критических market-share методов наследуются из vanilla. Будущий override локально переводит
 данный runtime class на сохранённое raw-поведение, не отключает vanilla-патч и не удерживает
 classloader форка.
+
+Патч Local Resources против холодной материализации распознаёт точный AoTD-контракт commodity,
+supply/demand data и calculation script. Он читает только уже опубликованное состояние и применяет
+форковое преобразование raw units, не вызывая lazy builder рыночных данных. Owner-local индекс
+`econGroup` также допускает точный наследуемый read surface `AoTDReachEconomy`. Real-fork gate
+проверяет, что текущий `addMarket` ровно один раз делегирует vanilla; будущий critical read override
+локально возвращается к raw path, а обход `super` в mutator обнаруживается через source validation
+и bounded audit, а не считается немедленным epoch event.
+
+Exact fork-owned `AoTDConstructionSite.setAssignedWonder(String)` получает проверенную scheduler
+mutation boundary, поэтому переход в `building=true` не остаётся скрытым до периодического
+construction audit. Эти пути не добавляют статический cache campaign/mod objects: optional
+accessors используют `ClassValue`, а массивы group index остаются transient-состоянием владельца
+`ReachEconomy`.
+
+Интеграция также исправляет синхронную последовательность открытия рынка/Cargo. Vanilla вызывает
+`Economy.nextStep()` до публикации `currentlyOpenMarket`; exact wrapper
+`CampaignEngine.reportPlayerOpenedMarket()` теперь передаёт аргумент заранее и очищает context в
+`finally`. Форк выполняет committed refresh только открываемого рынка, ограничивает этим рынком
+immigration и post-immigration snapshot, не строит global `commodity × econGroup` и пропускает
+немедленный Cargo step только при точном совпадении runtime/registry/market revisions. Global
+internal-trade settlement остаётся на штатной economy cadence, а UI path по-прежнему публикует одну
+границу `economyUpdated`.
 
 Патч управляется ключом `patch.aotdCleanDeficitPath=true` и включён во всех поставляемых профилях.

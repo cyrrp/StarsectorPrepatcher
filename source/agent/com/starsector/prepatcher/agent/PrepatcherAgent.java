@@ -15,7 +15,7 @@ import java.util.Map;
 import java.util.Set;
 
 public final class PrepatcherAgent {
-    public static final String VERSION = "0.12.0";
+    public static final String VERSION = "0.13.0";
     private PrepatcherAgent() {}
 
     public static void premain(String agentArgs, Instrumentation instrumentation) {
@@ -98,7 +98,11 @@ public final class PrepatcherAgent {
             // load time so the mod never uses reflection or loader probing.
             instrumentation.addTransformer(
                     new AoTDSchedulerBridgeTransformer(runtimeLoader), false);
+            instrumentation.addTransformer(
+                    new AoTDForkCompatibilityTransformer(config.marketScheduler), false);
             System.setProperty("starsector.prepatcher.aotdBridgePatch", "transformer-installed");
+            System.setProperty("starsector.prepatcher.aotdForkCompatibilityPatch",
+                    config.marketScheduler ? "transformer-installed" : "disabled");
             if (!presentationMarkerLoaded) {
                 instrumentation.addTransformer(
                         new FastForwardPresentationTransformer(config, runtimeLoader), false);
@@ -110,6 +114,14 @@ public final class PrepatcherAgent {
             }
             ClassFileTransformer transformer = new PrepatcherTransformer(config, runtimeLoader);
             instrumentation.addTransformer(transformer, false);
+            // Registered after the structural plan so it wraps the final
+            // CampaignEngine method body and publishes the market before
+            // vanilla Economy.nextStep() observes currentlyOpenMarket.
+            instrumentation.addTransformer(
+                    new AoTDMarketOpenContextTransformer(config.marketScheduler, runtimeLoader),
+                    false);
+            System.setProperty("starsector.prepatcher.aotdMarketOpenContextPatch",
+                    config.marketScheduler ? "transformer-installed" : "disabled");
             System.setProperty("starsector.prepatcher.presentationStructuralOrder",
                     presentationMarkerLoaded ? "structural-only" : "presentation->structural");
             if (config.directMarketObservation || config.marketScheduler

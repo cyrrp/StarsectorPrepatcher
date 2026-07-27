@@ -16,6 +16,50 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-27
+
+### Добавлено
+
+- Exact `CampaignEngine.reportPlayerOpenedMarket(MarketAPI)` wrapper публикует
+  открываемый рынок до vanilla `Economy.nextStep()` и очищает loader-neutral
+  `ThreadLocal` context в `finally`. Scheduler Fork потребляет контекст
+  один раз, выполняет только single-market UI cut и coalesces немедленный Cargo
+  `tripleStep` по campaign/economy/registry/market revisions.
+- Real-JAR bytecode gate запрещает возврат all-market list, global
+  `commodity × econGroup` construction и global internal-trade cut в AoTD UI path;
+  отдельно проверяются transient owner-local coordinator и subset-safe registry audit.
+- Атомарный Local Resources patch устраняет скрытую холодную материализацию
+  `CommodityMarketData`; для exact AoTD commodity используется только уже опубликованный
+  `AoTDSupplyDemandData` и тот же calculation script, включая границу positive raw -> zero
+  converted.
+- Owner-local transient index `ReachEconomy.getMarketsInGroup()` с mutation epoch, source
+  identity/size validation и bounded ordered audit. Точный `AoTDReachEconomy` наследует индекс
+  после проверки vanilla-owned critical read surface; real-fork gate отдельно подтверждает
+  one-super-call `addMarket`, а обход mutator hook восстанавливается validation/audit.
+- Exact fork-owned transformer для `AoTDConstructionSite.setAssignedWonder(String)`, публикующий
+  scheduler construction mutation через `try/finally` без нового cache/listener/state.
+- Real-JAR compatibility gate P0/P1/P2, future-contract negative fixtures, actual class-load/
+  javaagent smoke и GC-проверки optional classloader/owner-local state.
+
+### Исправлено
+
+- Открытие рынка больше не выбирает глобальную ветку AoTD из-за того, что vanilla
+  присваивает `currentlyOpenMarket` только после `Economy.nextStep()`. Immigration,
+  post-immigration trade snapshot, materialized reconciliation и price follow-up
+  ограничены открываемым рынком; повторный Cargo step пропускается только при точном
+  совпадении revisions.
+- Synchronous UI refresh больше не создаёт `AoTDCommodityMarketData` для каждого
+  `commodity × (global + econGroup)` и не выполняет all-market snapshot
+  `markets × commodities × industries`. Global internal-trade settlement остаётся
+  на штатной economy boundary; UI path сохраняет один `economyUpdated` listener boundary.
+- Нелегальный AoTD commodity до первого economy batch больше не оценивается по ещё нулевым
+  vanilla-style `maxSupply/maxDemand`: используется подтверждённое форковое committed state либо
+  сохранённый raw getter.
+- `AoTDReachEconomy` больше не откатывает каждый `getMarketsInGroup()` к полному O(M)-scan только
+  из-за exact-class guard.
+- Начало строительства Grand Wonder немедленно инвалидирует scheduler construction policy вместо
+  ожидания редкого safety audit.
+
 ## [0.12.0] - 2026-07-26
 
 ### Добавлено
@@ -180,8 +224,8 @@
 
 - Пересечения presentation transformer и structural transformer закрыты единым
   ownership/postcondition контрактом для `CampaignState`, `CampaignEngine`, `BaseLocation`,
-  `BaseCampaignEntity` и `HyperspaceTerrainPlugin`. Presentation-stage публикует private synthetic
-  owner и feature mask; structural-stage принимает только полностью vanilla или полностью
+  `BaseCampaignEntity` и `HyperspaceTerrainPlugin`. Presentation pass публикует private synthetic
+  owner и feature mask; structural pass принимает только полностью vanilla или полностью
   подтверждённое presentation-состояние, перепроверяет его после каждого structural commit и в
   финальной композиции. Partial/foreign hooks отклоняют structural invocation до любых изменений;
   обратный порядок не является runtime-контрактом и проверяется локально structural matcher-ом.
@@ -681,7 +725,7 @@
 - Campaign listener throttling, ordered route indexes, installer/uninstaller, профили, build scripts
   и первичные отчёты проверки.
 
-## Stage 2 AoTD native contract
+## AoTD native contract
 
 - Added diagnostic early discovery of the AoTD scheduler-fork marker.
 - Added a verified transformer for the fork-owned no-op SchedulerBridge.
@@ -689,7 +733,7 @@
 - Added loader-ancestry, ABI, marker, idempotency and conflict checks.
 - Negotiates only capability `0x1`; later scheduler capabilities remain disabled.
 
-## Stage 3 AoTD delivered-time contract
+## AoTD delivered-time contract
 
 - Extended the verified no-reflection bridge to capability mask `0x0f`.
 - Added post-success `Market.advance()` delivery events and weak per-market generations.
@@ -697,9 +741,9 @@
 - Added nested mutation tokens, structural generations and a loader-neutral JDK callback.
 - Kept ordinary AoTD reads/calculations off the exact replay path.
 
-## Stage 6 AoTD pure price offload
+## AoTD pure price offload
 
 - Added negotiation for AoTD capability `0x40` (`PURE_PRICE_OFFLOAD`).
-- Full Stage 6 fork capability mask is now `0x6f`.
+- Full fork capability mask is now `0x6f`.
 - Kept delivered-time, exact structural mutation replay and loader policy
   unchanged.

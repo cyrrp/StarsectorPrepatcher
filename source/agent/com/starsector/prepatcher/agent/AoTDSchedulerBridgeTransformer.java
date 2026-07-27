@@ -82,6 +82,12 @@ final class AoTDSchedulerBridgeTransformer implements ClassFileTransformer {
                     "(Ljava/lang/Object;I)J"), directBeforeMutation(), 2, 2);
             rewrite(require(node, "afterMarketMutation",
                     "(JLjava/lang/Object;IJ)V"), directAfterMutation(), 6, 6);
+            MethodNode consumeOpeningMarket = find(
+                    node, "consumeOpeningMarket", "()Ljava/lang/Object;");
+            if (consumeOpeningMarket != null) {
+                rewrite(consumeOpeningMarket,
+                        directNoArgObject("consumeAoTDOpeningMarket"), 1, 0);
+            }
             rewrite(require(node, "publishRuntimeEpoch",
                     "(JJ)V"), directPublishRuntimeEpoch(), 4, 4);
             rewrite(require(node, "getRuntimeCapabilities",
@@ -133,6 +139,14 @@ final class AoTDSchedulerBridgeTransformer implements ClassFileTransformer {
         code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE, name,
                 "()J", false));
         code.add(new InsnNode(Opcodes.LRETURN));
+        return code;
+    }
+
+    private static InsnList directNoArgObject(String name) {
+        InsnList code = new InsnList();
+        code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE, name,
+                "()Ljava/lang/Object;", false));
+        code.add(new InsnNode(Opcodes.ARETURN));
         return code;
     }
 
@@ -228,9 +242,15 @@ final class AoTDSchedulerBridgeTransformer implements ClassFileTransformer {
         method.maxLocals = maxLocals;
     }
 
-    private static MethodNode require(ClassNode node, String name, String desc) {
+    private static MethodNode find(ClassNode node, String name, String desc) {
         for (MethodNode method : node.methods)
             if (name.equals(method.name) && desc.equals(method.desc)) return method;
+        return null;
+    }
+
+    private static MethodNode require(ClassNode node, String name, String desc) {
+        MethodNode method = find(node, name, desc);
+        if (method != null) return method;
         throw new IllegalStateException("Missing bridge ABI method " + name + desc);
     }
 

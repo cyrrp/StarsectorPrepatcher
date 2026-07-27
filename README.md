@@ -2,7 +2,7 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Current version: **0.12.0**. Supported game build: **Starsector 0.98a-RC8**.
+Current version: **0.13.0**. Supported game build: **Starsector 0.98a-RC8**.
 
 [![Unplayable without Prepatcher versus smooth with Prepatcher](media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
@@ -20,7 +20,7 @@ The project has a broader direction than map optimization alone:
 - keep version-specific bytecode knowledge inside the prepatcher instead of duplicating it across
   gameplay mods.
 
-The public API is a roadmap item, not a published compatibility surface in `0.12.0`. Its intended
+The public API is a roadmap item, not a published compatibility surface in `0.13.0`. Its intended
 namespace is `com.starsector.prepatcher.api`; API types will only become supported once they are
 documented and covered by compatibility tests.
 
@@ -62,7 +62,7 @@ log and warns when the mod is enabled without the startup agent.
 
 If you use **AoTD — Theory of Toolbox**, install the maintained
 [Scheduler Fork](https://github.com/cyrrp/AoTD-Theory-Of-Toolbox-Scheduler-Fork), release
-`1.0.14-spp1` or newer. The fork is required for optimal AoTD performance and for the supported
+`1.0.14-spp2` or newer. The fork is required for optimal AoTD performance and for the supported
 native scheduler/capability path. It is not required when AoTD is absent.
 
 On Windows, double-click `StarsectorPrepatcher.bat`, choose **Install javaagent**, and select
@@ -225,13 +225,13 @@ classloader smoke. Build details are in [`BUILDING.md`](BUILDING.md).
 - [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) — structural matching and fail-open rules;
 - [`docs/VALIDATION.md`](docs/VALIDATION.md) — regression and performance validation playbook;
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — structural discovery, architecture, tooling, and platform plan;
-- [`docs/releases/0.12.0.md`](docs/releases/0.12.0.md) — current detailed release report.
+- [`docs/releases/0.13.0.md`](docs/releases/0.13.0.md) — current detailed release report.
 
 StarsectorPrepatcher is distributed under the terms in [`LICENSE`](LICENSE).
 
 ## AoTD Scheduler Fork integration
 
-Prepatcher 0.12.0 installs a clean wrapper around the original
+Prepatcher 0.13.0 installs a clean wrapper around the original
 `BaseIndustry.getMaxDeficit()`. The preserved vanilla implementation remains active until a
 compatible AoTD Scheduler Fork registers the complete native capability profile `0x1ff`.
 Bridge schema V6 publishes campaign/economy epochs and reads the live runtime capability mask.
@@ -239,7 +239,7 @@ Late callbacks from an older epoch are rejected; a listener fail-stop triggers o
 resynchronization before fallback dirtying is enabled. Do not install the obsolete modified
 `starfarer.api.jar`.
 
-The maintained Scheduler Fork `1.0.14-spp1` is required for optimal performance when AoTD Theory of
+The maintained Scheduler Fork `1.0.14-spp2` is required for optimal performance when AoTD Theory of
 Toolbox is installed. Prepatcher does not require AoTD or the fork in any other setup. The original
 AoTD build may use preserved fail-closed/raw paths, but it does not provide the complete supported
 native scheduler contract.
@@ -249,3 +249,26 @@ The market-share P0/P0.5/P1 set also treats the owned
 current fork only while all five critical market-share methods remain inherited from vanilla. A
 future fork override fails closed to the preserved raw implementation for that runtime class; it
 does not disable the vanilla patch or retain the fork classloader.
+
+The Local Resources cold-materialization patch recognizes the exact AoTD commodity/data/calculation
+surface. It reads only already-published supply/demand data and applies the fork's own raw-unit
+conversion without invoking its lazy market-data builder. The owner-local `econGroup` index also
+admits the exact inherited `AoTDReachEconomy` read surface. The real-fork gate verifies that the
+currently supplied `addMarket` delegates once to vanilla; a future critical read override falls
+back locally, while a future mutator bypass is recovered by source validation and the bounded audit
+rather than being treated as an immediate epoch event.
+
+The exact fork-owned `AoTDConstructionSite.setAssignedWonder(String)` method receives a verified
+scheduler mutation wrapper so the transition to `building=true` cannot remain hidden until the
+periodic construction audit. These compatibility paths add no static campaign/mod-object cache:
+optional accessors use `ClassValue`, and group-index arrays remain transient state of the owning
+`ReachEconomy`.
+
+The integration also fixes the synchronous market/Cargo refresh sequence. Vanilla calls
+`Economy.nextStep()` before publishing `currentlyOpenMarket`; an exact, finally-cleared
+`CampaignEngine.reportPlayerOpenedMarket()` wrapper now supplies that argument early. The fork
+performs a committed single-market refresh, limits immigration and post-immigration snapshot work
+to that market, skips global `commodity × econGroup` construction, and coalesces the immediately
+following Cargo step only when the exact runtime and market revisions are unchanged. Global
+internal-trade settlement remains on the normal economy cadence; the UI path still publishes one
+`economyUpdated` listener boundary.

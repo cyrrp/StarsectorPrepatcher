@@ -161,6 +161,16 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             "com/fs/starfarer/api/impl/campaign/econ/impl/ConstructionQueue";
     static final String COMMODITY_ON_MARKET =
             "com/fs/starfarer/campaign/econ/CommodityOnMarket";
+    static final String LOCAL_RESOURCES_SUBMARKET =
+            "com/fs/starfarer/api/impl/campaign/submarkets/LocalResourcesSubmarketPlugin";
+    static final String REACH_ECONOMY =
+            "com/fs/starfarer/campaign/econ/reach/ReachEconomy";
+    private static final String ECONOMY_GROUP_INDEX_STATE_FIELD =
+            "spp$econGroupIndexState";
+    private static final String ECONOMY_GROUP_INDEX_RAW_GETTER =
+            "spp$rawGetMarketsInGroup";
+    private static final int ECONOMY_GROUP_INDEX_COMPONENT_REACH_ECONOMY = 1;
+    private static final int ECONOMY_GROUP_INDEX_COMPONENT_MARKET = 2;
     private static final String ECONOMY_PERSISTENT_STATE_FIELD =
             "smo$economyMarketsSnapshotState";
     private static final String ECONOMY_PERSISTENT_ACCESSOR =
@@ -226,7 +236,8 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             BASE_CAMPAIGN_ENTITY, MEMORY, CORE_SCRIPT, ECONOMY,
             MARKET, BASE_INDUSTRY, COMMODITY_MARKET_DATA, PUNITIVE_EXPEDITION_MANAGER,
             MILITARY_BASE, LIONS_GUARD_HQ, RECENT_UNREST, CONSTRUCTION_QUEUE,
-            COMMODITY_ON_MARKET, MUTABLE_STAT, MUTABLE_STAT_WITH_TEMP_MODS,
+            COMMODITY_ON_MARKET, LOCAL_RESOURCES_SUBMARKET, REACH_ECONOMY,
+            MUTABLE_STAT, MUTABLE_STAT_WITH_TEMP_MODS,
             INTEL_MANAGER, SHIP,
             DYNAMIC_PARTICLE_GROUP, LOADING_UTILS,
             SCRIPT_STORE_RUNNER, RULES, SPEC_STORE, TEXTURE_LOADER, SOUND,
@@ -436,8 +447,21 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
                     config.coreWorldsExtentCache, this::patchCoreWorldsExtentCache);
             case ECONOMY -> apply(state, ECONOMY_ADVANCE_PLAN_PATCH_ID,
                     economyAdvancePlanEnabled(), this::patchEconomyAdvancePlan);
-            case MARKET -> apply(state, MARKET_ADVANCE_PLAN_PATCH_ID,
-                    marketAdvancePlanEnabled(), this::patchMarketAdvancePlan);
+            case MARKET -> {
+                apply(state, MARKET_ADVANCE_PLAN_PATCH_ID,
+                        marketAdvancePlanEnabled(), this::patchMarketAdvancePlan);
+                apply(state, "economyGroupIndexMarketMutation",
+                        config.economyGroupIndex,
+                        this::patchEconomyGroupIndexMarketMutation);
+            }
+            case LOCAL_RESOURCES_SUBMARKET -> apply(state,
+                    "localResourcesNoColdMarketData",
+                    config.localResourcesNoColdMarketData,
+                    this::patchLocalResourcesNoColdMarketData);
+            case REACH_ECONOMY -> apply(state,
+                    "economyGroupIndexReachEconomy",
+                    config.economyGroupIndex,
+                    this::patchEconomyGroupIndexReachEconomy);
             case COMMODITY_MARKET_DATA -> {
                 // Both patches touch the same class. The linear wrapper is installed first;
                 // put-elision then consumes that current state and composition validation
@@ -830,7 +854,9 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
                     || config.economyPersistentSnapshots || config.marketScheduler;
             case MARKET -> config.economyPersistentSnapshots
                     || config.commodityTemporalFastPath || config.directMarketObservation
-                    || config.marketScheduler;
+                    || config.marketScheduler || config.economyGroupIndex;
+            case LOCAL_RESOURCES_SUBMARKET -> config.localResourcesNoColdMarketData;
+            case REACH_ECONOMY -> config.economyGroupIndex;
             case COMMODITY_MARKET_DATA -> config.marketShareLinearAggregation
                     || config.marketShareDataPutElision;
             case PUNITIVE_EXPEDITION_MANAGER ->
@@ -928,6 +954,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
                 || config.campaignListenerThrottle || config.routeJumpPointIndex
                 || config.strategicJumpDestinationIndex
                 || config.economyLocationCache || config.marketScheduler
+                || config.economyGroupIndex
                 || config.commRelaySystemIndex
                 || config.commodityTemporalFastPath
                 || config.scratchTrimEnabled
@@ -7231,6 +7258,518 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     // Market-share aggregation and punitive-expedition callers
     // ---------------------------------------------------------------------
 
+    private PatchReport patchLocalResourcesNoColdMarketData(ClassNode node) {
+        final String commodityApi =
+                "com/fs/starfarer/api/campaign/econ/CommodityOnMarketAPI";
+        final String marketApi = "com/fs/starfarer/api/campaign/econ/MarketAPI";
+        final String marketDataApi =
+                "com/fs/starfarer/api/campaign/econ/CommodityMarketDataAPI";
+        final String shareDataApi =
+                "com/fs/starfarer/api/campaign/econ/MarketShareDataAPI";
+        final String concreteData =
+                "com/fs/starfarer/campaign/econ/reach/CommodityMarketData";
+        final String commodityDesc = "L" + commodityApi + ";";
+        final String marketDesc = "L" + marketApi + ";";
+        final String getterDesc = "()L" + marketDataApi + ";";
+        final String shippingDesc = "(" + marketDesc + "Z)I";
+        final String shouldHookDesc = "(" + marketDesc + commodityDesc + ")Z";
+
+        MethodNode stockpile = requireMethod(node, "getStockpileLimit",
+                "(" + commodityDesc + ")I");
+        MethodNode shouldHave = requireMethod(node, "shouldHaveCommodity",
+                "(" + commodityDesc + ")Z");
+
+        int stockGetter = countCalls(stockpile, Opcodes.INVOKEINTERFACE,
+                commodityApi, "getCommodityMarketData", getterDesc);
+        int stockInterfaceShipping = countCalls(stockpile, Opcodes.INVOKEINTERFACE,
+                marketDataApi, "getMaxShipping", shippingDesc);
+        int stockStaticShipping = countCalls(stockpile, Opcodes.INVOKESTATIC,
+                concreteData, "getShippingCapacity", shippingDesc);
+        int shouldGetter = countCalls(shouldHave, Opcodes.INVOKEINTERFACE,
+                commodityApi, "getCommodityMarketData", getterDesc);
+        int shouldHook = countCalls(shouldHave, Opcodes.INVOKESTATIC, HOOKS,
+                "localResourcesShouldHaveCommodity", shouldHookDesc);
+
+        boolean patched = stockGetter == 0 && stockInterfaceShipping == 0
+                && stockStaticShipping == 1 && shouldGetter == 0 && shouldHook == 1;
+        if (patched) {
+            requireLocalResourcesShouldWrapper(node.name, shouldHave, shouldHookDesc);
+            throw already("Local Resources cold CommodityMarketData paths are removed");
+        }
+        if (stockStaticShipping != 0 || shouldHook != 0) {
+            throw mismatch("Local Resources has a partial/foreign cold-data rewrite");
+        }
+
+        requireCount("Local Resources stockpile CommodityMarketData getter", stockGetter, 1);
+        requireCount("Local Resources stockpile getMaxShipping", stockInterfaceShipping, 1);
+        requireCount("Local Resources should-have CommodityMarketData getter", shouldGetter, 1);
+        requireCount("Local Resources should-have Market.isIllegal",
+                countCalls(shouldHave, Opcodes.INVOKEINTERFACE,
+                        marketApi, "isIllegal", "(" + commodityDesc + ")Z"), 1);
+        requireCount("Local Resources should-have getMarketShareData",
+                countCalls(shouldHave, Opcodes.INVOKEINTERFACE, marketDataApi,
+                        "getMarketShareData", "(" + marketDesc + ")L" + shareDataApi + ";"), 1);
+        requireCount("Local Resources should-have isSourceIsIllegal",
+                countCalls(shouldHave, Opcodes.INVOKEINTERFACE, shareDataApi,
+                        "isSourceIsIllegal", "()Z"), 1);
+
+        MethodInsnNode getter = only(calls(stockpile, Opcodes.INVOKEINTERFACE,
+                commodityApi, "getCommodityMarketData", getterDesc),
+                "Local Resources stockpile CommodityMarketData getter");
+        MethodInsnNode shipping = only(calls(stockpile, Opcodes.INVOKEINTERFACE,
+                marketDataApi, "getMaxShipping", shippingDesc),
+                "Local Resources stockpile getMaxShipping");
+        AbstractInsnNode getterReceiver = previousMeaningful(getter);
+        AbstractInsnNode marketLoad = nextMeaningful(getter);
+        AbstractInsnNode marketGetterInsn = nextMeaningful(marketLoad);
+        AbstractInsnNode sameFaction = nextMeaningful(marketGetterInsn);
+        if (!(getterReceiver instanceof VarInsnNode receiver)
+                || receiver.getOpcode() != Opcodes.ALOAD || receiver.var != 1
+                || !(marketLoad instanceof VarInsnNode marketOwner)
+                || marketOwner.getOpcode() != Opcodes.ALOAD || marketOwner.var != 1
+                || !(marketGetterInsn instanceof MethodInsnNode marketGetter)
+                || !callMatches(marketGetter, Opcodes.INVOKEINTERFACE,
+                        commodityApi, "getMarket", "()" + marketDesc)
+                || sameFaction == null || sameFaction.getOpcode() != Opcodes.ICONST_0
+                || nextMeaningful(sameFaction) != shipping) {
+            throw mismatch("Local Resources stockpile shipping operand sequence changed");
+        }
+        stockpile.instructions.remove(getterReceiver);
+        stockpile.instructions.remove(getter);
+        stockpile.instructions.set(shipping, new MethodInsnNode(Opcodes.INVOKESTATIC,
+                concreteData, "getShippingCapacity", shippingDesc, false));
+
+        List<FieldInsnNode> marketFields = new ArrayList<>();
+        for (AbstractInsnNode insn : shouldHave.instructions.toArray()) {
+            if (insn instanceof FieldInsnNode field
+                    && field.getOpcode() == Opcodes.GETFIELD
+                    && field.desc.equals(marketDesc)) {
+                marketFields.add(field);
+            }
+        }
+        requireCount("Local Resources should-have market field reads", marketFields.size(), 2);
+        FieldInsnNode marketField = marketFields.get(0);
+        for (FieldInsnNode candidate : marketFields) {
+            if (!candidate.owner.equals(marketField.owner)
+                    || !candidate.name.equals(marketField.name)) {
+                throw mismatch("Local Resources should-have market field identity changed");
+            }
+        }
+        InsnList shouldCode = new InsnList();
+        shouldCode.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        shouldCode.add(new FieldInsnNode(Opcodes.GETFIELD,
+                marketField.owner, marketField.name, marketField.desc));
+        shouldCode.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        shouldCode.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS,
+                "localResourcesShouldHaveCommodity", shouldHookDesc, false));
+        shouldCode.add(new InsnNode(Opcodes.IRETURN));
+        replaceMethodBody(shouldHave, shouldCode, 2);
+
+        requireCount("Local Resources patched stockpile getter",
+                countCalls(stockpile, Opcodes.INVOKEINTERFACE,
+                        commodityApi, "getCommodityMarketData", getterDesc), 0);
+        requireCount("Local Resources patched stockpile static shipping",
+                countCalls(stockpile, Opcodes.INVOKESTATIC,
+                        concreteData, "getShippingCapacity", shippingDesc), 1);
+        requireCount("Local Resources patched should-have getter",
+                countCalls(shouldHave, Opcodes.INVOKEINTERFACE,
+                        commodityApi, "getCommodityMarketData", getterDesc), 0);
+        requireLocalResourcesShouldWrapper(node.name, shouldHave, shouldHookDesc);
+
+        PatchReport report = new PatchReport();
+        report.add("static Local Resources shipping capacity", 1);
+        report.add("cold-safe Local Resources legality predicate", 1);
+        return report;
+    }
+
+    private static void requireLocalResourcesShouldWrapper(
+            String owner, MethodNode method, String hookDesc) {
+        List<AbstractInsnNode> code = meaningfulInstructions(method);
+        requireCount("Local Resources should-have wrapper instruction count", code.size(), 5);
+        requireVar(code.get(0), Opcodes.ALOAD, 0, "Local Resources wrapper owner");
+        if (!(code.get(1) instanceof FieldInsnNode field)
+                || field.getOpcode() != Opcodes.GETFIELD
+                || !field.owner.equals(owner)
+                || !field.desc.equals("Lcom/fs/starfarer/api/campaign/econ/MarketAPI;")) {
+            throw mismatch("Local Resources should-have wrapper market field changed");
+        }
+        requireVar(code.get(2), Opcodes.ALOAD, 1, "Local Resources wrapper commodity");
+        requireCall(asMethod(code.get(3), "Local Resources wrapper hook"),
+                Opcodes.INVOKESTATIC, HOOKS, "localResourcesShouldHaveCommodity",
+                hookDesc, "Local Resources wrapper hook");
+        if (code.get(4).getOpcode() != Opcodes.IRETURN) {
+            throw mismatch("Local Resources should-have wrapper return changed");
+        }
+    }
+
+    private PatchReport patchEconomyGroupIndexReachEconomy(ClassNode node) {
+        final String getterDesc = "(Ljava/lang/String;)Ljava/util/List;";
+        final String hookDesc = "(L" + REACH_ECONOMY
+                + ";Ljava/lang/Object;Ljava/lang/String;)Ljava/util/List;";
+        boolean fieldPresent = hasExactSyntheticField(node,
+                ECONOMY_GROUP_INDEX_STATE_FIELD,
+                PERSISTENT_STATE_DESC, persistentStateAccess());
+        MethodNode original = requireEconomyGroupIndexWrapperSource(
+                node, getterDesc, hookDesc);
+        requireEconomyGroupRawGetterShape(node.name, original);
+        PatchState addState = economyGroupMutationState(node, "addMarket");
+        PatchState removeState = economyGroupMutationState(node, "removeMarket");
+        PatchState registration = economyGroupIndexRegistrationState(node,
+                ECONOMY_GROUP_INDEX_COMPONENT_REACH_ECONOMY,
+                "ReachEconomy economy-group index");
+
+        boolean wrapperPatched = original.name.equals(ECONOMY_GROUP_INDEX_RAW_GETTER);
+        if (fieldPresent && wrapperPatched
+                && addState == PatchState.PATCHED
+                && removeState == PatchState.PATCHED
+                && registration == PatchState.PATCHED) {
+            requireEconomyGroupIndexWrapperPostcondition(node, getterDesc, hookDesc);
+            throw already("ReachEconomy economy-group index wrapper is complete");
+        }
+        if (fieldPresent || wrapperPatched || addState == PatchState.PATCHED
+                || removeState == PatchState.PATCHED
+                || registration == PatchState.PATCHED) {
+            throw mismatch("ReachEconomy economy-group index is partial/foreign");
+        }
+
+        node.fields.add(new FieldNode(Opcodes.ASM8, persistentStateAccess(),
+                ECONOMY_GROUP_INDEX_STATE_FIELD, PERSISTENT_STATE_DESC, null, null));
+        MethodNode wrapper = renameForPrivateOriginal(
+                node, original, ECONOMY_GROUP_INDEX_RAW_GETTER);
+        installEconomyGroupIndexWrapper(node.name, wrapper, hookDesc);
+        patchEconomyGroupMutation(node, "addMarket");
+        patchEconomyGroupMutation(node, "removeMarket");
+        installEconomyGroupIndexRegistration(node,
+                ECONOMY_GROUP_INDEX_COMPONENT_REACH_ECONOMY,
+                "ReachEconomy economy-group index");
+        requireEconomyGroupIndexWrapperPostcondition(node, getterDesc, hookDesc);
+        requireCount("ReachEconomy add-market owner invalidation hook",
+                countCalls(requireMethod(node, "addMarket",
+                                "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)V"),
+                        Opcodes.INVOKESTATIC, HOOKS,
+                        "markEconomyGroupStructureChanged", "(Ljava/lang/Object;)V"), 1);
+        requireCount("ReachEconomy remove-market owner invalidation hook",
+                countCalls(requireMethod(node, "removeMarket",
+                                "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)V"),
+                        Opcodes.INVOKESTATIC, HOOKS,
+                        "markEconomyGroupStructureChanged", "(Ljava/lang/Object;)V"), 1);
+
+        PatchReport report = new PatchReport();
+        report.add("owner-local econ-group index wrapper", 1);
+        report.add("ReachEconomy group mutation epochs", 2);
+        report.add("ReachEconomy group-index capability registration", 1);
+        return report;
+    }
+
+    private static MethodNode requireEconomyGroupIndexWrapperSource(
+            ClassNode node, String desc, String hookDesc) {
+        List<MethodNode> publicMethods = methods(node, "getMarketsInGroup", desc);
+        List<MethodNode> rawMethods = methods(node, ECONOMY_GROUP_INDEX_RAW_GETTER, desc);
+        int hookCount = countCalls(node, Opcodes.INVOKESTATIC, HOOKS,
+                "borrowMarketsInGroupIndexed", hookDesc);
+        if (publicMethods.size() == 1 && rawMethods.size() == 1 && hookCount == 1) {
+            MethodNode wrapper = publicMethods.get(0);
+            MethodNode raw = rawMethods.get(0);
+            int expectedAccess = wrapper.access;
+            expectedAccess &= ~(Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED);
+            expectedAccess |= Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC;
+            if (raw.access != expectedAccess) {
+                throw mismatch("ReachEconomy raw getMarketsInGroup access changed");
+            }
+            return raw;
+        }
+        if (publicMethods.size() != 1 || !rawMethods.isEmpty() || hookCount != 0) {
+            throw mismatch("ReachEconomy getMarketsInGroup wrapper collision/mixed state: public="
+                    + publicMethods.size() + ", raw=" + rawMethods.size()
+                    + ", hooks=" + hookCount);
+        }
+        return publicMethods.get(0);
+    }
+
+    private static void requireEconomyGroupRawGetterShape(String owner, MethodNode method) {
+        requireCount("ReachEconomy raw group ArrayList allocation",
+                countNew(method, "java/util/ArrayList"), 1);
+        requireCount("ReachEconomy raw group markets field",
+                countFields(method, Opcodes.GETFIELD, owner,
+                        "markets", "Ljava/util/List;"), 1);
+        requireCount("ReachEconomy raw group iterator",
+                countCalls(method, Opcodes.INVOKEINTERFACE,
+                        "java/util/List", "iterator", "()Ljava/util/Iterator;"), 1);
+        requireCount("ReachEconomy raw isInGroup",
+                countCalls(method, Opcodes.INVOKEVIRTUAL, owner,
+                        "isInGroup", "(Ljava/lang/String;"
+                                + "Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)Z"), 1);
+        requireCount("ReachEconomy raw group add",
+                countCalls(method, Opcodes.INVOKEINTERFACE,
+                        "java/util/List", "add", "(Ljava/lang/Object;)Z"), 1);
+    }
+
+    private static void installEconomyGroupIndexWrapper(
+            String owner, MethodNode wrapper, String hookDesc) {
+        LabelNode stateReady = new LabelNode();
+        LabelNode fallback = new LabelNode();
+        InsnList code = new InsnList();
+        code.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        code.add(new FieldInsnNode(Opcodes.GETFIELD, owner,
+                ECONOMY_GROUP_INDEX_STATE_FIELD, PERSISTENT_STATE_DESC));
+        code.add(new VarInsnNode(Opcodes.ASTORE, 2));
+        code.add(new VarInsnNode(Opcodes.ALOAD, 2));
+        code.add(new JumpInsnNode(Opcodes.IFNONNULL, stateReady));
+        code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS,
+                "newPersistentSnapshotState", "()Ljava/lang/Object;", false));
+        code.add(new VarInsnNode(Opcodes.ASTORE, 2));
+        code.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        code.add(new VarInsnNode(Opcodes.ALOAD, 2));
+        code.add(new FieldInsnNode(Opcodes.PUTFIELD, owner,
+                ECONOMY_GROUP_INDEX_STATE_FIELD, PERSISTENT_STATE_DESC));
+        code.add(stateReady);
+        code.add(new FrameNode(Opcodes.F_FULL, 3,
+                new Object[]{owner, "java/lang/String", "java/lang/Object"},
+                0, null));
+        code.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        code.add(new VarInsnNode(Opcodes.ALOAD, 2));
+        code.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS,
+                "borrowMarketsInGroupIndexed", hookDesc, false));
+        code.add(new VarInsnNode(Opcodes.ASTORE, 3));
+        code.add(new VarInsnNode(Opcodes.ALOAD, 3));
+        code.add(new JumpInsnNode(Opcodes.IFNULL, fallback));
+        code.add(new VarInsnNode(Opcodes.ALOAD, 3));
+        code.add(new InsnNode(Opcodes.ARETURN));
+        code.add(fallback);
+        code.add(new FrameNode(Opcodes.F_FULL, 4,
+                new Object[]{owner, "java/lang/String", "java/lang/Object",
+                        "java/util/List"}, 0, null));
+        code.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        code.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        code.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, owner,
+                ECONOMY_GROUP_INDEX_RAW_GETTER,
+                "(Ljava/lang/String;)Ljava/util/List;", false));
+        code.add(new InsnNode(Opcodes.ARETURN));
+        replaceMethodBody(wrapper, code, 4);
+    }
+
+    private static void requireEconomyGroupIndexWrapperPostcondition(
+            ClassNode node, String desc, String hookDesc) {
+        requireCount("ReachEconomy public group getter",
+                methods(node, "getMarketsInGroup", desc).size(), 1);
+        List<MethodNode> raw = methods(node, ECONOMY_GROUP_INDEX_RAW_GETTER, desc);
+        requireCount("ReachEconomy raw group getter", raw.size(), 1);
+        if ((raw.get(0).access & Opcodes.ACC_PRIVATE) == 0
+                || (raw.get(0).access & Opcodes.ACC_SYNTHETIC) == 0) {
+            throw mismatch("ReachEconomy raw group getter is not private synthetic");
+        }
+        MethodNode wrapper = methods(node, "getMarketsInGroup", desc).get(0);
+        requireCount("ReachEconomy group-index hook",
+                countCalls(wrapper, Opcodes.INVOKESTATIC, HOOKS,
+                        "borrowMarketsInGroupIndexed", hookDesc), 1);
+        requireCount("ReachEconomy group-index state allocation",
+                countCalls(wrapper, Opcodes.INVOKESTATIC, HOOKS,
+                        "newPersistentSnapshotState", "()Ljava/lang/Object;"), 1);
+        requireCount("ReachEconomy raw fallback",
+                countCalls(wrapper, Opcodes.INVOKESPECIAL, node.name,
+                        ECONOMY_GROUP_INDEX_RAW_GETTER, desc), 1);
+        requireCount("ReachEconomy group-index state read",
+                countFields(wrapper, Opcodes.GETFIELD, node.name,
+                        ECONOMY_GROUP_INDEX_STATE_FIELD, PERSISTENT_STATE_DESC), 1);
+        requireCount("ReachEconomy group-index state write",
+                countFields(wrapper, Opcodes.PUTFIELD, node.name,
+                        ECONOMY_GROUP_INDEX_STATE_FIELD, PERSISTENT_STATE_DESC), 1);
+        requireCount("ReachEconomy wrapper ARETURNs",
+                countOpcode(wrapper, Opcodes.ARETURN), 2);
+    }
+
+    private static PatchState economyGroupMutationState(ClassNode node, String methodName) {
+        MethodNode method = requireMethod(node, methodName,
+                "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)V");
+        int hooks = countCalls(method, Opcodes.INVOKESTATIC, HOOKS,
+                "markEconomyGroupStructureChanged", "(Ljava/lang/Object;)V");
+        if (hooks == 0) return PatchState.ORIGINAL;
+        if (hooks != 1) throw mismatch(node.name + "." + methodName
+                + " has duplicate economy-group owner invalidation hooks");
+        String listMethod = methodName.equals("addMarket") ? "add" : "remove";
+        MethodInsnNode mutation = only(calls(method, Opcodes.INVOKEINTERFACE,
+                "java/util/List", listMethod, "(Ljava/lang/Object;)Z"),
+                node.name + "." + methodName + " list mutation");
+        AbstractInsnNode pop = nextMeaningful(mutation);
+        AbstractInsnNode ownerLoad = nextMeaningful(pop);
+        AbstractInsnNode stateRead = nextMeaningful(ownerLoad);
+        AbstractInsnNode hook = nextMeaningful(stateRead);
+        if (pop == null || pop.getOpcode() != Opcodes.POP
+                || !(ownerLoad instanceof VarInsnNode load)
+                || load.getOpcode() != Opcodes.ALOAD || load.var != 0
+                || !(stateRead instanceof FieldInsnNode field)
+                || field.getOpcode() != Opcodes.GETFIELD
+                || !field.owner.equals(node.name)
+                || !field.name.equals(ECONOMY_GROUP_INDEX_STATE_FIELD)
+                || !field.desc.equals(PERSISTENT_STATE_DESC)
+                || !(hook instanceof MethodInsnNode call)
+                || !callMatches(call, Opcodes.INVOKESTATIC, HOOKS,
+                        "markEconomyGroupStructureChanged", "(Ljava/lang/Object;)V")) {
+            throw mismatch(node.name + "." + methodName
+                    + " owner invalidation is not directly after the list mutation");
+        }
+        return PatchState.PATCHED;
+    }
+
+    private static void patchEconomyGroupMutation(ClassNode node, String methodName) {
+        if (economyGroupMutationState(node, methodName) != PatchState.ORIGINAL) {
+            throw mismatch(node.name + "." + methodName + " is not original");
+        }
+        MethodNode method = requireMethod(node, methodName,
+                "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)V");
+        String listMethod = methodName.equals("addMarket") ? "add" : "remove";
+        MethodInsnNode mutation = only(calls(method, Opcodes.INVOKEINTERFACE,
+                "java/util/List", listMethod, "(Ljava/lang/Object;)Z"),
+                node.name + "." + methodName + " list mutation");
+        AbstractInsnNode pop = nextMeaningful(mutation);
+        if (pop == null || pop.getOpcode() != Opcodes.POP) {
+            throw mismatch(node.name + "." + methodName
+                    + " no longer discards the list-mutation result");
+        }
+        InsnList invalidate = new InsnList();
+        invalidate.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        invalidate.add(new FieldInsnNode(Opcodes.GETFIELD, node.name,
+                ECONOMY_GROUP_INDEX_STATE_FIELD, PERSISTENT_STATE_DESC));
+        invalidate.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS,
+                "markEconomyGroupStructureChanged", "(Ljava/lang/Object;)V", false));
+        method.instructions.insert(pop, invalidate);
+    }
+
+    private PatchReport patchEconomyGroupIndexMarketMutation(ClassNode node) {
+        MethodNode method = requireMethod(node, "setEconGroup", "(Ljava/lang/String;)V");
+        int hooks = countCalls(method, Opcodes.INVOKESTATIC, HOOKS,
+                "markEconomyGroupStructureChanged", "()V");
+        PatchState registration = economyGroupIndexRegistrationState(node,
+                ECONOMY_GROUP_INDEX_COMPONENT_MARKET,
+                "Market economy-group index");
+        if (hooks == 1 && registration == PatchState.PATCHED) {
+            requireMarketEconGroupMutationShape(node.name, method, true);
+            throw already("Market econ-group mutation barrier is complete");
+        }
+        if (hooks != 0 || registration == PatchState.PATCHED) {
+            throw mismatch("Market economy-group index mutation patch is partial/foreign");
+        }
+        requireMarketEconGroupMutationShape(node.name, method, false);
+        FieldInsnNode write = only(fields(method, Opcodes.PUTFIELD,
+                node.name, "econGroup", "Ljava/lang/String;"),
+                "Market.setEconGroup field write");
+        method.instructions.insert(write, new MethodInsnNode(Opcodes.INVOKESTATIC,
+                HOOKS, "markEconomyGroupStructureChanged", "()V", false));
+        installEconomyGroupIndexRegistration(node,
+                ECONOMY_GROUP_INDEX_COMPONENT_MARKET,
+                "Market economy-group index");
+        requireMarketEconGroupMutationShape(node.name, method, true);
+
+        PatchReport report = new PatchReport();
+        report.add("Market.setEconGroup epoch barrier", 1);
+        report.add("Market group-index capability registration", 1);
+        return report;
+    }
+
+    private static void requireMarketEconGroupMutationShape(
+            String owner, MethodNode method, boolean patched) {
+        requireCount("Market.setEconGroup field write",
+                countFields(method, Opcodes.PUTFIELD, owner,
+                        "econGroup", "Ljava/lang/String;"), 1);
+        int hooks = countCalls(method, Opcodes.INVOKESTATIC, HOOKS,
+                "markEconomyGroupStructureChanged", "()V");
+        requireCount("Market.setEconGroup epoch hooks", hooks, patched ? 1 : 0);
+        FieldInsnNode write = only(fields(method, Opcodes.PUTFIELD,
+                owner, "econGroup", "Ljava/lang/String;"),
+                "Market.setEconGroup field write");
+        AbstractInsnNode next = nextMeaningful(write);
+        if (patched) {
+            if (!(next instanceof MethodInsnNode hook)
+                    || !callMatches(hook, Opcodes.INVOKESTATIC, HOOKS,
+                            "markEconomyGroupStructureChanged", "()V")) {
+                throw mismatch("Market.setEconGroup epoch hook moved from the field write");
+            }
+        } else if (next == null || next.getOpcode() != Opcodes.RETURN) {
+            throw mismatch("Market.setEconGroup original return shape changed");
+        }
+    }
+
+    private static PatchState economyGroupIndexRegistrationState(
+            ClassNode node, int component, String label) {
+        List<MethodNode> initializers = methods(node, "<clinit>", "()V");
+        if (initializers.size() > 1) throw mismatch(label + " has duplicate class initializers");
+        if (initializers.isEmpty()) return PatchState.ORIGINAL;
+        MethodNode initializer = initializers.get(0);
+        int totalHooks = countCalls(initializer, Opcodes.INVOKESTATIC, HOOKS,
+                "registerEconomyGroupIndexComponent", "(I)V");
+        if (totalHooks == 0) return PatchState.ORIGINAL;
+        int returns = 0;
+        int matching = 0;
+        for (AbstractInsnNode insn : initializer.instructions.toArray()) {
+            if (insn.getOpcode() != Opcodes.RETURN) continue;
+            returns++;
+            int scanned = 0;
+            for (AbstractInsnNode cursor = insn.getPrevious(); cursor != null && scanned < 6;
+                 cursor = cursor.getPrevious()) {
+                if (cursor.getOpcode() < 0) continue;
+                scanned++;
+                if (!(cursor instanceof MethodInsnNode call)
+                        || !callMatches(call, Opcodes.INVOKESTATIC, HOOKS,
+                                "registerEconomyGroupIndexComponent", "(I)V")) continue;
+                if (!isIntegerLdc(previousMeaningful(call), component)) {
+                    throw mismatch(label + " registration component changed");
+                }
+                matching++;
+                break;
+            }
+        }
+        if (returns > 0 && totalHooks == returns && matching == returns) {
+            return PatchState.PATCHED;
+        }
+        throw mismatch(label + " registration is partial or missing from a normal exit");
+    }
+
+    private static void installEconomyGroupIndexRegistration(
+            ClassNode node, int component, String label) {
+        if (economyGroupIndexRegistrationState(node, component, label)
+                != PatchState.ORIGINAL) {
+            throw mismatch(label + " registration is not original");
+        }
+        List<MethodNode> initializers = methods(node, "<clinit>", "()V");
+        MethodNode initializer;
+        if (initializers.isEmpty()) {
+            initializer = new MethodNode(Opcodes.ASM8, Opcodes.ACC_STATIC,
+                    "<clinit>", "()V", null, null);
+            initializer.instructions.add(new InsnNode(Opcodes.RETURN));
+            node.methods.add(initializer);
+        } else {
+            initializer = initializers.get(0);
+        }
+        List<AbstractInsnNode> returns = new ArrayList<>();
+        for (AbstractInsnNode insn : initializer.instructions.toArray()) {
+            if (insn.getOpcode() == Opcodes.RETURN) returns.add(insn);
+        }
+        if (returns.isEmpty()) throw mismatch(label + " class initializer has no normal return");
+        for (AbstractInsnNode exit : returns) {
+            AbstractInsnNode insertionPoint = exit;
+            AbstractInsnNode previous = previousMeaningful(exit);
+            if (previous instanceof MethodInsnNode call
+                    && callMatches(call, Opcodes.INVOKESTATIC, HOOKS,
+                            "registerMarketSchedulerComponent", "(I)V")) {
+                AbstractInsnNode schedulerComponent = previousMeaningful(call);
+                if (schedulerComponent == null) {
+                    throw mismatch(label + " cannot compose with scheduler registration");
+                }
+                insertionPoint = schedulerComponent;
+            }
+            InsnList registration = new InsnList();
+            registration.add(pushInt(component));
+            registration.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS,
+                    "registerEconomyGroupIndexComponent", "(I)V", false));
+            initializer.instructions.insertBefore(insertionPoint, registration);
+        }
+        if (economyGroupIndexRegistrationState(node, component, label)
+                != PatchState.PATCHED) {
+            throw mismatch(label + " registration postcondition failed");
+        }
+    }
+
     private PatchReport patchMarketShareLinearAggregation(ClassNode node) {
         MethodNode wrapper = requireMethod(node, "getMarketSharePercentPerFaction",
                 MARKET_SHARE_METHOD_DESC);
@@ -11133,6 +11672,21 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
                     && (desc == null || field.desc.equals(desc))) count++;
         }
         return count;
+    }
+
+    private static List<FieldInsnNode> fields(MethodNode method, int opcode,
+                                               String owner, String name, String desc) {
+        List<FieldInsnNode> result = new ArrayList<>();
+        for (AbstractInsnNode insn : method.instructions.toArray()) {
+            if (insn instanceof FieldInsnNode field
+                    && (opcode < 0 || field.getOpcode() == opcode)
+                    && (owner == null || field.owner.equals(owner))
+                    && (name == null || field.name.equals(name))
+                    && (desc == null || field.desc.equals(desc))) {
+                result.add(field);
+            }
+        }
+        return result;
     }
 
     private static int countOpcode(MethodNode method, int opcode) {

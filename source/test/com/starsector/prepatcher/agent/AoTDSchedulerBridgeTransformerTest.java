@@ -67,7 +67,7 @@ public final class AoTDSchedulerBridgeTransformerTest {
         catch (java.lang.reflect.InvocationTargetException expected) { rejected = expected.getCause() instanceof IllegalStateException; }
         require(rejected, "unpatched bridge accepted the production profile");
 
-        Path configPath = Files.createTempFile("spp-stage8-", ".properties");
+        Path configPath = Files.createTempFile("spp-aotd-bridge-", ".properties");
         Files.writeString(configPath, "patch.aotdCleanDeficitPath=true\n");
         com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge.configure(
                 PrepatcherConfig.load(configPath), Path.of("."));
@@ -145,7 +145,7 @@ public final class AoTDSchedulerBridgeTransformerTest {
         require(registryStatus.contains("unknownMutation=0"),
                 "mutation bypassed registered market: " + registryStatus);
 
-        // Stage 11: simulate a runtime listener LinkageError after a successful
+        // Simulate a runtime listener LinkageError after a successful
         // delivery. Prepatcher removes the capability; AoTD must observe the
         // live mask on the next capability check and immediately resynchronize
         // the missed delivered generation instead of waiting for a hard boundary.
@@ -234,16 +234,22 @@ public final class AoTDSchedulerBridgeTransformerTest {
         require(runtimeCommit, "runtime mutation commit call missing");
         require(localQueueCommit, "fork-local dirty queue commit call missing");
 
+        MethodNode consumeOpeningMarket = null;
         MethodNode publishEpoch = null;
         MethodNode runtimeCapabilities = null;
         MethodNode beforeGlobal = null;
         MethodNode afterGlobal = null;
         for (MethodNode method : node.methods) {
+            if ("consumeOpeningMarket".equals(method.name)
+                    && "()Ljava/lang/Object;".equals(method.desc)) consumeOpeningMarket = method;
             if ("publishRuntimeEpoch".equals(method.name) && "(JJ)V".equals(method.desc)) publishEpoch = method;
             if ("getRuntimeCapabilities".equals(method.name) && "()J".equals(method.desc)) runtimeCapabilities = method;
             if ("beforeGlobalBoundary".equals(method.name) && "(IZ)J".equals(method.desc)) beforeGlobal = method;
             if ("afterGlobalBoundary".equals(method.name) && "(JJ)V".equals(method.desc)) afterGlobal = method;
         }
+        require(consumeOpeningMarket != null, "consumeOpeningMarket method missing");
+        require(calls(consumeOpeningMarket, "consumeAoTDOpeningMarket"),
+                "runtime opening-market context call missing");
         require(publishEpoch != null, "publishRuntimeEpoch method missing");
         require(calls(publishEpoch, "publishAoTDRuntimeEpoch"),
                 "runtime epoch publication call missing");

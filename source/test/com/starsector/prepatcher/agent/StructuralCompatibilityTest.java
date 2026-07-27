@@ -225,6 +225,7 @@ public final class StructuralCompatibilityTest {
         allProperties.setProperty("patch.economyPersistentSnapshots", "true");
         allProperties.setProperty("patch.economyLocationCache", "true");
         allProperties.setProperty("patch.marketScheduler", "true");
+        allProperties.setProperty("patch.economyGroupIndex", "false");
         PrepatcherConfig all = constructor.newInstance(allProperties);
 
         ClassNode brokenLocation = read(original);
@@ -247,6 +248,7 @@ public final class StructuralCompatibilityTest {
         snapshotsProperties.setProperty("patch.economyPersistentSnapshots", "true");
         snapshotsProperties.setProperty("patch.economyLocationCache", "false");
         snapshotsProperties.setProperty("patch.marketScheduler", "false");
+        snapshotsProperties.setProperty("patch.economyGroupIndex", "false");
         byte[] snapshotsOnly = new PrepatcherTransformer(
                 constructor.newInstance(snapshotsProperties)).transform(
                 null, PrepatcherTransformer.ECONOMY, null, null, original);
@@ -278,6 +280,7 @@ public final class StructuralCompatibilityTest {
         maskThreeProperties.setProperty("patch.economyPersistentSnapshots", "true");
         maskThreeProperties.setProperty("patch.economyLocationCache", "true");
         maskThreeProperties.setProperty("patch.marketScheduler", "false");
+        maskThreeProperties.setProperty("patch.economyGroupIndex", "false");
         rejected = new PrepatcherTransformer(
                 constructor.newInstance(maskThreeProperties)).transform(
                 null, PrepatcherTransformer.ECONOMY, null, null, complete);
@@ -536,6 +539,7 @@ public final class StructuralCompatibilityTest {
         properties.setProperty("patch.economyLocationCache", "false");
         properties.setProperty("patch.commRelaySystemIndex", "false");
         properties.setProperty("patch.commodityTemporalFastPath", "false");
+        properties.setProperty("patch.economyGroupIndex", "false");
         properties.setProperty("scratch.trim.enabled", "false");
         properties.setProperty("patch.starfieldCleanupBuffers", "false");
         return properties;
@@ -558,6 +562,7 @@ public final class StructuralCompatibilityTest {
                     Boolean.toString((mask & 4) != 0));
             properties.setProperty("patch.marketScheduler",
                     Boolean.toString((mask & 8) != 0));
+            properties.setProperty("patch.economyGroupIndex", "false");
             PrepatcherConfig featureConfig = constructor.newInstance(properties);
             byte[] patched = new PrepatcherTransformer(featureConfig).transform(
                     null, PrepatcherTransformer.MARKET, null, null, original);
@@ -605,6 +610,7 @@ public final class StructuralCompatibilityTest {
         allProperties.setProperty("patch.commodityTemporalFastPath", "true");
         allProperties.setProperty("patch.directMarketObservation", "true");
         allProperties.setProperty("patch.marketScheduler", "true");
+        allProperties.setProperty("patch.economyGroupIndex", "false");
         PrepatcherConfig all = constructor.newInstance(allProperties);
 
         ClassNode brokenCommodity = read(original);
@@ -627,6 +633,7 @@ public final class StructuralCompatibilityTest {
         snapshotsProperties.setProperty("patch.commodityTemporalFastPath", "false");
         snapshotsProperties.setProperty("patch.directMarketObservation", "false");
         snapshotsProperties.setProperty("patch.marketScheduler", "false");
+        snapshotsProperties.setProperty("patch.economyGroupIndex", "false");
         byte[] snapshotsOnly = new PrepatcherTransformer(
                 constructor.newInstance(snapshotsProperties)).transform(
                 null, PrepatcherTransformer.MARKET, null, null, original);
@@ -659,6 +666,7 @@ public final class StructuralCompatibilityTest {
         maskThreeProperties.setProperty("patch.commodityTemporalFastPath", "true");
         maskThreeProperties.setProperty("patch.directMarketObservation", "false");
         maskThreeProperties.setProperty("patch.marketScheduler", "false");
+        maskThreeProperties.setProperty("patch.economyGroupIndex", "false");
         rejected = new PrepatcherTransformer(
                 constructor.newInstance(maskThreeProperties)).transform(
                 null, PrepatcherTransformer.MARKET, null, null, complete);
@@ -2409,6 +2417,29 @@ public final class StructuralCompatibilityTest {
     }
 
 
+    private static void assertLocalResourcesColdDataPatch(byte[] bytes) {
+        ClassNode node = read(bytes);
+        MethodNode stockpile = method(node, "getStockpileLimit",
+                "(Lcom/fs/starfarer/api/campaign/econ/CommodityOnMarketAPI;)I");
+        require(countCalls(stockpile, Opcodes.INVOKEINTERFACE,
+                        "com/fs/starfarer/api/campaign/econ/CommodityOnMarketAPI",
+                        "getCommodityMarketData",
+                        "()Lcom/fs/starfarer/api/campaign/econ/CommodityMarketDataAPI;") == 0,
+                "Local Resources stockpile still materializes CommodityMarketData");
+        require(countCalls(stockpile, Opcodes.INVOKESTATIC,
+                        "com/fs/starfarer/campaign/econ/reach/CommodityMarketData",
+                        "getShippingCapacity",
+                        "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;Z)I") == 1,
+                "Local Resources static shipping-capacity replacement changed");
+        MethodNode shouldHave = method(node, "shouldHaveCommodity",
+                "(Lcom/fs/starfarer/api/campaign/econ/CommodityOnMarketAPI;)Z");
+        require(countCalls(shouldHave, Opcodes.INVOKESTATIC, HOOKS,
+                        "localResourcesShouldHaveCommodity",
+                        "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;"
+                                + "Lcom/fs/starfarer/api/campaign/econ/CommodityOnMarketAPI;)Z") == 1,
+                "Local Resources cold-safe predicate wrapper changed");
+    }
+
     private static void assertMarketSharePatches(byte[] bytes) {
         ClassNode node = read(bytes);
         require(hasOwnershipMarker(node, "marketShareLinearAggregation"),
@@ -2584,6 +2615,18 @@ public final class StructuralCompatibilityTest {
                 expected.put("registerConstructionQueueOwner", 1);
                 expected.put("flushPendingMarketBeforeMutation", 3);
                 expected.put("registerMarketSchedulerComponent", 1);
+                expected.put("markEconomyGroupStructureChanged", 1);
+                expected.put("registerEconomyGroupIndexComponent", 1);
+            }
+            case PrepatcherTransformer.LOCAL_RESOURCES_SUBMARKET -> {
+                expected.put("localResourcesShouldHaveCommodity", 1);
+                assertLocalResourcesColdDataPatch(bytes);
+            }
+            case PrepatcherTransformer.REACH_ECONOMY -> {
+                expected.put("borrowMarketsInGroupIndexed", 1);
+                expected.put("newPersistentSnapshotState", 1);
+                expected.put("markEconomyGroupStructureChanged", 2);
+                expected.put("registerEconomyGroupIndexComponent", 1);
             }
             case PrepatcherTransformer.COMMODITY_MARKET_DATA ->
                     assertMarketSharePatches(bytes);

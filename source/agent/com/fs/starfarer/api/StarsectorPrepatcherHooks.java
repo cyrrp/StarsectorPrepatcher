@@ -9,6 +9,7 @@ import com.fs.starfarer.api.campaign.SectorEntityToken;
 import com.fs.starfarer.api.campaign.StarSystemAPI;
 import com.fs.starfarer.api.campaign.comm.IntelInfoPlugin;
 import com.fs.starfarer.api.campaign.econ.MarketAPI;
+import com.fs.starfarer.api.campaign.econ.CommodityOnMarketAPI;
 import com.fs.starfarer.api.campaign.econ.Industry;
 import com.fs.starfarer.api.campaign.rules.MemoryAPI;
 import com.fs.starfarer.api.impl.campaign.econ.impl.ConstructionQueue;
@@ -20,6 +21,7 @@ import com.fs.starfarer.campaign.JumpPoint;
 import com.fs.starfarer.campaign.econ.CommodityOnMarket;
 import com.fs.starfarer.campaign.econ.Economy;
 import com.fs.starfarer.campaign.econ.Market;
+import com.fs.starfarer.campaign.econ.reach.CommodityMarketData;
 import com.fs.starfarer.campaign.econ.reach.ReachEconomy;
 import com.fs.starfarer.api.impl.campaign.procgen.Constellation;
 import com.fs.starfarer.api.impl.campaign.procgen.StarSystemGenerator;
@@ -152,6 +154,11 @@ public final class StarsectorPrepatcherHooks {
     private static final int MARKET_SCHEDULER_COMPONENT_RECENT_UNREST = 256;
     private static final int MARKET_SCHEDULER_COMPONENT_BASE_INDUSTRY = 512;
     private static final int MARKET_SCHEDULER_COMPONENT_CONSTRUCTION_QUEUE = 1024;
+    private static final int ECONOMY_GROUP_INDEX_COMPONENT_REACH_ECONOMY = 1;
+    private static final int ECONOMY_GROUP_INDEX_COMPONENT_MARKET = 2;
+    private static final int ECONOMY_GROUP_INDEX_COMPONENT_ALL =
+            ECONOMY_GROUP_INDEX_COMPONENT_REACH_ECONOMY
+                    | ECONOMY_GROUP_INDEX_COMPONENT_MARKET;
     private static final int CONSTRUCTION_REASON_QUEUE_NON_EMPTY = 1;
     private static final int CONSTRUCTION_REASON_INDUSTRY_BUILDING = 2;
     private static final int CONSTRUCTION_REASON_INDUSTRY_UPGRADING = 4;
@@ -202,6 +209,9 @@ public final class StarsectorPrepatcherHooks {
                     | MARKET_SCHEDULER_COMPONENT_CONSTRUCTION_QUEUE;
     private static final AtomicInteger MARKET_SCHEDULER_COMPONENTS = new AtomicInteger();
     private static volatile boolean marketSchedulerReady;
+    private static final AtomicInteger ECONOMY_GROUP_INDEX_COMPONENTS = new AtomicInteger();
+    private static final AtomicLong ECONOMY_GROUP_STRUCTURE_EPOCH = new AtomicLong();
+    private static volatile boolean economyGroupIndexReady;
     private static final ThreadLocal<MarketSchedulerTick> MARKET_SCHEDULER_TICK =
             ThreadLocal.withInitial(MarketSchedulerTick::new);
     private static final ThreadLocal<MarketSchedulerBatch> MARKET_SCHEDULER_BATCH =
@@ -214,6 +224,8 @@ public final class StarsectorPrepatcherHooks {
             ThreadLocal.withInitial(ConstructionProbe::new);
     private static volatile VarHandle baseIndustryBuildingHandle;
     private static volatile boolean baseIndustryBuildingHandleResolved;
+    private static volatile VarHandle commodityMarketDataHandle;
+    private static volatile boolean commodityMarketDataHandleResolved;
     private static volatile WeakIdentityMap<MarketAPI, MarketScheduleState> MARKET_SCHEDULER_STATES =
             new WeakIdentityMap<>();
     private static volatile WeakIdentityMap<ConstructionQueue, WeakReference<MarketAPI>>
@@ -397,6 +409,16 @@ public final class StarsectorPrepatcherHooks {
     private static final LongAdder MARKET_INDUSTRY_PERSISTENT_AUDITS = new LongAdder();
     private static final LongAdder MARKET_INDUSTRY_PERSISTENT_MISMATCHES = new LongAdder();
     private static final LongAdder MARKET_INDUSTRY_PERSISTENT_ELEMENTS = new LongAdder();
+    private static final LongAdder LOCAL_RESOURCES_COLD_AVOIDED = new LongAdder();
+    private static final LongAdder LOCAL_RESOURCES_AOTD_COLD_AVOIDED = new LongAdder();
+    private static final LongAdder LOCAL_RESOURCES_WARM_READS = new LongAdder();
+    private static final LongAdder LOCAL_RESOURCES_PEEK_FALLBACKS = new LongAdder();
+    private static final LongAdder ECONOMY_GROUP_INDEX_HITS = new LongAdder();
+    private static final LongAdder ECONOMY_GROUP_INDEX_BUILDS = new LongAdder();
+    private static final LongAdder ECONOMY_GROUP_INDEX_FALLBACKS = new LongAdder();
+    private static final LongAdder ECONOMY_GROUP_INDEX_AUDITS = new LongAdder();
+    private static final LongAdder ECONOMY_GROUP_INDEX_MISMATCHES = new LongAdder();
+    private static final LongAdder ECONOMY_GROUP_INDEX_ELEMENTS = new LongAdder();
     private static final LongAdder COMMODITY_TEMPORAL_MARKET_CALLS = new LongAdder();
     private static final LongAdder COMMODITY_TEMPORAL_ENTRIES = new LongAdder();
     private static final LongAdder COMMODITY_TEMPORAL_ACTIVE_ADVANCES = new LongAdder();
@@ -2412,6 +2434,43 @@ public final class StarsectorPrepatcherHooks {
         }
     }
 
+    public static void registerEconomyGroupIndexComponent(int component) {
+        if (component != ECONOMY_GROUP_INDEX_COMPONENT_REACH_ECONOMY
+                && component != ECONOMY_GROUP_INDEX_COMPONENT_MARKET) {
+            throw new IllegalArgumentException(
+                    "Unknown economy-group index component: " + component);
+        }
+        int current;
+        int updated;
+        do {
+            current = ECONOMY_GROUP_INDEX_COMPONENTS.get();
+            updated = current | component;
+            if (current == updated) return;
+        } while (!ECONOMY_GROUP_INDEX_COMPONENTS.compareAndSet(current, updated));
+        System.setProperty("starsector.prepatcher.economyGroupIndexCapabilityMask",
+                Integer.toString(updated));
+        if (updated == ECONOMY_GROUP_INDEX_COMPONENT_ALL && !economyGroupIndexReady) {
+            economyGroupIndexReady = true;
+            PrepatcherLog.info("economy-group index READY: ReachEconomy getter/mutators"
+                    + " + Market.setEconGroup mutation barrier");
+        }
+    }
+
+    public static void markEconomyGroupStructureChanged() {
+        ECONOMY_GROUP_STRUCTURE_EPOCH.incrementAndGet();
+    }
+
+    public static void markEconomyGroupStructureChanged(Object rawState) {
+        ECONOMY_GROUP_STRUCTURE_EPOCH.incrementAndGet();
+        try {
+            if (rawState instanceof PersistentSnapshotState state) {
+                state.invalidateGroupIndex();
+            }
+        } catch (Throwable ignored) {
+            // The primitive epoch still invalidates every indexed owner lazily.
+        }
+    }
+
     /** Opens one simulation tick inside the current render batch. */
     public static void beginMarketSchedulerTick() {
         MarketSchedulerTick tick = MARKET_SCHEDULER_TICK.get();
@@ -3218,6 +3277,143 @@ public final class StarsectorPrepatcherHooks {
         }
     }
 
+
+
+    // ---------------------------------------------------------------------
+    // Economy hot paths: Local Resources and econ groups
+    // ---------------------------------------------------------------------
+
+    /**
+     * Exact warm-path replacement for LocalResourcesSubmarketPlugin's legality
+     * test. The exact vanilla class derives a cold result from its committed
+     * local fields. The maintained AoTD fork instead peeks its authoritative
+     * committed raw supply/demand object without invoking either lazy
+     * CommodityMarketData construction or AoTD's local materializer.
+     *
+     * <p>Unknown implementations and changed owned-fork surfaces fail closed to
+     * the preserved virtual getter.</p>
+     */
+    public static boolean localResourcesShouldHaveCommodity(
+            MarketAPI market, CommodityOnMarketAPI commodity) {
+        if (!market.isIllegal(commodity)) return true;
+
+        PrepatcherConfig c = config;
+        if (c == null || !c.localResourcesNoColdMarketData
+                || !(commodity instanceof CommodityOnMarket)) {
+            return localResourcesVanillaFallback(market, commodity);
+        }
+
+        VarHandle handle = commodityMarketDataHandle();
+        if (handle == null) return localResourcesVanillaFallback(market, commodity);
+
+        Object raw;
+        try {
+            raw = handle.get(commodity);
+        } catch (Throwable ignored) {
+            return localResourcesVanillaFallback(market, commodity);
+        }
+
+        if (StarsectorPrepatcherEconomyHotpathRuntime
+                .isExpectedWarmMarketData(commodity, raw)) {
+            LOCAL_RESOURCES_WARM_READS.increment();
+            return !((CommodityMarketData) raw)
+                    .getMarketShareData(market).isSourceIsIllegal();
+        }
+
+        if (StarsectorPrepatcherEconomyHotpathRuntime.isVanillaCommodity(commodity)) {
+            if (raw != null) return localResourcesVanillaFallback(market, commodity);
+            LOCAL_RESOURCES_COLD_AVOIDED.increment();
+            return (commodity.isDemandLegal() && commodity.getMaxDemand() > 0)
+                    || (commodity.isSupplyLegal() && commodity.getMaxSupply() > 0);
+        }
+
+        if (StarsectorPrepatcherEconomyHotpathRuntime.isAoTDCommodity(commodity)) {
+            long maxima = StarsectorPrepatcherEconomyHotpathRuntime
+                    .peekAoTDConvertedMaxima(commodity);
+            if (maxima != StarsectorPrepatcherEconomyHotpathRuntime
+                    .AOTD_RAW_TOTALS_UNAVAILABLE) {
+                int maxSupply = StarsectorPrepatcherEconomyHotpathRuntime
+                        .unpackAoTDMaxSupply(maxima);
+                int maxDemand = StarsectorPrepatcherEconomyHotpathRuntime
+                        .unpackAoTDMaxDemand(maxima);
+                LOCAL_RESOURCES_COLD_AVOIDED.increment();
+                LOCAL_RESOURCES_AOTD_COLD_AVOIDED.increment();
+                return (commodity.isDemandLegal() && maxDemand > 0)
+                        || (commodity.isSupplyLegal() && maxSupply > 0);
+            }
+        }
+
+        return localResourcesVanillaFallback(market, commodity);
+    }
+
+    private static boolean localResourcesVanillaFallback(
+            MarketAPI market, CommodityOnMarketAPI commodity) {
+        LOCAL_RESOURCES_PEEK_FALLBACKS.increment();
+        return !commodity.getCommodityMarketData()
+                .getMarketShareData(market).isSourceIsIllegal();
+    }
+
+    private static VarHandle commodityMarketDataHandle() {
+        if (!commodityMarketDataHandleResolved) {
+            synchronized (StarsectorPrepatcherHooks.class) {
+                if (!commodityMarketDataHandleResolved) {
+                    try {
+                        MethodHandles.Lookup lookup = MethodHandles.privateLookupIn(
+                                CommodityOnMarket.class, MethodHandles.lookup());
+                        commodityMarketDataHandle = lookup.findVarHandle(
+                                CommodityOnMarket.class, "commodityMarketData",
+                                CommodityMarketData.class);
+                    } catch (Throwable ignored) {
+                        commodityMarketDataHandle = null;
+                    }
+                    commodityMarketDataHandleResolved = true;
+                }
+            }
+        }
+        return commodityMarketDataHandle;
+    }
+
+    /**
+     * Returns a new mutable list matching ReachEconomy's vanilla contract, or
+     * null when the capability/lifecycle/fork contract is not currently safe.
+     * The transformed wrapper interprets null as a preserved raw-method call.
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public static List borrowMarketsInGroupIndexed(
+            ReachEconomy economy, Object rawState, String group) {
+        PrepatcherConfig c = config;
+        long generation = campaignCacheGeneration;
+        if (c == null || !c.economyGroupIndex || !economyGroupIndexReady
+                || !StarsectorPrepatcherEconomyHotpathRuntime
+                        .isReachEconomyEligible(economy)
+                || !(rawState instanceof PersistentSnapshotState state)
+                || !campaignCachesReady(generation, economy)) {
+            ECONOMY_GROUP_INDEX_FALLBACKS.increment();
+            return null;
+        }
+
+        try {
+            List<MarketAPI> source = economy.getMarkets();
+            if (source == null) {
+                ECONOMY_GROUP_INDEX_FALLBACKS.increment();
+                return null;
+            }
+            long structureEpoch = ECONOMY_GROUP_STRUCTURE_EPOCH.get();
+            List result = state.borrowMarketsInGroup(source, group, generation,
+                    structureEpoch, Math.max(0, c.economyStructureAuditMs));
+            if (!campaignCachesReady(generation, economy)
+                    || structureEpoch != ECONOMY_GROUP_STRUCTURE_EPOCH.get()) {
+                state.invalidateGroupIndex();
+                ECONOMY_GROUP_INDEX_FALLBACKS.increment();
+                return null;
+            }
+            return result;
+        } catch (Throwable ignored) {
+            state.invalidateGroupIndex();
+            ECONOMY_GROUP_INDEX_FALLBACKS.increment();
+            return null;
+        }
+    }
 
     // ---------------------------------------------------------------------
     // Aggressive economy: ordered commodity active set
@@ -5554,6 +5750,14 @@ public final class StarsectorPrepatcherHooks {
         long locationEpoch = Long.MIN_VALUE;
         long nextLocationAuditNanos;
 
+        long groupIndexGeneration = Long.MIN_VALUE;
+        long groupIndexStructureEpoch = Long.MIN_VALUE;
+        Object groupIndexSourceIdentity;
+        MarketAPI[] groupIndexMarkets;
+        String[] groupIndexGroups;
+        Map<String, int[]> groupIndexByGroup;
+        long nextGroupIndexAuditNanos;
+
         boolean acceptKind(int requestedKind) {
             if (requestedKind < 0 || requestedKind > 2) return false;
             int current = kind;
@@ -5649,6 +5853,108 @@ public final class StarsectorPrepatcherHooks {
             snapshotEpoch = Long.MIN_VALUE;
             auditCountdown = 0;
             nextAuditNanos = 0L;
+        }
+
+        List borrowMarketsInGroup(List<MarketAPI> source, String group,
+                                  long generation, long structureEpoch,
+                                  int auditMs) {
+            boolean rebuild = groupIndexMarkets == null
+                    || groupIndexByGroup == null
+                    || groupIndexGeneration != generation
+                    || groupIndexStructureEpoch != structureEpoch
+                    || groupIndexSourceIdentity != source
+                    || groupIndexMarkets.length != source.size();
+            long now = System.nanoTime();
+            long interval = (long) auditMs * 1_000_000L;
+
+            if (!rebuild && (interval == 0L || now >= nextGroupIndexAuditNanos)) {
+                ECONOMY_GROUP_INDEX_AUDITS.increment();
+                if (!groupIndexMatches(source)) {
+                    ECONOMY_GROUP_INDEX_MISMATCHES.increment();
+                    rebuild = true;
+                } else {
+                    nextGroupIndexAuditNanos = nextAuditNanos(now, interval);
+                }
+            }
+            if (rebuild) {
+                rebuildGroupIndex(source, generation, structureEpoch, now, interval);
+            }
+
+            int[] indices = groupIndexByGroup.get(group);
+            if (indices == null) {
+                ECONOMY_GROUP_INDEX_HITS.increment();
+                return new ArrayList();
+            }
+            ArrayList result = new ArrayList(indices.length);
+            for (int index : indices) result.add(groupIndexMarkets[index]);
+            ECONOMY_GROUP_INDEX_HITS.increment();
+            return result;
+        }
+
+        private void rebuildGroupIndex(List<MarketAPI> source, long generation,
+                                       long structureEpoch, long now, long interval) {
+            int size = source.size();
+            MarketAPI[] markets = new MarketAPI[size];
+            String[] groups = new String[size];
+            LinkedHashMap<String, Integer> counts = new LinkedHashMap<>();
+            for (int i = 0; i < size; i++) {
+                MarketAPI market = source.get(i);
+                String group = market.getEconGroup();
+                markets[i] = market;
+                groups[i] = group;
+                counts.put(group, counts.getOrDefault(group, 0) + 1);
+            }
+
+            LinkedHashMap<String, int[]> byGroup = new LinkedHashMap<>();
+            HashMap<String, Integer> positions = new HashMap<>();
+            for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+                byGroup.put(entry.getKey(), new int[entry.getValue()]);
+                positions.put(entry.getKey(), 0);
+            }
+            for (int i = 0; i < size; i++) {
+                String group = groups[i];
+                int position = positions.get(group);
+                byGroup.get(group)[position] = i;
+                positions.put(group, position + 1);
+            }
+
+            // Publish only after every market/group read and allocation succeeds.
+            groupIndexGeneration = generation;
+            groupIndexStructureEpoch = structureEpoch;
+            groupIndexSourceIdentity = source;
+            groupIndexMarkets = markets;
+            groupIndexGroups = groups;
+            groupIndexByGroup = byGroup;
+            nextGroupIndexAuditNanos = nextAuditNanos(now, interval);
+            ECONOMY_GROUP_INDEX_BUILDS.increment();
+            ECONOMY_GROUP_INDEX_ELEMENTS.add(size);
+        }
+
+        private boolean groupIndexMatches(List<MarketAPI> source) {
+            try {
+                if (groupIndexMarkets == null || groupIndexGroups == null
+                        || groupIndexMarkets.length != source.size()) return false;
+                for (int i = 0; i < groupIndexMarkets.length; i++) {
+                    MarketAPI market = source.get(i);
+                    if (groupIndexMarkets[i] != market
+                            || !Objects.equals(groupIndexGroups[i], market.getEconGroup())) {
+                        return false;
+                    }
+                }
+                return true;
+            } catch (Throwable ignored) {
+                return false;
+            }
+        }
+
+        void invalidateGroupIndex() {
+            groupIndexGeneration = Long.MIN_VALUE;
+            groupIndexStructureEpoch = Long.MIN_VALUE;
+            groupIndexSourceIdentity = null;
+            groupIndexMarkets = null;
+            groupIndexGroups = null;
+            groupIndexByGroup = null;
+            nextGroupIndexAuditNanos = 0L;
         }
 
         private static boolean identityMatches(List snapshot, Collection source) {
@@ -7725,6 +8031,26 @@ public final class StarsectorPrepatcherHooks {
                         + SAVE_EXACT_REPLAY_STEPS.sumThenReset()
                         + ", saveFlushDurationNanos="
                         + SAVE_FLUSH_DURATION_NANOS.sumThenReset()
+                        + ", localResourcesColdAvoided="
+                        + LOCAL_RESOURCES_COLD_AVOIDED.sumThenReset()
+                        + ", localResourcesAoTDColdAvoided="
+                        + LOCAL_RESOURCES_AOTD_COLD_AVOIDED.sumThenReset()
+                        + ", localResourcesWarmReads="
+                        + LOCAL_RESOURCES_WARM_READS.sumThenReset()
+                        + ", localResourcesPeekFallbacks="
+                        + LOCAL_RESOURCES_PEEK_FALLBACKS.sumThenReset()
+                        + ", economyGroupIndexHits="
+                        + ECONOMY_GROUP_INDEX_HITS.sumThenReset()
+                        + ", economyGroupIndexBuilds="
+                        + ECONOMY_GROUP_INDEX_BUILDS.sumThenReset()
+                        + ", economyGroupIndexFallbacks="
+                        + ECONOMY_GROUP_INDEX_FALLBACKS.sumThenReset()
+                        + ", economyGroupIndexAudits="
+                        + ECONOMY_GROUP_INDEX_AUDITS.sumThenReset()
+                        + ", economyGroupIndexMismatches="
+                        + ECONOMY_GROUP_INDEX_MISMATCHES.sumThenReset()
+                        + ", economyGroupIndexElements="
+                        + ECONOMY_GROUP_INDEX_ELEMENTS.sumThenReset()
                         + ", economyPersistentRebuilds=" + ECONOMY_PERSISTENT_SNAPSHOT_REBUILDS.sumThenReset()
                         + ", economyPersistentAudits=" + ECONOMY_PERSISTENT_SNAPSHOT_AUDITS.sumThenReset()
                         + ", economyPersistentMismatches=" + ECONOMY_PERSISTENT_SNAPSHOT_MISMATCHES.sumThenReset()

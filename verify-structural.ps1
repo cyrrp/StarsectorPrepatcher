@@ -47,7 +47,8 @@ $testCp = @(
     (Join-Path $core 'lwjgl.jar'),
     (Join-Path $core 'lwjgl_util.jar'),
     (Join-Path $core 'xstream-1.4.10.jar'),
-    (Join-Path $core 'jaxb-api-2.4.0-b180830.0359.jar')
+    (Join-Path $core 'jaxb-api-2.4.0-b180830.0359.jar'),
+    (Join-Path $core 'json.jar')
 ) -join [IO.Path]::PathSeparator
 $frSmokeSource = Join-Path $modRoot `
     'source\test\com\starsector\prepatcher\fr\FasterRenderingLoaderSmokeTest.java'
@@ -273,6 +274,75 @@ if ($aotdAvailable) {
         $utf8)
 }
 
+$economyHotpathAoTDReport = Join-Path $reportDir 'economy-hotpath-aotd-fork.txt'
+$aotdForkOwnedTransformerReport =
+    Join-Path $reportDir 'aotd-fork-owned-transformer.txt'
+$aotdSchedulerBridgeReport = Join-Path $reportDir 'aotd-scheduler-bridge.txt'
+$aotdMarketOpenContextReport = Join-Path $reportDir 'aotd-market-open-context.txt'
+$aotdUiEconomyBehaviorReport = Join-Path $reportDir 'aotd-ui-economy-behavior.txt'
+$aotdMarkerScannerReport = Join-Path $reportDir 'aotd-marker-scanner.txt'
+
+$ErrorActionPreference = 'Continue'
+try {
+    $aotdMarketOpenContextOutput = @(& java @exports -cp $classPath `
+        com.starsector.prepatcher.agent.AoTDMarketOpenContextTransformerTest `
+        (Join-Path $core 'starfarer_obf.jar') $verificationConfig 2>&1)
+    $aotdMarketOpenContextExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$aotdMarketOpenContextLines = @(
+    $aotdMarketOpenContextOutput | ForEach-Object { $_.ToString() })
+$aotdMarketOpenContextLines
+[IO.File]::WriteAllLines(
+    $aotdMarketOpenContextReport,
+    [string[]] $aotdMarketOpenContextLines,
+    $utf8)
+if ($aotdMarketOpenContextExitCode -ne 0) {
+    throw 'AoTD market-open context verification failed.'
+}
+
+if ($aotdAvailable) {
+    $aotdTestCp = @($testClasses, $testCp) -join [IO.Path]::PathSeparator
+    foreach ($case in @(
+        @('com.starsector.prepatcher.agent.EconomyHotpathAoTDForkCompatibilityTest',
+          $economyHotpathAoTDReport, $aotdJar),
+        @('com.starsector.prepatcher.agent.AoTDForkCompatibilityTransformerTest',
+          $aotdForkOwnedTransformerReport, $aotdJar),
+        @('com.starsector.prepatcher.agent.AoTDSchedulerBridgeTransformerTest',
+          $aotdSchedulerBridgeReport, $aotdJar),
+        @('com.starsector.prepatcher.agent.AoTDUIEconomyBehaviorCompatibilityTest',
+          $aotdUiEconomyBehaviorReport, $aotdJar),
+        @('com.starsector.prepatcher.agent.AoTDForkMarkerScannerTest',
+          $aotdMarkerScannerReport,
+          (Split-Path -Parent (Split-Path -Parent $aotdJar)))
+    )) {
+        $ErrorActionPreference = 'Continue'
+        try {
+            $output = @(& java @exports -cp $aotdTestCp $case[0] $case[2] 2>&1)
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $savedErrorActionPreference
+        }
+        $lines = @($output | ForEach-Object { $_.ToString() })
+        $lines
+        [IO.File]::WriteAllLines($case[1], [string[]] $lines, $utf8)
+        if ($exitCode -ne 0) { throw "AoTD compatibility test failed: $($case[0])" }
+    }
+} else {
+    foreach ($entry in @(
+        @($economyHotpathAoTDReport, 'economy-hotpath compatibility'),
+        @($aotdForkOwnedTransformerReport, 'fork-owned transformer compatibility'),
+        @($aotdSchedulerBridgeReport, 'scheduler bridge'),
+        @($aotdUiEconomyBehaviorReport, 'UI economy behavior'),
+        @($aotdMarkerScannerReport, 'marker scanner')
+    )) {
+        $lines = @("SKIPPED AoTD $($entry[1]): $aotdJar not found")
+        $lines
+        [IO.File]::WriteAllLines($entry[0], [string[]] $lines, $utf8)
+    }
+}
+
 $strategicJumpReport =
     Join-Path $reportDir 'strategic-jump-destination-first.txt'
 $ErrorActionPreference = 'Continue'
@@ -405,6 +475,9 @@ foreach ($test in @(
     'com.starsector.prepatcher.runtime.TempModExpiryRuntimeRegressionTest',
     'com.starsector.prepatcher.runtime.LoadingSaveRuntimeRegressionTest',
     'com.starsector.prepatcher.runtime.AoTDDomainRevisionRuntimeTest',
+    'com.starsector.prepatcher.runtime.AoTDDeliveryListenerFailStopTest',
+    'com.starsector.prepatcher.runtime.AoTDOpeningMarketContextRuntimeTest',
+    'com.fs.starfarer.api.EconomyHotpathRuntimeTest',
     'com.fs.starfarer.api.StrategicJumpDestinationIndexRuntimeTest'
 )) {
     $runtimeLines.Add("== $test ==")
@@ -423,6 +496,22 @@ foreach ($test in @(
 }
 $runtimeLines
 [IO.File]::WriteAllLines($runtimeReport, $runtimeLines, $utf8)
+
+$semanticBaselineReport = Join-Path $reportDir 'aotd-semantic-baseline.txt'
+$ErrorActionPreference = 'Continue'
+try {
+    $semanticBaselineOutput = @(& java -cp $runtimeCp `
+        com.starsector.prepatcher.aotd.AoTDSemanticBaselineTest `
+        (Join-Path $modRoot 'baseline\aotd\deficit-scenarios.csv') 2>&1)
+    $semanticBaselineExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$semanticBaselineLines = @($semanticBaselineOutput | ForEach-Object { $_.ToString() })
+$semanticBaselineLines
+[IO.File]::WriteAllLines(
+    $semanticBaselineReport, [string[]] $semanticBaselineLines, $utf8)
+if ($semanticBaselineExitCode -ne 0) { throw 'AoTD semantic baseline failed.' }
 
 $presentationRuntimeReport = Join-Path $reportDir 'fast-forward-presentation-runtime.txt'
 $presentationRuntimeLines = [System.Collections.Generic.List[string]]::new()
@@ -586,6 +675,65 @@ $marketShareAgentLines
     $utf8)
 if ($marketShareAgentExitCode -ne 0) {
     throw 'Market-share actual-agent smoke failed.'
+}
+
+# Exercise Local Resources P0 and owner-local econ-group P2 with unrelated
+# transformations disabled. Include exact AoTDReachEconomy when available.
+$economyHotpathAgentConfig = Join-Path $build 'economy-hotpath-agent-smoke.properties'
+$economyHotpathAgentText = [IO.File]::ReadAllText(
+    (Join-Path $modRoot 'prepatcher.properties'))
+$economyHotpathAgentText = [regex]::Replace(
+    $economyHotpathAgentText,
+    '(?m)^(patch\.[^=\r\n]+)=.*$',
+    { param($match) $match.Groups[1].Value + '=false' })
+foreach ($key in @(
+    'patch.localResourcesNoColdMarketData',
+    'patch.economyGroupIndex'
+)) {
+    $economyHotpathAgentText = [regex]::Replace(
+        $economyHotpathAgentText,
+        '(?m)^' + [regex]::Escape($key) + '=false$',
+        "$key=true")
+}
+$economyHotpathAgentText = [regex]::Replace(
+    $economyHotpathAgentText,
+    '(?m)^economy\.structureAuditMs=.*$',
+    'economy.structureAuditMs=0')
+$economyHotpathAgentText = [regex]::Replace(
+    $economyHotpathAgentText,
+    '(?m)^logging\.statsIntervalSeconds=.*$',
+    'logging.statsIntervalSeconds=0')
+[IO.File]::WriteAllText(
+    $economyHotpathAgentConfig, $economyHotpathAgentText, $utf8)
+$economyHotpathAgentCp = $runtimeCp
+$economyHotpathAgentArgs = @()
+if ($aotdAvailable) {
+    $economyHotpathAgentCp += [IO.Path]::PathSeparator + $aotdJar
+    $economyHotpathAgentArgs += 'aotd'
+}
+$economyHotpathAgentReport =
+    Join-Path $reportDir 'economy-hotpath-actual-agent-smoke.txt'
+$ErrorActionPreference = 'Continue'
+try {
+    $economyHotpathAgentOutput = @(& java -Xverify:all `
+        '-Dstarsector.prepatcher.sessionOrigin=economy-hotpath-smoke' `
+        "-javaagent:$mainAgentJar=config=$economyHotpathAgentConfig" `
+        -cp $economyHotpathAgentCp `
+        com.starsector.prepatcher.runtime.EconomyHotpathActualAgentSmokeTest `
+        @economyHotpathAgentArgs 2>&1)
+    $economyHotpathAgentExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$economyHotpathAgentLines = @(
+    $economyHotpathAgentOutput | ForEach-Object { $_.ToString() })
+$economyHotpathAgentLines
+[IO.File]::WriteAllLines(
+    $economyHotpathAgentReport,
+    [string[]] $economyHotpathAgentLines,
+    $utf8)
+if ($economyHotpathAgentExitCode -ne 0) {
+    throw 'Economy-hotpath actual-agent smoke failed.'
 }
 
 $commoditySmokeConfig = Join-Path $build 'commodity-temporal-agent-smoke.properties'

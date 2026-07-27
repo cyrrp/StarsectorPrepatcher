@@ -73,6 +73,16 @@ public final class StarsectorPrepatcherRuntimeBridge {
             new LinkedHashSet<>();
     private static final int AOTD_STALE_MARKET_TOKEN_LIMIT = 256;
 
+    // Synchronous, finally-cleared UI call context. Object[] avoids adding a
+    // nested runtime payload class and is retained only by the campaign thread
+    // for the duration of reportPlayerOpenedMarket(). Layout: token, market, parent.
+    private static final ThreadLocal<Object[]> AOTD_OPENING_MARKET_CONTEXT =
+            new ThreadLocal<>();
+    private static final AtomicLong AOTD_OPENING_MARKET_SEQUENCE = new AtomicLong();
+    private static final LongAdder AOTD_OPENING_MARKET_BEGINS = new LongAdder();
+    private static final LongAdder AOTD_OPENING_MARKET_CONSUMES = new LongAdder();
+    private static final LongAdder AOTD_OPENING_MARKET_TOKEN_MISMATCHES = new LongAdder();
+
     private static volatile boolean aotdContractRegistered;
     private static volatile String aotdForkVersion = "";
     private static volatile long aotdDeclaredCapabilities;
@@ -96,14 +106,14 @@ public final class StarsectorPrepatcherRuntimeBridge {
         StarsectorPrepatcherPresentationHooks.configure(config);
     }
 
-    /** Stage-2 compatibility overload. */
+    /** Compatibility overload for forks without delivery callbacks. */
     public static long registerAoTDForkContract(
             String modId, int abiVersion, String forkVersion, long declaredCapabilities) {
         return registerAoTDForkContract(
                 modId, abiVersion, forkVersion, declaredCapabilities, null, null);
     }
 
-    /** Stage-7 compatibility overload. */
+    /** Compatibility overload for forks without deficit resolution. */
     public static long registerAoTDForkContract(
             String modId, int abiVersion, String forkVersion, long declaredCapabilities,
             Consumer<Object> deliveryListener) {
@@ -199,7 +209,11 @@ public final class StarsectorPrepatcherRuntimeBridge {
                 + "; marketBoundaryTokenMismatches="
                 + AOTD_MARKET_BOUNDARY_TOKEN_MISMATCHES.get()
                 + "; unknownMarketBoundaryCloses="
-                + AOTD_UNKNOWN_MARKET_BOUNDARY_CLOSES.get();
+                + AOTD_UNKNOWN_MARKET_BOUNDARY_CLOSES.get()
+                + "; openingMarketBegins=" + AOTD_OPENING_MARKET_BEGINS.sum()
+                + "; openingMarketConsumes=" + AOTD_OPENING_MARKET_CONSUMES.sum()
+                + "; openingMarketTokenMismatches="
+                + AOTD_OPENING_MARKET_TOKEN_MISMATCHES.sum();
     }
 
     /** Called by the clean BaseIndustry wrapper. Null means use preserved vanilla code. */
@@ -369,6 +383,54 @@ public final class StarsectorPrepatcherRuntimeBridge {
                 state.mutationReasonMask = 0;
                 state.mutationToken = 0L;
             }
+        }
+    }
+
+    /** Opens the exact CampaignEngine market-open call context. */
+    public static long beginAoTDOpeningMarket(Object market) {
+        if (market == null) return 0L;
+        long token = AOTD_OPENING_MARKET_SEQUENCE.updateAndGet(
+                StarsectorPrepatcherRuntimeBridge::nextPositive);
+        Object[] parent = AOTD_OPENING_MARKET_CONTEXT.get();
+        AOTD_OPENING_MARKET_CONTEXT.set(
+                new Object[] {Long.valueOf(token), market, parent});
+        AOTD_OPENING_MARKET_BEGINS.increment();
+        return token;
+    }
+
+    /**
+     * Returns the market once and clears the strong market reference immediately.
+     * The wrapper's finally block later removes the remaining token frame.
+     */
+    public static Object consumeAoTDOpeningMarket() {
+        Object[] context = AOTD_OPENING_MARKET_CONTEXT.get();
+        if (context == null) return null;
+        Object market = context[1];
+        context[1] = null;
+        if (market != null) AOTD_OPENING_MARKET_CONSUMES.increment();
+        return market;
+    }
+
+    /** Closes the context without retaining the market after abnormal exit. */
+    public static void endAoTDOpeningMarket(long token) {
+        if (token == 0L) return;
+        Object[] context = AOTD_OPENING_MARKET_CONTEXT.get();
+        if (context == null) return;
+        Object rawToken = context[0];
+        long actual = rawToken instanceof Long ? ((Long) rawToken).longValue() : 0L;
+        context[1] = null;
+        if (actual != token) {
+            AOTD_OPENING_MARKET_TOKEN_MISMATCHES.increment();
+            AOTD_OPENING_MARKET_CONTEXT.remove();
+            return;
+        }
+        Object parent = context[2];
+        context[0] = null;
+        context[2] = null;
+        if (parent instanceof Object[]) {
+            AOTD_OPENING_MARKET_CONTEXT.set((Object[]) parent);
+        } else {
+            AOTD_OPENING_MARKET_CONTEXT.remove();
         }
     }
 

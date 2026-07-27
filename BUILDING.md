@@ -35,7 +35,7 @@ agent JAR как обычные entries `com/fs/starfarer/api/StarsectorPrepatch
 не должен иметь на них статических ссылок: `RuntimeInstaller` читает эти entries как bytes и через
 `MethodHandles.Lookup.defineClass()` определяет их в system/game loader. Build завершается ошибкой,
 если в JAR нет обязательных top-level entries или exact inventory текущего payload отличается от
-108 top-level/nested class entries:
+113 top-level/nested class entries:
 
 ```text
 com/fs/starfarer/api/StarsectorPrepatcherHooks.class
@@ -113,7 +113,7 @@ profile и только там включает known-disabled loading/startup p
 документацию или дистрибутив. Если `fr.jar` отсутствует, FR smoke явно получает `SKIPPED`; такой
 результат допустим для обычной разработки, но не для выпуска с заявленной FR-совместимостью.
 Краткие пользовательские изменения фиксируются в [`CHANGELOG.md`](CHANGELOG.md), а причины,
-измерения и остаточные риски — в [`docs/releases/`](docs/releases/0.12.0.md). Обязательные regression
+измерения и остаточные риски — в [`docs/releases/`](docs/releases/0.13.0.md). Обязательные regression
 gates для новых pre-load патчей описаны в [`docs/VALIDATION.md`](docs/VALIDATION.md).
 
 ## Java 17 compatibility

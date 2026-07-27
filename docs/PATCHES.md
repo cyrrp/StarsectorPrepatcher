@@ -45,6 +45,8 @@ classfile или JAR не участвует в решении.
 | `patch.marketScheduler` | `Economy.advance`, `BaseCampaignEntity.advance`, pre-save boundary | one stable-phase scheduler for all transformed engine-owned market updates with exact accumulated amount | one identity state and policy; direct mod calls immediate; hot markets full-rate; callback cadence intentionally changes |
 | `patch.directMarketObservation` | mod call sites + known engine origins + concrete `Market.advance` entry | synchronous wrappers, eager call-site manifest, sampled timing and interval-bounded stack attribution | direct mod calls are never delayed/merged/suppressed; known planet path is classified separately |
 | `patch.economyPersistentSnapshots` | Economy/Market | owner-local copy-on-write snapshots + structure epochs | API mutators invalidate immediately; direct live-list edits bounded by audit |
+| `patch.localResourcesNoColdMarketData` | `LocalResourcesSubmarketPlugin.getStockpileLimit/shouldHaveCommodity` | removes accidental cold global `CommodityMarketData` materialization; exact AoTD cold state uses its committed supply/demand model | both method surfaces apply atomically; unknown/future commodity classes retain the raw getter path |
+| `patch.economyGroupIndex` | `ReachEconomy.getMarketsInGroup`, market/group mutators | owner-local ordered `econGroup` index; each caller still receives a fresh mutable list | exact vanilla and verified `AoTDReachEconomy`; mutation epoch, source identity/size and bounded ordered audit prevent stale publication |
 | `patch.commodityEventModDirtyCache` | `CommodityOnMarket.reapplyEventMod` | skip repeated removal after zero quantity proved private `eMod` absent | first zero call/load and the complete nonzero remove/calculate/add path stay vanilla; direct external mutation of the private key is unsupported |
 | `patch.commodityTemporalFastPath` | `Market.advance` + `MutableStat` | ordered active set: stable commodity skips 4 temp-stat advances and event-mod reapply | API mutations wake immediately; subclasses/shared stats fall back; direct live-map edits bounded by audit |
 
@@ -345,9 +347,17 @@ virtual `Industry.isBuilding()` используется как fallback тол�
 `Industry.isUpgrading()` и virtual-building при raw=false остаются reason/gauge для диагностики, но не
 включают full-rate. Старая history exact-replay’ится до текущего шага.
 Подтверждённые mutators `Market`, `BaseIndustry`
-и `ConstructionQueue` flush’ят pending history до изменения структуры. После завершения
-строительства рынок автоматически возвращается к coalescing. Полный detector scan выполняется
-после mutation epoch и через редкий safety audit, а не на каждом simulation input.
+и `ConstructionQueue` flush’ят pending history до изменения структуры. Owned
+`AoTDConstructionSite.setAssignedWonder(String)` является отдельной fork-owned surface: exact
+structural transformer сохраняет исходное тело как private synthetic raw method и ставит
+`SchedulerBridge.beforeMarketMutation/afterMarketMutation` в `try/finally`. Тем самым переход
+`building=false -> true` сначала доставляет накопленное время старому состоянию, затем немедленно
+публикует structure/industry/derived-economy dirty mask. Transformer включён тем же
+`patch.marketScheduler`, не создаёт cache/listener/state и отклоняет future implementation, если
+изменились write/call/return invariants.
+
+После завершения строительства рынок автоматически возвращается к coalescing. Полный detector scan
+выполняется после mutation epoch и через редкий safety audit, а не на каждом simulation input.
 
 Периодическая строка stats всегда содержит причины и стоимость detector scan: queue/effective-
 building/upgrading/reported-without-raw gauges, dirty/safety/forced scans, cached decisions,
@@ -592,7 +602,7 @@ byte-for-byte visual parity: сама цель блока — намеренно
 исходный отдельный FastForward Presentation Patch agent одновременно устанавливать не нужно.
 
 Порядок `presentation → structural` является частью runtime-контракта, а не только порядком строк
-регистрации. На пяти общих target-классах presentation-stage добавляет private synthetic
+регистрации. На пяти общих target-классах presentation pass добавляет private synthetic
 `smo$patched$fastForwardPresentation` и `smo$fastForwardPresentationMask`. Structural transformer до
 анализа принимает только полностью vanilla presentation-state либо owner/mask с точным набором
 `StarsectorPrepatcherPresentationHooks`; после каждого structural commit и в финале этот набор
@@ -623,6 +633,64 @@ arguments или control-flow anchor, соответствующий класс 
 | `patch.starfieldCleanupBuffers` | parallax starfield implementation | reusable stale list | two-phase cleanup retained |
 | `patch.starfieldLinearRemoval` | same | thresholded stable iterator removal | order retained; equality-aware fallback |
 
+
+
+## Local Resources и economy-group hot paths
+
+### `patch.localResourcesNoColdMarketData`
+
+Target surfaces are the exact vanilla methods
+`LocalResourcesSubmarketPlugin.getStockpileLimit(CommodityOnMarketAPI)` and
+`shouldHaveCommodity(CommodityOnMarketAPI)`. They form one atomic capability: if either bytecode
+surface changes, both remain raw.
+
+`getStockpileLimit()` no longer reaches an instance through
+`CommodityOnMarket.getCommodityMarketData()` merely to call `getMaxShipping()`. The latter is a
+stateless forwarding method, so the transformed site calls the same static
+`CommodityMarketData.getShippingCapacity(market, false)` calculation directly. Warm results are
+unchanged, while a Local Resources frame can no longer construct a global commodity model through
+that call site.
+
+For illegal commodities, `shouldHaveCommodity()` first peeks the already-published transient
+market-data reference. An exact warm object uses the original `MarketShareData.sourceIsIllegal`
+semantics. An exact cold vanilla commodity uses its last committed legal supply/demand snapshot.
+The maintained AoTD fork is handled separately: a loader-local `ClassValue` verifies the exact
+`AoTDCommodityOnMarket`/`AoTDAvailableStat`/`AoTDSupplyDemandData`/calculation-script surface, peeks
+only previously published supply/demand data, and runs the same
+`convertRawUnitsToSupply/Demand()` methods used by the fork. It does not invoke AoTD's lazy getter,
+refresh industries, or materialize `AoTDCommodityMarketData`. Missing committed data, a repairable
+wrong market-data type, linkage failure, another subclass, or a future changed fork surface calls
+the preserved raw getter instead of guessing.
+
+The runtime stores only core `VarHandle` metadata, primitive counters and unload-safe `ClassValue`
+accessors. It does not keep a static `MarketAPI`, commodity, optional `Class`, `Method`,
+`ClassLoader`, or mod instance.
+
+### `patch.economyGroupIndex`
+
+`ReachEconomy.getMarketsInGroup(String)` is wrapped around a private retained raw method. The index
+state is a private transient synthetic field of the owning `ReachEconomy`; it contains one ordered
+market array plus primitive bucket indices. Every successful lookup creates a new mutable
+`ArrayList`, preserving caller mutation freedom and source order. Unknown group names return a new
+empty list and are not inserted into the index.
+
+`ReachEconomy.addMarket/removeMarket` and `Market.setEconGroup` advance a primitive structure epoch.
+Each borrow additionally checks active campaign generation, owner identity, source-list identity
+and size; a timed ordered identity/group audit covers direct list or reflective mutation. Rebuild
+replaces exact-sized arrays and removal clears the previous owner-local arrays immediately. Thus the
+cycle `ReachEconomy -> index -> markets -> ReachEconomy` has no static root and is collected with the
+campaign.
+
+The exact maintained `AoTDReachEconomy` uses the indexed inherited path only while
+`getMarketsInGroup`, `getMarkets`, `isInGroup` and `removeMarket` remain vanilla-owned. The
+real-fork build gate additionally verifies that the currently supplied fork-owned `addMarket`
+delegates exactly once to `ReachEconomy.addMarket`. A future critical read override is rejected for
+that concrete runtime class. If a future `addMarket` body stops delegating, immediate epoch
+invalidation is no longer guaranteed, but source-list identity/size checks and the bounded ordered
+audit still detect the mutation and rebuild the owner-local index; the exact-JAR compatibility gate
+must then be updated before claiming the same immediate-invalidation performance contract. The
+shipped profiles explicitly enable the feature; an old/custom config missing the key remains
+fail-closed.
 
 ## Market share и punitive expeditions
 

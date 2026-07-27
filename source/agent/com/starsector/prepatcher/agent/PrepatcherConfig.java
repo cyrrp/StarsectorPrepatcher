@@ -45,6 +45,8 @@ public final class PrepatcherConfig {
     /** Bounded audit for direct mutations of BaseLocation.getTags() live collections. */
     public final int coreWorldsAuditSystemsPerFrame;
     public final boolean economyLocationCache;
+    public final boolean localResourcesNoColdMarketData;
+    public final boolean economyGroupIndex;
     public final boolean economyPersistentSnapshots;
     public final boolean commodityEventModDirtyCache;
     public final boolean marketScheduler;
@@ -194,6 +196,11 @@ public final class PrepatcherConfig {
         coreWorldsAuditSystemsPerFrame = integer(
                 "coreWorlds.auditSystemsPerFrame", 64, 1, 16_384);
         economyLocationCache = bool("patch.economyLocationCache", true);
+        localResourcesNoColdMarketData = bool(
+                "patch.localResourcesNoColdMarketData", true);
+        // Missing keys in legacy/custom configs fail closed; shipped production profiles
+        // opt in explicitly after the structural capability handshake succeeds.
+        economyGroupIndex = bool("patch.economyGroupIndex", false);
         warnRemovedEconomySnapshotReuse();
         economyPersistentSnapshots = bool("patch.economyPersistentSnapshots", false);
         commodityEventModDirtyCache = bool("patch.commodityEventModDirtyCache", false);

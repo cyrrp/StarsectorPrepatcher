@@ -99,6 +99,30 @@ critical market-share surface по-прежнему объявлен vanilla-к�
 `getMarketShareData()` остаётся независимым. Решение хранится в `ClassValue`, поэтому child
 classloader не становится strong root.
 
+## Owned AoTD economy и construction surfaces
+
+Проверка выполняется по реальному `AoTDToolboxTheory.jar`, а не по имени класса.
+
+| Поверхность форка | Результат |
+|---|---|
+| `AoTDCommodityOnMarket` + `AoTDAvailableStat` + `AoTDSupplyDemandData` | `patch.localResourcesNoColdMarketData` читает только уже опубликованное состояние и применяет тот же calculation script; lazy materialization не вызывается. Изменённый контракт локально возвращается к raw getter. |
+| `AoTDCommodityMarketData` | `patch.marketShareLinearAggregation` наследует линейный путь, пока пять critical methods остаются vanilla-owned. |
+| `AoTDReachEconomy` | `patch.economyGroupIndex` наследует wrapper только при vanilla ownership четырёх critical read/mutation methods. Exact supplied JAR отдельно проверяется на one-super-call `addMarket`; future critical read override fail-closed, а changed `addMarket` без `super` восстанавливается через source identity/size и bounded ordered audit вместо обещания немедленной epoch-инвалидации. |
+| `AoTDEconomy` + `AoTDReachEconomy` single-market UI path | Exact `CampaignEngine.reportPlayerOpenedMarket` wrapper передаёт рынок до vanilla `Economy.nextStep()` и очищает context в `finally`. Owner-local transient coordinator выполняет single-market main/update/immigration/snapshot pipeline и coalesces Cargo step только при совпадении campaign/economy/registry/global-dirty/market-dirty revisions. Real-JAR gate запрещает all-market `getMarkets()`, global commodity construction и global trade cut в этом методе. |
+| `AoTDEconomy` | `Economy.advance` не переопределён, поэтому объединённый economy plan применяется к vanilla owner один раз. Bulk initial population покрывается source identity/size validation и ordered audit P2. |
+| `AoTDAvailableStat.advance(float)` | Exact fork method делегирует один раз в `MutableStatWithTempMods.advance`; temp-mod scheduler сохраняет inherited optimized path. |
+| `AoTDCommodityOnMarket.reapplyEventMod()` | Exact no-op; `commodityEventModDirtyCache` намеренно не нужен этому override, остальные commodity temporal surfaces наследуются/проверяются отдельно. |
+| `AoTDFarming`, `AoTDToolboxPopAndInfra` | Наследуют поддержанные `BaseIndustry` surfaces; dormant/no-op eligibility остаётся dynamic и отклоняет custom override. |
+| `AoTDConstructionSite` | Completion paths уже имеют source-level bridge boundaries. Exact fork-owned `setAssignedWonder(String)` дополнительно трансформируется в `before/afterMarketMutation` `try/finally`, чтобы `building=true` немедленно менял scheduler construction policy. Changed future body remains raw. |
+| Остальные target families | В fork JAR нет descendants/overrides для map, Intel, core-worlds, strategic jump, hyperspace, loading/save, ship/particle и presentation targets; они остаются vanilla-owned. |
+
+Compatibility accessors используют `ClassValue`; нет process-lifetime strong map по optional
+`Class`, `Method`, `ClassLoader` или mod object. Economy-group arrays находятся только в transient
+owner-local field `ReachEconomy`; construction wrapper не добавляет instance state, listener или
+cache. UI context хранит strong `MarketAPI` только в campaign-thread `ThreadLocal` между входом в
+`reportPlayerOpenedMarket()` и первым потреблением; ссылка зануляется при consume и повторно в
+`finally`. Coordinator форка сохраняет только primitive revisions, identity hash и market ID.
+
 ## Статусы
 
 В `logs/prepatcher.log` для каждого загруженного target выводится один из статусов:
@@ -438,7 +462,7 @@ Telemetry schema `0.7.1`: старый `pooledRandom` называется `pool
 Structural proof показывает однозначность site, linkage, no-escape и verifier postconditions, но
 не доказывает величину ускорения. Runtime и performance evidence создаётся в `.build/reports/`, а
 проверенные выводы сохраняются в отчёте выпуска, например
-[`releases/0.12.0.md`](releases/0.12.0.md).
+[`releases/0.13.0.md`](releases/0.13.0.md).
 
 Если несколько javaagent меняют одни и те же классы, располагайте Prepatcher после них:
 transformer увидит bytes, возвращённые ранее зарегистрированными агентами. Installer обеспечивает
@@ -460,24 +484,34 @@ Prepatcher снова стал последним `-javaagent`.
 Общие классы не полагаются на случайный порядок двух независимых transformer-ов. Поддерживаемая
 runtime-последовательность остаётся `presentation → structural`. Все presentation
 target-классы проверяются по локальной структуре методов; SHA-256 класса и JAR не участвуют в
-compatibility decision. Presentation stage публикует owner, global feature mask и точный hook
-inventory. Structural stage проверяет их до анализа и после каждого commit. При локальном
+compatibility decision. Presentation pass публикует owner, global feature mask и точный hook
+inventory. Structural pass проверяет их до анализа и после каждого commit. При локальном
 `SKIPPED_STRUCTURAL` presentation-класс остаётся входным, а независимые structural patches могут
 продолжить работу на своих surfaces.
 
 ## AoTD Scheduler Fork
 
-Scheduler Fork release `1.0.14-spp1` requires Prepatcher `0.12.0`, an active compatible javaagent
+Scheduler Fork release `1.0.14-spp2` requires Prepatcher `0.13.0`, an active compatible javaagent
 and the original game `starfarer.api.jar`. The fork is required for optimal performance when
 AoTD Theory of Toolbox is installed; it is not a dependency for configurations without AoTD.
 A partial capability profile is intentionally rejected. The legacy AoTD core-JAR replacement is
 not compatible with this profile.
 
-The owned fork is validated from its real `AoTDToolboxTheory.jar`. Its scheduler bridge is
-transformed directly, the market-share optimization is inherited only while the five critical
-methods remain vanilla-owned, and the core-worlds index is intentionally unrelated because the
-fork owns none of its three transformation surfaces. A future critical market-share override fails
-closed for that concrete runtime class instead of silently receiving inherited semantics.
+The owned fork is validated from its real `AoTDToolboxTheory.jar`. Its scheduler bridge and the
+exact `AoTDConstructionSite.setAssignedWonder(String)` construction-start surface are transformed
+directly. Market-share and economy-group optimizations are inherited only while their audited
+vanilla-owned read surfaces remain compatible. The exact supplied `AoTDReachEconomy.addMarket`
+delegation is also checked by the real-JAR gate; if a future body bypasses `super`, source
+identity/size validation and the bounded ordered audit recover the index, but immediate mutation-
+epoch invalidation is no longer claimed until that fork revision is reviewed. Local Resources
+cold-state handling uses the fork's already-published supply/demand data and exact
+conversion script without invoking its lazy materializer. Future critical overrides fail closed for
+that concrete runtime class instead of silently receiving inherited semantics.
+
+The audit also confirms inherited `Economy.advance`, commodity temporal and temp-mod paths, and
+records `AoTDCommodityOnMarket.reapplyEventMod()` as an intentional no-op for which the vanilla
+removal cache is unnecessary. Core-worlds, strategic-jump, hyperspace, map/Intel, startup/save,
+combat and presentation families have no fork descendant on their transformation surfaces.
 
 ## Optional Nexerelin market-share target
 

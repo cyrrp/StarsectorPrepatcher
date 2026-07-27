@@ -5,7 +5,7 @@ import java.nio.file.*;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
-public final class Stage8CleanDeficitTest {
+public final class AoTDCleanDeficitCompatibilityTest {
   public static void main(String[] args) throws Exception {
     Path classFile=Path.of(args[0]);
     Path configFile=Path.of(args[1]);
@@ -18,7 +18,7 @@ public final class Stage8CleanDeficitTest {
     byte[] repeated=transformer.transform(null,
       "com/fs/starfarer/api/impl/campaign/econ/impl/BaseIndustry",null,null,transformed);
     require(repeated==null,"repeated transform was not idempotent");
-    Loader loader=new Loader(Stage8CleanDeficitTest.class.getClassLoader());
+    Loader loader=new Loader(AoTDCleanDeficitCompatibilityTest.class.getClassLoader());
     Class<?> type=loader.define(transformed);
     Object instance=type.getConstructor().newInstance();
     Object vanilla=type.getMethod("getMaxDeficit",String[].class)
@@ -27,7 +27,7 @@ public final class Stage8CleanDeficitTest {
 
     StarsectorPrepatcherRuntimeBridge.configure(config,Path.of("."));
     long caps=StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract(
-      "aotd_theory_of_toolbox",1,"test-stage8",0xffL,
+      "aotd_theory_of_toolbox",1,"clean-deficit-test",0xffL,
       new Consumer<Object>() { public void accept(Object event) {} },
       new BiFunction<Object,Object,Object>() {
         public Object apply(Object industry,Object ids) {

@@ -19,7 +19,7 @@ bash "$MOD_ROOT/build-agent.sh"
 rm -rf "$TEST_CLASSES" "$FR_SMOKE_CLASSES"
 mkdir -p "$TEST_CLASSES" "$FR_SMOKE_CLASSES" "$REPORT_DIR"
 
-TEST_CP="$AGENT_CLASSES:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar"
+TEST_CP="$AGENT_CLASSES:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
 FR_SMOKE_SOURCE="$MOD_ROOT/source/test/com/starsector/prepatcher/fr/FasterRenderingLoaderSmokeTest.java"
 find "$MOD_ROOT/source/test" -name '*.java' ! -path "$FR_SMOKE_SOURCE" -print0 | \
   xargs -0 javac -encoding UTF-8 -source 17 -target 17 \
@@ -103,6 +103,46 @@ else
 fi
 
 java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.AoTDMarketOpenContextTransformerTest \
+  "$CORE/starfarer_obf.jar" "$VERIFICATION_CONFIG" \
+  2>&1 | tee "$REPORT_DIR/aotd-market-open-context.txt"
+
+if [[ -f "$AOTD_JAR" ]]; then
+  AOTD_MOD_ROOT="$(cd "$(dirname "$AOTD_JAR")/.." && pwd)"
+  java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
+    com.starsector.prepatcher.agent.EconomyHotpathAoTDForkCompatibilityTest \
+    "$AOTD_JAR" \
+    2>&1 | tee "$REPORT_DIR/economy-hotpath-aotd-fork.txt"
+  java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
+    com.starsector.prepatcher.agent.AoTDForkCompatibilityTransformerTest \
+    "$AOTD_JAR" \
+    2>&1 | tee "$REPORT_DIR/aotd-fork-owned-transformer.txt"
+  java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
+    com.starsector.prepatcher.agent.AoTDSchedulerBridgeTransformerTest \
+    "$AOTD_JAR" \
+    2>&1 | tee "$REPORT_DIR/aotd-scheduler-bridge.txt"
+  java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
+    com.starsector.prepatcher.agent.AoTDUIEconomyBehaviorCompatibilityTest \
+    "$AOTD_JAR" \
+    2>&1 | tee "$REPORT_DIR/aotd-ui-economy-behavior.txt"
+  java -cp "$TEST_CLASSES:$TEST_CP" \
+    com.starsector.prepatcher.agent.AoTDForkMarkerScannerTest \
+    "$AOTD_MOD_ROOT" \
+    2>&1 | tee "$REPORT_DIR/aotd-marker-scanner.txt"
+else
+  echo "SKIPPED AoTD economy-hotpath compatibility: $AOTD_JAR not found" | \
+    tee "$REPORT_DIR/economy-hotpath-aotd-fork.txt"
+  echo "SKIPPED AoTD fork-owned transformer compatibility: $AOTD_JAR not found" | \
+    tee "$REPORT_DIR/aotd-fork-owned-transformer.txt"
+  echo "SKIPPED AoTD scheduler bridge: $AOTD_JAR not found" | \
+    tee "$REPORT_DIR/aotd-scheduler-bridge.txt"
+  echo "SKIPPED AoTD UI economy behavior: $AOTD_JAR not found" | \
+    tee "$REPORT_DIR/aotd-ui-economy-behavior.txt"
+  echo "SKIPPED AoTD marker scanner: $AOTD_JAR not found" | \
+    tee "$REPORT_DIR/aotd-marker-scanner.txt"
+fi
+
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
   com.starsector.prepatcher.agent.StrategicJumpDestinationFirstTransformerTest \
   "$VERIFICATION_CONFIG" "$CORE/starfarer_obf.jar" \
   2>&1 | tee "$REPORT_DIR/strategic-jump-destination-first.txt"
@@ -151,6 +191,15 @@ RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$CORE/st
   java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.LoadingSaveRuntimeRegressionTest
   echo '== AoTDDomainRevisionRuntimeTest =='
   java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.AoTDDomainRevisionRuntimeTest
+  echo '== AoTDDeliveryListenerFailStopTest =='
+  java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.AoTDDeliveryListenerFailStopTest
+  echo '== AoTDOpeningMarketContextRuntimeTest =='
+  java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.AoTDOpeningMarketContextRuntimeTest
+  echo '== EconomyHotpathRuntimeTest =='
+  java -cp "$RUNTIME_CP" com.fs.starfarer.api.EconomyHotpathRuntimeTest
+  echo '== AoTDSemanticBaselineTest =='
+  java -cp "$RUNTIME_CP" com.starsector.prepatcher.aotd.AoTDSemanticBaselineTest \
+    "$MOD_ROOT/baseline/aotd/deficit-scenarios.csv"
   echo '== StrategicJumpDestinationIndexRuntimeTest =='
   java -cp "$RUNTIME_CP" com.fs.starfarer.api.StrategicJumpDestinationIndexRuntimeTest
 } 2>&1 | tee "$REPORT_DIR/runtime-regression.txt"
@@ -220,6 +269,32 @@ java -Xverify:all \
   com.starsector.prepatcher.runtime.MarketShareActualAgentSmokeTest \
   "${MARKET_SHARE_AGENT_ARGS[@]}" \
   2>&1 | tee "$REPORT_DIR/market-share-actual-agent-smoke.txt"
+
+# Exercise Local Resources P0 and the owner-local econ-group P2 in isolation.
+# The exact AoTDReachEconomy path is added when the maintained fork JAR is present.
+ECONOMY_HOTPATH_AGENT_CONFIG="$BUILD/economy-hotpath-agent-smoke.properties"
+sed -E \
+  -e 's/^(patch\.[^=]+)=.*/\1=false/' \
+  -e 's/^economy\.structureAuditMs=.*/economy.structureAuditMs=0/' \
+  -e 's/^logging\.statsIntervalSeconds=.*/logging.statsIntervalSeconds=0/' \
+  "$MOD_ROOT/prepatcher.properties" | \
+  sed -E \
+    -e 's/^patch\.localResourcesNoColdMarketData=false/patch.localResourcesNoColdMarketData=true/' \
+    -e 's/^patch\.economyGroupIndex=false/patch.economyGroupIndex=true/' \
+  > "$ECONOMY_HOTPATH_AGENT_CONFIG"
+ECONOMY_HOTPATH_AGENT_CP="$RUNTIME_CP"
+ECONOMY_HOTPATH_AGENT_ARGS=()
+if [[ -f "$AOTD_JAR" ]]; then
+  ECONOMY_HOTPATH_AGENT_CP="$ECONOMY_HOTPATH_AGENT_CP:$AOTD_JAR"
+  ECONOMY_HOTPATH_AGENT_ARGS+=(aotd)
+fi
+java -Xverify:all \
+  -Dstarsector.prepatcher.sessionOrigin=economy-hotpath-smoke \
+  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$ECONOMY_HOTPATH_AGENT_CONFIG" \
+  -cp "$ECONOMY_HOTPATH_AGENT_CP" \
+  com.starsector.prepatcher.runtime.EconomyHotpathActualAgentSmokeTest \
+  "${ECONOMY_HOTPATH_AGENT_ARGS[@]}" \
+  2>&1 | tee "$REPORT_DIR/economy-hotpath-actual-agent-smoke.txt"
 
 # Exercise the active-set dependency contract with every other patch, including
 # the standalone temp-mod switch, disabled. The transformer must still install
