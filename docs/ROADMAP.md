@@ -1,6 +1,6 @@
 # Технический roadmap
 
-Статус: план работ после выпуска `0.13.0`. Persistent economy snapshots, ordered commodity active
+Статус: план работ после выпуска `0.17.0`. Атомарный UI market-mutation refresh для policy/trade/free-port и exact vanilla industry branches добавлен; Persistent economy snapshots, ordered commodity active
 set, direct expiry-aware temp-mod scheduler, dormant `BaseIndustry` fast path, production-интеграция
 AoTD, incremental core-worlds и StrategicModule indexes и линейный market-share path выпущены в
 одном unified agent. Следующий архитектурный milestone сосредоточен на structural discovery; срок
@@ -30,8 +30,9 @@ Structural discovery — не факультативная оптимизаци�
 
 ### Имена и structural matching
 
-1. `PrepatcherTransformer` содержит 31 точное JVM internal name. Класс отбрасывается до
-   structural-проверки, если его имя отсутствует в `TARGET_CLASSES`.
+1. `PrepatcherTransformer` содержит растущий каталог точных JVM internal names. Класс отбрасывается
+   до structural-проверки, если его имя отсутствует в `TARGET_CLASSES`; cardinality каталога
+   меняется вместе с добавлением patch surfaces.
 2. Один и тот же каталог целей повторяется в `TARGET_CLASSES`, dispatch-switch и switch проверки
    конфигурации. Hyperspace-цели имеют ещё один отдельный список.
 3. Текущая проверка хорошо переносит изменения строк и constant pool внутри класса с известным
@@ -48,11 +49,11 @@ Structural discovery — не факультативная оптимизаци�
 
 ### Архитектура
 
-- `PrepatcherTransformer.java` вырос примерно до 4,4 тысячи строк и одновременно выполняет
-  routing, config dispatch, structural matching, mutation, ownership/idempotency, serialization,
-  ASM verification и реализации патчей.
-- `PrepatcherHooks.java` вырос примерно до 3 тысяч строк и объединяет loading, campaign lifecycle,
-  map/Intel caches, economy, combat, routing и telemetry.
+- `PrepatcherTransformer.java` остаётся крупным и одновременно выполняет routing, config dispatch,
+  structural matching, mutation, ownership/idempotency, serialization, ASM verification и
+  реализации патчей.
+- `PrepatcherHooks.java` остаётся крупным и объединяет loading, campaign lifecycle, map/Intel caches,
+  economy, combat, routing и telemetry.
 - Match и mutation не выражены отдельными фазами. Часть mutator'ов начинает менять временный
   `ClassNode` до доказательства полного контракта. Транзакция не выпускает ошибочный результат, но
   такой код нельзя безопасно использовать для read-only discovery.
@@ -287,7 +288,7 @@ allowlist. Cache hit всё равно повторяет read-only contract и 
 
 ### Обязательные acceptance criteria
 
-- Все 27 текущих logical targets однозначно обнаруживаются в оригинальной `0.98a-RC8` и в
+- Все текущие logical roles однозначно обнаруживаются в оригинальной `0.98a-RC8` и в
   используемой русской локализации.
 - Каждая из 27 ролей проходит fixture-remap internal name и peer references без production-доступа
   к legacy name.
@@ -413,7 +414,7 @@ Cross-OS byte equality не обещается, пока она не объяв�
 | `CORE-02` | Patch API | Read-only inspection, immutable `PatchPlan`, общий hyperspace contract | `CORE-01` | P0 |
 | `ARCH-01` | Patch domains | Финальные domain packages: hyperspace → loading/save → map → Intel → campaign → economy → combat | `CORE-02` | P0 |
 | `DISC-01` | Discovery | Classpath locator, header index, diagnostics и shadow-mode registry | `CORE-01`, `ARCH-01` | P0 |
-| `DISC-02` | Discovery + patch domains | Intrinsic/relational contracts, `RuntimeBindings` и symbols для всех 27 roles | `DISC-01` | P0 |
+| `DISC-02` | Discovery + patch domains | Intrinsic/relational contracts, `RuntimeBindings` и symbols для всех текущих roles | `DISC-01` | P0 |
 | `HOOK-ABI-01` | Runtime/transform | Инвентаризация private game types и отдельные необходимые ABI-миграции | `DISC-02` | P0 при наличии нестабильных типов |
 | `DISC-03` | Compatibility | Authoritative discovery routing; legacy names только в hints/fixtures | `DISC-02`, `HOOK-ABI-01`, original/localized gates | P0 |
 | `HOOK-01` | Runtime | Hook-фасады и lifecycle-scoped domain services, GC/runtime regressions | `BASE-01`; после стабильного binding contract | P1 |
@@ -449,9 +450,9 @@ discovery registry.
 
 ## Definition of done для архитектурного milestone
 
-- Structural discovery является production routing для всех 27 текущих целей; точные имена не
+- Structural discovery является production routing для всех текущих logical roles; точные имена не
   участвуют в решении о совместимости.
-- Original и localized installations, remap всех 27 roles, near-match, legacy-decoy и ambiguity
+- Original и localized installations, remap всех текущих roles, near-match, legacy-decoy и ambiguity
   fixtures проходят.
 - Один mismatch остаётся локальным; functionality и измеренная производительность `0.8.0` не
   регрессируют.

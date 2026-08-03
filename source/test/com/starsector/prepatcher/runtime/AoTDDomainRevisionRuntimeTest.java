@@ -1,6 +1,10 @@
 package com.starsector.prepatcher.runtime;
 
 import com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge;
+import com.starsector.prepatcher.agent.PrepatcherConfig;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 /** Regression contract for domain-specific AoTD revision delivery. */
 public final class AoTDDomainRevisionRuntimeTest {
@@ -10,11 +14,16 @@ public final class AoTDDomainRevisionRuntimeTest {
 
     private AoTDDomainRevisionRuntimeTest() {}
 
-    public static void main(String[] args) {
-        long requested = StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_CONTRACT_HANDSHAKE
-                | StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_NATIVE_MUTATION_BOUNDARIES;
+    public static void main(String[] args) throws Exception {
+        Path configFile = Files.createTempFile("prepatcher-aotd-domain", ".properties");
+        Files.writeString(configFile, "patch.aotdCleanDeficitPath=true\n");
+        StarsectorPrepatcherRuntimeBridge.configure(
+                PrepatcherConfig.load(configFile), configFile.getParent());
         StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract(
-                "aotd_theory_of_toolbox", 1, "domain-revision-test", requested, null);
+                "aotd_theory_of_toolbox",
+                StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
+                StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES,
+                ignored -> { }, (industry, ids) -> null);
 
         Object market = new Object();
         require(StarsectorPrepatcherRuntimeBridge.getAoTDMarketStructuralGeneration(market) == 0L,
@@ -42,6 +51,7 @@ public final class AoTDDomainRevisionRuntimeTest {
         require(StarsectorPrepatcherRuntimeBridge.getAoTDMarketStructuralGeneration(market) == 2L,
                 "nested structural mutation did not advance exactly once");
 
+        Files.deleteIfExists(configFile);
         System.out.println("AoTDDomainRevisionRuntimeTest: PASS");
     }
 

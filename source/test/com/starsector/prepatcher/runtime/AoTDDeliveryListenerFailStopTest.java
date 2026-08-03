@@ -1,16 +1,21 @@
 package com.starsector.prepatcher.runtime;
 
 import com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge;
+import com.starsector.prepatcher.agent.PrepatcherConfig;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 public final class AoTDDeliveryListenerFailStopTest {
     private AoTDDeliveryListenerFailStopTest() {}
 
-    public static void main(String[] args) {
-        long requested = StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_CONTRACT_HANDSHAKE
-                | StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_NATIVE_DELIVERY_EVENTS;
+    public static void main(String[] args) throws Exception {
+        Path configFile = Files.createTempFile("prepatcher-aotd-delivery", ".properties");
+        Files.writeString(configFile, "patch.aotdCleanDeficitPath=true\n");
+        StarsectorPrepatcherRuntimeBridge.configure(
+                PrepatcherConfig.load(configFile), configFile.getParent());
         AtomicInteger calls = new AtomicInteger();
         Consumer<Object> broken = ignored -> {
             calls.incrementAndGet();
@@ -18,7 +23,10 @@ public final class AoTDDeliveryListenerFailStopTest {
         };
 
         long negotiated = StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract(
-                "aotd_theory_of_toolbox", 1, "delivery-fail-stop-test", requested, broken);
+                "aotd_theory_of_toolbox",
+                StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
+                StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES,
+                broken, (industry, ids) -> null);
         require((negotiated & StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_NATIVE_DELIVERY_EVENTS) != 0L,
                 "delivery capability was not initially negotiated");
 
@@ -37,6 +45,7 @@ public final class AoTDDeliveryListenerFailStopTest {
                 "missing disabled listener diagnostic: " + status);
         require(status.contains("callbackFailures=1"),
                 "unexpected callback failure count: " + status);
+        Files.deleteIfExists(configFile);
         System.out.println("AoTDDeliveryListenerFailStopTest: PASS");
     }
 

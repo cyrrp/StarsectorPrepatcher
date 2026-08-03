@@ -43,12 +43,80 @@ classfile или JAR не участвует в решении.
 | `patch.strategicJumpDestinationIndex` | `StrategicModule.findNearestSafeJumpPoint`, expired `JumpPlan`, jump/location topology mutators | budgeted ordered index keyed by destination `LocationAPI` identity | requires destination-first; no location type/size admission rule; cold/dirty work is deferred under one global frame budget |
 | `patch.economyLocationCache` | `Economy.advance` | omit only redundant automatic dirty write | explicit mod dirty state authoritative |
 | `patch.marketScheduler` | `Economy.advance`, `BaseCampaignEntity.advance`, pre-save boundary | one stable-phase scheduler for all transformed engine-owned market updates with exact accumulated amount | one identity state and policy; direct mod calls immediate; hot markets full-rate; callback cadence intentionally changes |
+| `patch.campaignCargoNoGlobalEconomyStep` | exact detached campaign-Cargo `fake_market` constructor branch | exact vanilla `Economy + ReachEconomy` skips the unrelated three-step refresh; owned AoTD receives an explicit synthetic-Cargo dispatch | structural anchors, `CARGO` mode, null outpost/other-cargo and final `Economy.tripleStep/getEconomy` contract; rejected/failed dispatch, subclasses and replacement economies execute the original global call |
+| `patch.lootTransferNoGlobalEconomyStep` | exact generated-loot `fake_market` constructor branch | exact vanilla skips the unrelated three-step refresh; owned AoTD receives the same explicit synthetic-Cargo dispatch after loot generation | structural anchors, `LOOT` mode, null outpost and real `CargoData`; unknown modes/economies preserve the original global call |
+| `patch.planetConditionMarketOpenNoGlobalEconomyStep` | `CampaignEngine.reportPlayerOpenedMarket` for non-economy condition-only markets | skip only the initial all-market `Economy.nextStep`; keep ability/listener callbacks and `currentlyOpenMarket` publication | exact vanilla `Economy + ReachEconomy` identity scan or accepted owned-AoTD market-open dispatch; live/unknown markets fall back |
+| `patch.vanillaMarketOpenLocalization` | `CampaignEngine.reportPlayerOpenedMarket` plus the immediate live-market Cargo constructor | exact vanilla uses a synchronous one-market refresh and consumes the following duplicate `tripleStep`; owned AoTD receives explicit market-open/Cargo intents | final vanilla `Economy`/`ReachEconomy` contracts, exact class/loader/economy membership, scheduler debt barrier and one-shot vanilla coalescing token; any failed guard or dispatcher executes the original global call |
+| `patch.uiMarketMutationRefresh` | exact vanilla market-overview policy mutations and shared helper; trade `confirmTransaction()V`; five industry-dialog branches plus `IndustryListPanel`; final vanilla `CommodityMarketData`; AoTD Scheduler Bridge V9 | one atomic mutation feature: setter/helper paths use an internal one-shot context, while trade uses a boolean guard around the preserved original `doubleStep()`; vanilla refreshes locally and owned AoTD receives one explicit dispatch; affected IDs rebuild only their global/econ-group records | each independent bytecode surface fails closed locally; every preparation, snapshot, proof and publication read is best-effort; the industry dialog/panel pair activates only after both postconditions hold; changed inventory, non-stock economy, poisoned/stale context, `GLOBAL_TOPOLOGY`, missing barrier/capability, admin, construction queue, custom providers and unknown helpers execute the original global step |
+| `patch.commandTabNoGlobalEconomyStep` | `com.fs.starfarer.campaign.command.F.<init>` | opening Command/Colonies consumes the last committed economy state without a terminal sector-wide `tripleStep()` | exact public constructor descriptor, one class-local `tripleStep`, exact `Global.getSector → getEconomy` chain and terminal `RETURN`; any changed shape remains vanilla |
+| `patch.commodityDetailNoGlobalEconomyStep` | current `CommodityDetailDialogV2` and dormant legacy `CommodityDetailDialog` constructors | commodity producer/consumer/import/export details use already-published `CommodityMarketData` without three synchronous global passes | each class is matched independently by exact constructor descriptor, unique call chain and post-step `CommodityOnMarket.getMarket()` anchor; one mismatch does not disable the other |
+| `patch.marketDefensesNoGlobalEconomyStep` | vanilla `MarketCMD.showDefenses(boolean)` and optional Nexerelin `Nex_MarketCMD.showDefenses(boolean)` | removes each owner-local guarded global `tripleStep()` after interaction fleet, station fleet and station state have already been captured | exact protected method, owner/superclass, market-null guard/join and ordering proof; changed military/UI flow preserves that class's original call |
 | `patch.directMarketObservation` | mod call sites + known engine origins + concrete `Market.advance` entry | synchronous wrappers, eager call-site manifest, sampled timing and interval-bounded stack attribution | direct mod calls are never delayed/merged/suppressed; known planet path is classified separately |
 | `patch.economyPersistentSnapshots` | Economy/Market | owner-local copy-on-write snapshots + structure epochs | API mutators invalidate immediately; direct live-list edits bounded by audit |
 | `patch.localResourcesNoColdMarketData` | `LocalResourcesSubmarketPlugin.getStockpileLimit/shouldHaveCommodity` | removes accidental cold global `CommodityMarketData` materialization; exact AoTD cold state uses its committed supply/demand model | both method surfaces apply atomically; unknown/future commodity classes retain the raw getter path |
+| `patch.localResourcesTooltipSnapshot` | `LocalResourcesSubmarketPlugin.createTooltipAfterDescription` plus owned AoTD overrides | one stockpile-limit snapshot per commodity; sort compares saved integers only | exact vanilla/Nex classes or fork-owned helper only; unknown subclasses execute preserved raw tooltip; no persistent cache |
 | `patch.economyGroupIndex` | `ReachEconomy.getMarketsInGroup`, market/group mutators | owner-local ordered `econGroup` index; each caller still receives a fresh mutable list | exact vanilla and verified `AoTDReachEconomy`; mutation epoch, source identity/size and bounded ordered audit prevent stale publication |
 | `patch.commodityEventModDirtyCache` | `CommodityOnMarket.reapplyEventMod` | skip repeated removal after zero quantity proved private `eMod` absent | first zero call/load and the complete nonzero remove/calculate/add path stay vanilla; direct external mutation of the private key is unsupported |
 | `patch.commodityTemporalFastPath` | `Market.advance` + `MutableStat` | ordered active set: stable commodity skips 4 temp-stat advances and event-mod reapply | API mutations wake immediately; subclasses/shared stats fall back; direct live-map edits bounded by audit |
+
+### Read-only UI economy-step removals
+
+The read-only UI transformer owns four vanilla classes plus the reviewed Nexerelin override and
+removes only the exact stack-neutral
+`Global.getSector() → SectorAPI.getEconomy() → EconomyAPI.tripleStep()` sequence. It adds no runtime
+hook, cache, listener, market reference or serialized state. Each class carries a private synthetic
+ownership marker, is re-read after emission, and every concrete method passes ASM `BasicVerifier`.
+
+- Command/Colonies: the call is the terminal action of the exact public constructor, so removal does
+  not reorder any UI initialization.
+- Commodity detail V2 and legacy: the next semantic instructions still initialize the dialog from
+  the supplied `CommodityOnMarket`; the two classes have independent compatibility results.
+- Market defenses: vanilla `MarketCMD` and the real Nexerelin 0.12.1d `Nex_MarketCMD` independently
+  execute `getInteractionTargetForFIDPI()`, `getStationFleet()` and `getStationState()` before their
+  guarded global step. Consequently that step cannot change the already captured fleet/station
+  inputs used by the current dialog. The patch removes no Nex invasion/responder option or local
+  defense calculation, and never modifies `ExerelinCore.jar` on disk.
+
+The maintained AoTD fork has no descendants or overrides of the four vanilla surfaces. Its real-JAR
+gate continues to reject a future fork override. The optional Nex target is instead transformed
+directly in its child mod loader, adds no cross-loader reference, and is gated against the real
+`ExerelinCore.jar`; a changed superclass or method shape remains raw. Safe profile disables all
+three switches; default/aggressive/debug enable them. A structural mismatch is local and
+fail-closed: original bytes, including `tripleStep()`, are returned unchanged.
+
+### Explicit AoTD UI economy dispatch
+
+Scheduler Fork `1.0.14-spp7` restores the standard virtual-step contract:
+`AoTDEconomy.nextStep(EconWorkParams)`, `doubleStep()`, `tripleStep()` and
+`AoTDReachEconomy.nextStep(EconWorkParams)` always run the full all-market pipeline. They do not
+inspect `currentlyOpenMarket`, infer UI intent from a null payload or consume a Prepatcher context;
+`doubleStep()` and `tripleStep()` retain vanilla two/three-step multiplicity.
+
+Prepatcher classifies only structurally proven UI call sites and invokes the fork's single public
+final `dispatchPrepatcherUiEconomyStep(int, MarketAPI, long, String[])` entry point. Market-open,
+Cargo and trade transformations are boolean guards around the existing virtual
+`nextStep`/`tripleStep`/`doubleStep` invocation; they no longer wrap the enclosing method or publish
+a fork context. The helper returns `true` only after a completed local refresh. On `false` or any
+exception the original call remains in bytecode and executes outside the helper, including when the
+exact fork/capability is unavailable or a debt barrier cannot prove the local cut safe. The exact
+fork loader is derived from the two callbacks registered by verified Scheduler Bridge V9, so the
+real parent-runtime/child-mod topology is accepted while an equal-name economy from another loader
+is not eligible.
+
+Non-trade market mutation keeps one internal weak, same-thread, epoch-bound context only between an
+exact vanilla setter/industry wrapper and its shared helper. Original setters and industry mutators
+execute exactly once outside instrumentation catches. Preparation, before/after snapshots, context
+publication, exact-class/membership proofs, counters and logging are fail-open. A failed read poisons
+the current setter batch monotonically, so a later successful record cannot erase uncertainty before
+the helper consumes it. The helper then executes the preserved global step. Trade instead collects
+its immutable transaction IDs directly inside its guard and uses no record/consume round trip. No
+static `Class`, `Method`, `ClassLoader`, campaign object or mod instance is cached for dispatch.
+
+Only exact Scheduler Fork `1.0.14-spp7` registers. The current declared mask must be exactly
+`0x7ff`; old, future and partially declared contracts are logged and rejected wholesale with mask
+`0`. For the exact current fork, the required dispatcher bit is independent of profile switches:
+safe negotiates `0x3ff`, while `patch.uiMarketMutationRefresh=true` adds the sole optional bit and
+negotiates `0x7ff`.
 
 `Economy.advance(F)V` и связанное owner-local состояние имеют одного structural-владельца
 `economyAdvancePlan`. Публичные переключатели `patch.economyPersistentSnapshots`,
@@ -203,8 +271,12 @@ hooks только в ASM-доказанных `add`/`addAll` sites. Поэто�
 
 Starfield `PooledList.add/addAll` также обновляет только integer high-water без `nanoTime()`;
 единственный clock read выполняется при release lease. Oversized free lists удаляются после
-`starfield.pool.oversizedGraceMs`. Отдельного executor, daemon maintenance thread или `System.gc()`
-нет.
+`starfield.pool.oversizedGraceMs`. Каждый borrow фиксирует campaign generation. При lifecycle reset
+свободные lists текущего campaign thread очищаются и `ThreadLocal` отсоединяется немедленно; list,
+borrowed до reset, при позднем release очищается и отбрасывается по stale generation, поэтому старый
+большой backing array не может повторно попасть в pool новой кампании. Другие thread-local pools
+очищаются лениво при следующем обращении по тому же generation contract, без process-lifetime
+реестра `Thread`/`ListPool`. Отдельного executor, daemon maintenance thread или `System.gc()` нет.
 
 ### Commodity temporal active set
 
@@ -546,22 +618,22 @@ Design rationale, complexity and release evidence:
 
 | Config | Target/область | Изменение | Профиль и основной риск |
 |---|---|---|---|
-| `patch.fastForwardPresentation` | весь presentation-блок | master switch structural class-plan transformer/runtime | safe/default/aggressive; выключение оставляет весь блок vanilla |
+| `patch.fastForwardPresentation` | весь presentation-блок | master switch structural class-plan transformer/runtime | safe/default/aggressive/debug; выключение оставляет весь блок vanilla |
 | `patch.fastForwardFrameMarker` | `CampaignState.advance` | отмечает outer frame, номер и число simulation substeps | обязателен для всех групп; mismatch fast-forward flag немедленно прекращает дальнейшее coalescing в этом frame |
-| `patch.fastForwardActionIndicators` | `CampaignEngine` action indicators | один visual `advance` на последнем substep | safe/default; меняется только presentation cadence |
-| `patch.fastForwardLocationVisuals` | `BaseLocation` light fader, background/stars, particle group | visual refresh один раз за outer frame | safe/default; визуальные lifetime/скорость следуют выбранному visual time |
-| `patch.fastForwardFloatingText` | entity floating text, включая paused path | один visual `advance` на последнем substep | safe/default; текст не ускоряется вместе с simulation при `realtime` |
-| `patch.fastForwardFleetView` | `CampaignFleetView.advance` | один view refresh за outer frame | safe/default; промежуточные substep states не рисуются |
-| `patch.fastForwardFleetPresentation` | fleet layers/view clear/sensor range/pulse fader | объединяет fleet-only presentation work | safe/default; видимым остаётся финальное состояние outer frame |
-| `patch.fastForwardSensorIndicators` | selection/contact indicators | один indicator refresh на последнем substep | safe/default; selection bridge fail-open при marker mismatch |
-| `patch.fastForwardCelestialVisuals` | planets, jump-point rings/corona | объединяет графические animation calls | safe/default; nonlinear animation может отличаться при `simulation` visual time |
-| `patch.fastForwardAuroraAnimation` | terrain `AuroraRenderer` | один aurora refresh за outer frame | safe/default; промежуточная визуальная анимация пропускается |
-| `patch.fastForwardContinuousSound` | terrain, abilities, slipstream и gate loops/filters/music suppression | повторные audio refresh calls выполняются на финальном substep | safe/default; transient промежуточные audio parameters не подаются mixer'у |
-| `patch.fastForwardGateJitter` | gate faders/warp/jitter seed | объединяет gate-only visual updates | safe/default; jitter RNG обновляется один раз за outer frame |
-| `patch.fastForwardGlobalAnimations` | global `AnimationManager.advanceAll` | объединяет все global animation callbacks | **aggressive opt-in:** широкая callback/lifetime-семантика, возможны скачки и изменённая cadence |
-| `patch.fastForwardSensorFaders` | entity sensor faders | один fader update за outer frame | **aggressive opt-in:** может менять visibility/despawn timing |
-| `patch.fastForwardSlipstreamParticles` | slipstream particle add/advance | emission и particle advance только на финальном substep | **aggressive opt-in:** меняются density, lifetime, RNG и emission cadence |
-| `patch.fastForwardParticleEmitters` | gate/mote/coronal/Zig emitter intervals | interval advances только на финальном substep | **aggressive opt-in:** меняются spawn count/timing и RNG sequence |
+| `patch.fastForwardActionIndicators` | `CampaignEngine` action indicators | один visual `advance` на последнем substep | safe/default/aggressive/debug; меняется только presentation cadence |
+| `patch.fastForwardLocationVisuals` | `BaseLocation` light fader, background/stars, particle group | visual refresh один раз за outer frame | safe/default/aggressive/debug; визуальные lifetime/скорость следуют выбранному visual time |
+| `patch.fastForwardFloatingText` | entity floating text, включая paused path | один visual `advance` на последнем substep | safe/default/aggressive/debug; текст не ускоряется вместе с simulation при `realtime` |
+| `patch.fastForwardFleetView` | `CampaignFleetView.advance` | один view refresh за outer frame | safe/default/aggressive/debug; промежуточные substep states не рисуются |
+| `patch.fastForwardFleetPresentation` | fleet layers/view clear/sensor range/pulse fader | объединяет fleet-only presentation work | safe/default/aggressive/debug; видимым остаётся финальное состояние outer frame |
+| `patch.fastForwardSensorIndicators` | selection/contact indicators | один indicator refresh на последнем substep | safe/default/aggressive/debug; selection bridge fail-open при marker mismatch |
+| `patch.fastForwardCelestialVisuals` | planets, jump-point rings/corona | объединяет графические animation calls | safe/default/aggressive/debug; nonlinear animation может отличаться при `simulation` visual time |
+| `patch.fastForwardAuroraAnimation` | terrain `AuroraRenderer` | один aurora refresh за outer frame | safe/default/aggressive/debug; промежуточная визуальная анимация пропускается |
+| `patch.fastForwardContinuousSound` | terrain, abilities, slipstream и gate loops/filters/music suppression | повторные audio refresh calls выполняются на финальном substep | safe/default/aggressive/debug; transient промежуточные audio parameters не подаются mixer'у |
+| `patch.fastForwardGateJitter` | gate faders/warp/jitter seed | объединяет gate-only visual updates | safe/default/aggressive/debug; jitter RNG обновляется один раз только в подтверждённом N-step frame |
+| `patch.fastForwardGlobalAnimations` | global `AnimationManager.advanceAll` | объединяет все global animation callbacks | **default/aggressive/debug; false в safe:** широкая callback/lifetime-семантика, возможны скачки и изменённая cadence |
+| `patch.fastForwardSensorFaders` | entity sensor faders | один fader update за outer frame | **default/aggressive/debug; false в safe:** может менять visibility/despawn timing |
+| `patch.fastForwardSlipstreamParticles` | slipstream particle add/advance | emission и particle advance только на финальном substep | **default/aggressive/debug; false в safe:** меняются density, lifetime, RNG и emission cadence |
+| `patch.fastForwardParticleEmitters` | gate/mote/coronal/Zig emitter intervals | interval advances только на финальном substep | **default/aggressive/debug; false в safe:** меняются spawn count/timing и RNG sequence |
 
 Simulation logic по-прежнему выполняется на каждом substep. Runtime coalescing действует только
 внутри подтверждённого multi-step outer frame и выполняет целевой presentation-call на последнем
@@ -749,7 +821,7 @@ optional `exerelin.campaign.intel.Nex_PunitiveExpeditionManager`. Оба вкл�
 Optional Nex class не добавляется в обязательный core target inventory и не хранится как
 `Class<?>`, `Method`, `ClassLoader` или runtime object. Helper внедряется private static synthetic
 непосредственно в target class; cache живёт только до возврата метода. Если точная data-flow
-структура двух call sites не доказана, весь P1 target получает `SKIPPED_STRUCTURAL` без частичной
+структура двух call sites не доказана, весь Nex player-share target получает `SKIPPED_STRUCTURAL` без частичной
 модификации.
 
 ## Намеренно не реализовано

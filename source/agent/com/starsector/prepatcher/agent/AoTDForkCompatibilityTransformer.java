@@ -32,8 +32,9 @@ import java.util.List;
  * changed future implementation is left untouched.</p>
  */
 final class AoTDForkCompatibilityTransformer implements ClassFileTransformer {
-    static final String CONSTRUCTION_SITE =
+    static final String TARGET =
             "data/kaysaar/aotd/tot/industries/AoTDConstructionSite";
+    static final String CONSTRUCTION_SITE = TARGET;
     static final String PATCH_ID = "aotdConstructionStartBoundary";
     static final String RAW_SET_ASSIGNED_WONDER = "spp$rawSetAssignedWonder";
 

@@ -46,10 +46,19 @@ public final class PrepatcherConfig {
     public final int coreWorldsAuditSystemsPerFrame;
     public final boolean economyLocationCache;
     public final boolean localResourcesNoColdMarketData;
+    public final boolean localResourcesTooltipSnapshot;
     public final boolean economyGroupIndex;
     public final boolean economyPersistentSnapshots;
     public final boolean commodityEventModDirtyCache;
     public final boolean marketScheduler;
+    public final boolean campaignCargoNoGlobalEconomyStep;
+    public final boolean lootTransferNoGlobalEconomyStep;
+    public final boolean planetConditionMarketOpenNoGlobalEconomyStep;
+    public final boolean vanillaMarketOpenLocalization;
+    public final boolean uiMarketMutationRefresh;
+    public final boolean commandTabNoGlobalEconomyStep;
+    public final boolean commodityDetailNoGlobalEconomyStep;
+    public final boolean marketDefensesNoGlobalEconomyStep;
     public final boolean directMarketObservation;
     public final boolean commodityTemporalFastPath;
     public final boolean marketNoOpCallbacks;
@@ -198,6 +207,8 @@ public final class PrepatcherConfig {
         economyLocationCache = bool("patch.economyLocationCache", true);
         localResourcesNoColdMarketData = bool(
                 "patch.localResourcesNoColdMarketData", true);
+        localResourcesTooltipSnapshot = bool(
+                "patch.localResourcesTooltipSnapshot", true);
         // Missing keys in legacy/custom configs fail closed; shipped production profiles
         // opt in explicitly after the structural capability handshake succeeds.
         economyGroupIndex = bool("patch.economyGroupIndex", false);
@@ -205,6 +216,22 @@ public final class PrepatcherConfig {
         economyPersistentSnapshots = bool("patch.economyPersistentSnapshots", false);
         commodityEventModDirtyCache = bool("patch.commodityEventModDirtyCache", false);
         marketScheduler = bool("patch.marketScheduler", false);
+        campaignCargoNoGlobalEconomyStep = bool(
+                "patch.campaignCargoNoGlobalEconomyStep", true);
+        lootTransferNoGlobalEconomyStep = bool(
+                "patch.lootTransferNoGlobalEconomyStep", true);
+        planetConditionMarketOpenNoGlobalEconomyStep = bool(
+                "patch.planetConditionMarketOpenNoGlobalEconomyStep", true);
+        vanillaMarketOpenLocalization = bool(
+                "patch.vanillaMarketOpenLocalization", true);
+        uiMarketMutationRefresh = bool(
+                "patch.uiMarketMutationRefresh", true);
+        commandTabNoGlobalEconomyStep = bool(
+                "patch.commandTabNoGlobalEconomyStep", true);
+        commodityDetailNoGlobalEconomyStep = bool(
+                "patch.commodityDetailNoGlobalEconomyStep", true);
+        marketDefensesNoGlobalEconomyStep = bool(
+                "patch.marketDefensesNoGlobalEconomyStep", true);
         directMarketObservation = bool("patch.directMarketObservation", false);
         commodityTemporalFastPath = bool("patch.commodityTemporalFastPath", false);
         marketNoOpCallbacks = bool("patch.marketNoOpCallbacks", false);

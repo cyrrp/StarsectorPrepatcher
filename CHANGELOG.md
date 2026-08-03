@@ -16,6 +16,178 @@
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-29
+
+### Добавлено
+
+- Exact industry transformer для пяти доказанных vanilla branches:
+  `startUpgrading`, `downgrade`, два `removeIndustry` path и `cancelUpgrade`.
+- `IndustryListPanel.recreateOverview()` получил one-shot market-identity guard. Исходный
+  `tripleStep()` сохранён и выполняется для семи unknown/custom/build/queue callers без exact
+  mutation context.
+- Before/after local commodity-vector diff выбирает targeted global/econ-group rebuild только
+  изменившихся IDs; mutation без commodity diff выполняет local industry/state refresh.
+- Structural gate проверяет exact call inventory, сохранение shared-helper fallback, idempotency,
+  future-bytecode fail-closed и ASM BasicVerifier для обоих transformed classes.
+
+### Изменено
+
+- Вся цепочка UI market mutation — exact mutation context, локальный refresh и affected-commodity
+  rebuild — управляется одним `patch.uiMarketMutationRefresh` и одним optional capability. Временные
+  имена частей и отдельные переключатели разработки удалены; независимыми остаются только
+  трансформеры разных bytecode surfaces.
+- Industry dialog и `IndustryListPanel` активируются как одна атомарная patch group. Drift любого
+  target сохраняет исходные mutation calls и `tripleStep()` для обоих surfaces.
+- AoTD bridge остаётся на schema V9, а поддерживаемый fork обновлён до `1.0.14-spp7` с одним
+  public final dispatcher для классифицированных market-open, Cargo и market-mutation actions.
+- AoTD local materialization больше не дублирует commodity callbacks: общий callback внутри обеих
+  main tasks подавлен, затем отсортированный affected set публикуется ровно один раз.
+- Administrator assignment оставлен на global fallback: vanilla transfer может изменить несколько
+  player markets в одной UI-транзакции и требует отдельного multi-market contract.
+
+### Исправлено
+
+- `AoTDEconomy.nextStep(...)`, `doubleStep()`, `tripleStep()` и `AoTDReachEconomy.nextStep(...)`
+  снова всегда имеют стандартную global-семантику и не выводят UI intent из пустого payload или
+  `currentlyOpenMarket`; double/triple сохраняют vanilla-кратность в два/три глобальных шага.
+- Market-open и Cargo transformers теперь ставят exact guard у исходного virtual call, не публикуя
+  fork context. `false`/exception dispatcher, `GLOBAL_TOPOLOGY`, missing barrier/capability и
+  неизвестная ревизия форка выполняют сохранённый исходный global step.
+- Trade wrapper заменён boolean guard перед сохранённым исходным `doubleStep()`: любое исключение
+  transaction/Cargo/stack/proof read возвращает управление обязательному fallback, а guard сам шаг
+  не вызывает. ThreadLocal record/consume round trip для trade удалён.
+- Non-trade mutation context остаётся только внутренним one-shot handoff между exact vanilla setter
+  или industry wrapper и shared helper. Ошибка preparation/before-after snapshot/publication
+  монотонно отравляет текущий batch; исходная мутация выполняется ровно один раз вне
+  instrumentation catch, а диагностический сбой не может отменить global fallback.
+- Bridge принимает только текущую пару V9/`1.0.14-spp7` с точной declared mask `0x7ff`; старые,
+  будущие и частично объявленные контракты только логируются и целиком отклоняются с mask `0`.
+- Обязательный `UI_ECONOMY_DISPATCH` больше не зависит от optional switches: exact spp7 получает
+  required mask `0x3ff` даже в safe profile, а `patch.uiMarketMutationRefresh` добавляет только
+  optional bit до `0x7ff`.
+- Удалены legacy registration overloads, отдельный `ABI_VERSION`, старые bridge consumer methods и
+  runtime opening/Cargo ThreadLocal contexts; совместимость теперь определяется одним текущим
+  schema/shape и точным fork contract.
+- Военные действия Nexerelin больше не обходят read-only UI patch через override
+  `Nex_MarketCMD.showDefenses()`: exact call site преобразуется в child mod loader без изменения
+  `ExerelinCore.jar`, а неизвестная версия сохраняет исходный global step.
+
+Подробности и состав проверок: [отчёт о выпуске 0.17.0](docs/releases/0.17.0.md).
+
+## [0.16.0] - 2026-07-29
+
+### Добавлено
+
+- Affected-commodity refresh core: immutable sorted commodity-ID payload и Scheduler Bridge
+  schema V9 без удержания рынков или игровых commodity-объектов.
+- Exact trade transformer для `confirmTransaction()`: affected IDs берутся только из immutable
+  bought/sold cargo `PlayerMarketTransaction`, а исходный `doubleStep()` сохраняется при любом
+  structural mismatch.
+- Free-port mutation использует before/after local commodity vector; при пустом diff применяется
+  консервативный набор всех commodity IDs рынка.
+- Отдельный structural contract для vanilla `CommodityMarketData(String,String)` и runtime/ASM
+  gates для trade call-site, schema V9 payload, capability negotiation и V6–V8 fallback paths.
+- Scheduler Fork `1.0.14-spp6` выполняет filtered `AoTDCommodityMarketData` rebuild для переданного
+  набора IDs с сохранением scheduler debt, revision и dirty-mask boundaries.
+
+### Изменено
+
+- Safe profile оставляет targeted commits выключенными.
+- Administrator assignment, structural industry mutations и custom industry options в этом выпуске
+  сохраняют исходные global steps; они получили exact-site contract в следующем этапе 0.17.0.
+
+Подробности и состав проверок: [отчёт о выпуске 0.16.0](docs/releases/0.16.0.md).
+
+## [0.15.0] - 2026-07-29
+
+### Добавлено
+
+- UI market-mutation ABI: one-shot same-thread weak context разделяет causal reason и refresh
+  scope и привязывает их к campaign/economy epochs и identity конкретного рынка.
+- Exact transformer `com.fs.starfarer.campaign.ui.marketinfo.s` оборачивает доказанные vanilla
+  setter call sites immigration policy, incentives и stockpile-shortage policy.
+- AoTD Scheduler Bridge schema V8 и optional UI market-mutation capability; Scheduler Fork
+  `1.0.14-spp5` переводит локальные policy mutations в существующий `MarketRegistry` scheduler.
+- Runtime/ASM gates проверяют exact call inventory, one-shot consume, identity/thread/epoch
+  invalidation, mask merge, changed-bytecode fail-closed и реальный fork bridge.
+
+### Изменено
+
+- Safe profile оставляет UI market-mutation refresh выключенным.
+- Trade/free-port/industry paths в этом выпуске ещё сохраняют штатный global fallback; affected-ID
+  refresh добавлен в выпусках 0.16.0–0.17.0.
+
+Подробности и состав проверок: [отчёт о выпуске 0.15.0](docs/releases/0.15.0.md).
+
+## [0.14.0] - 2026-07-28
+
+### Добавлено
+
+- Vanilla market-open localization заменяет начальный глобальный `Economy.nextStep()` при
+  открытии живого рынка на синхронный refresh только этого рынка; следующий Cargo `tripleStep()`
+  coalesces одноразовым weak identity/fingerprint token.
+- Независимые exact-bytecode contract gates валидируют финальные `Economy` и `ReachEconomy`.
+- Read-only UI transformer удаляет точный `Global.getSector() → getEconomy() → tripleStep()` из
+  Command/Colonies, Commodity Detail V2/legacy и после захвата defense state в
+  `MarketCMD.showDefenses()`.
+- Real-fork inventory gate подтверждает отсутствие AoTD descendants/overrides на четырёх новых
+  vanilla-owned UI surfaces; будущий override требует явного пересмотра.
+- Condition-only planet и generated `LOOT` paths сохраняют callbacks/публикацию/создание груза, но
+  пропускают только доказанный несвязанный global economy step.
+- Сквозной exact-JAR gate проверяет цепочку condition-only planet → Survey → ruins LOOT →
+  colonization, включая `addMarket → tripleStep → advance(0)`.
+
+### Исправлено
+
+- Condition-only взаимодействие и transfer-панель после исследования руин больше не запускают
+  all-market AoTD fallback.
+- Release manifest включает `baseline/aotd/deficit-scenarios.csv`.
+- Starfield `ListPool` использует campaign-generation leases, а regression fixture удерживает
+  synthetic campaign engine до `Reference.reachabilityFence()` во всех JVM compilation modes.
+
+Подробности и состав проверок: [отчёт о выпуске 0.14.0](docs/releases/0.14.0.md).
+
+## [0.13.1] - 2026-07-28
+
+### Добавлено
+
+- Exact fail-closed wrapper вокруг единственного `EconomyAPI.tripleStep()` в доказанной
+  ветке vanilla `fake_market` для походного Cargo. Для подтверждённых exact vanilla
+  `Economy + ReachEconomy` вызов пропускается полностью; согласованный AoTD получает
+  token-only context, а неизвестные/subclass экономики сохраняют исходный `tripleStep()`.
+  Настоящие рынки, создание колонии, administrator UI и остальные call sites не затрагиваются.
+- `SchedulerBridge` schema V7 и capability `UI_CALL_CONTEXTS`; полный production mask
+  поддерживаемого AoTD Scheduler Fork `1.0.14-spp4` равен `0x3ff`.
+- Call-local snapshot Local Resources tooltip для exact vanilla/Nexerelin и fork-owned AoTD
+  плагинов: `getStockpileLimit()` вызывается не более одного раза на commodity, comparator
+  сравнивает только сохранённые `int`, а неизвестные subclasses используют сохранённый raw path.
+- Fail-closed guard для `planetConditionMarketOnly`: открытие незаселённой планеты сохраняет
+  callbacks и публикацию `currentlyOpenMarket`, но exact vanilla и поддерживаемый AoTD не запускают
+  глобальный economy step.
+- Поддержка режима `LOOT` в доказанной ветке `fake_market`; неизвестные UI modes и экономики
+  сохраняют исходный вызов.
+- Exact-JAR сценарий condition-only planet → Survey → ruins LOOT → colonization с проверкой
+  порядка `addMarket → tripleStep → advance(0)` и actual-javaagent статусов UI-transformer’ов.
+
+### Исправлено
+
+- Открытие Cargo из походного интерфейса больше не превращает временный `fake_market` в
+  три полных vanilla economy step или в один полный AoTD economy step. Exact vanilla skip
+  дополнительно требует неизменённые `Economy.tripleStep()` и `getEconomy()`; при любом
+  несовпадении исходный вызов сохраняется.
+- Tooltip Local Resources больше не повторяет экономические getter-вычисления порядка
+  `O(G log G)`; AoTD normal path читает уже опубликованный supply/demand state без lazy refresh.
+  Долговременный cache рынков или commodities не добавлен.
+- Condition-only рынок больше не выбирает all-market AoTD fallback из-за отсутствия в
+  `MarketRegistry`, а transfer-панель после исследования руин не повторяет глобальный пересчёт.
+- Release manifest включает `baseline/aotd/deficit-scenarios.csv`, поэтому semantic-baseline tests
+  работают из чисто распакованного архива.
+- Starfield `ListPool` получил campaign-generation leases: reset очищает текущий pool, а поздний
+  release списка старого поколения отбрасывает его. Regression fixture удерживает synthetic
+  campaign engine до `Reference.reachabilityFence()`, делая grace-trim gate независимым от JIT.
+
+Подробности и состав проверок: [отчёт о выпуске 0.13.1](docs/releases/0.13.1.md).
+
 ## [0.13.0] - 2026-07-27
 
 ### Добавлено
@@ -38,7 +210,7 @@
   one-super-call `addMarket`, а обход mutator hook восстанавливается validation/audit.
 - Exact fork-owned transformer для `AoTDConstructionSite.setAssignedWonder(String)`, публикующий
   scheduler construction mutation через `try/finally` без нового cache/listener/state.
-- Real-JAR compatibility gate P0/P1/P2, future-contract negative fixtures, actual class-load/
+- Real-JAR compatibility gates для market-share surfaces, future-contract negative fixtures, actual class-load/
   javaagent smoke и GC-проверки optional classloader/owner-local state.
 
 ### Исправлено
@@ -59,6 +231,8 @@
   из-за exact-class guard.
 - Начало строительства Grand Wonder немедленно инвалидирует scheduler construction policy вместо
   ожидания редкого safety audit.
+
+Подробности и состав проверок: [отчёт о выпуске 0.13.0](docs/releases/0.13.0.md).
 
 ## [0.12.0] - 2026-07-26
 
@@ -88,7 +262,7 @@
 
 ### Изменено
 
-- Vanilla и Nexerelin P1 получили независимые настройки:
+- Vanilla и Nexerelin player-share caches получили независимые настройки:
   `patch.punitivePlayerShareLocalCache` и
   `patch.nexPunitivePlayerShareLocalCache`; обе включены по умолчанию.
 - `getMarketShareData()` больше не выполняет повторный `LinkedHashMap.put()` для уже
@@ -101,7 +275,7 @@
   каждый outer frame. После одного campaign/recovery snapshot steady state имеет стоимость O(C+B),
   где C — число core systems, B — `coreWorlds.auditSystemsPerFrame` (по умолчанию 64). Lifecycle
   reset/rebuild заменяет wrapper-list containers и не удерживает их прежнюю backing capacity.
-- Exact-class guard P0/P1 заменён loader-safe `ClassValue` compatibility gate: текущий
+- Exact-class guard market-share patches заменён loader-safe `ClassValue` compatibility gate: текущий
   AoTD Scheduler Fork наследует оптимизированный путь, а будущий critical override автоматически
   возвращает только этот runtime class на raw behavior без structural failure.
 - Добавлен regression на реальном `AoTDToolboxTheory.jar`, synthetic future override и GC
@@ -156,8 +330,8 @@
 - Кэш reflection-accessors для AoTD temporal stats переведён с process-lifetime map на
   unload-safe `ClassValue`, поэтому он не удерживает classloader завершённой кампании/сборки.
 
-Подробности и состав проверок: [отчёт о выпуске 0.11.0](docs/releases/0.11.0.md).
 
+Подробности и состав проверок: [отчёт о выпуске 0.11.0](docs/releases/0.11.0.md).
 
 ## [0.10.0] - 2026-07-21
 
@@ -693,8 +867,6 @@
 - Частично применённый или повреждённый transformer patch больше не принимается за полный.
 - Исправлены PowerShell native-exit handling и явная UTF-8 сборка/генерация отчётов.
 
-Подробности и исходный baseline: [отчёт о выпуске 0.7.0](docs/releases/0.7.0.md).
-
 ## [0.4.0] - 2026-07-17
 
 ### Добавлено
@@ -747,3 +919,5 @@
 - Full fork capability mask is now `0x6f`.
 - Kept delivered-time, exact structural mutation replay and loader policy
   unchanged.
+
+Подробности и исходный baseline: [отчёт о выпуске 0.7.0](docs/releases/0.7.0.md).

@@ -22,10 +22,10 @@ public final class EconomyHotpathActualAgentSmokeTest {
         Field stateField = ReachEconomy.class.getDeclaredField("spp$econGroupIndexState");
         stateField.setAccessible(true);
         int modifiers = stateField.getModifiers();
-        require(Modifier.isPrivate(modifiers), "P2 state field is not private");
-        require(Modifier.isTransient(modifiers), "P2 state field is not transient");
-        require(stateField.isSynthetic(), "P2 state field is not synthetic");
-        require(stateField.getType() == Object.class, "P2 state field type changed");
+        require(Modifier.isPrivate(modifiers), "econ-group state field is not private");
+        require(Modifier.isTransient(modifiers), "econ-group state field is not transient");
+        require(stateField.isSynthetic(), "econ-group state field is not synthetic");
+        require(stateField.getType() == Object.class, "econ-group state field type changed");
 
         StarsectorPrepatcherHooks.registerEconomyGroupIndexComponent(1);
         StarsectorPrepatcherHooks.registerEconomyGroupIndexComponent(2);
@@ -55,21 +55,21 @@ public final class EconomyHotpathActualAgentSmokeTest {
         List<?> first = economy.getMarketsInGroup("A");
         requireIdentityList(first, a1.market, a2.market);
         Object state = stateField.get(economy);
-        require(state != null, "P2 wrapper did not install owner-local state");
+        require(state != null, "econ-group wrapper did not install owner-local state");
         require(groupIndexMarkets(state) != null,
-                "P2 wrapper did not build the owner-local index");
+                "econ-group wrapper did not build the owner-local index");
 
         first.clear();
         requireIdentityList(economy.getMarketsInGroup("A"), a1.market, a2.market);
 
         economy.removeMarket(a1.market);
         require(groupIndexMarkets(state) == null,
-                "P2 removeMarket retained the removed market until a future query");
+                "econ-group removeMarket retained the removed market until a future query");
         requireIdentityList(economy.getMarketsInGroup("A"), a2.market);
 
         economy.addMarket(a1.market);
         require(groupIndexMarkets(state) == null,
-                "P2 addMarket did not invalidate owner-local arrays immediately");
+                "econ-group addMarket did not invalidate owner-local arrays immediately");
         requireIdentityList(economy.getMarketsInGroup("A"), a2.market, a1.market);
     }
 
@@ -78,7 +78,7 @@ public final class EconomyHotpathActualAgentSmokeTest {
                 "data.kaysaar.aotd.tot.scripts.economy.AoTDReachEconomy");
         require(StarsectorPrepatcherEconomyHotpathRuntime
                         .isReachEconomyClassEligible(type),
-                "exact AoTDReachEconomy did not pass the P2 runtime contract");
+                "exact AoTDReachEconomy did not pass the econ-group runtime contract");
         ReachEconomy economy = (ReachEconomy) type.getConstructor().newInstance();
         Object engine = new Object();
         MarketFixture a1 = new MarketFixture("aotd-a1", "A", economy);
@@ -92,10 +92,10 @@ public final class EconomyHotpathActualAgentSmokeTest {
         requireIdentityList(economy.getMarketsInGroup("A"), a1.market, a2.market);
         Object state = stateField.get(economy);
         require(state != null && groupIndexMarkets(state) != null,
-                "exact AoTDReachEconomy inherited wrapper did not build P2 state");
+                "exact AoTDReachEconomy inherited wrapper did not build econ-group state");
         economy.removeMarket(a1.market);
         require(groupIndexMarkets(state) == null,
-                "AoTDReachEconomy inherited removeMarket did not release P2 arrays");
+                "AoTDReachEconomy inherited removeMarket did not release econ-group arrays");
         requireIdentityList(economy.getMarketsInGroup("A"), a2.market);
     }
 
@@ -114,7 +114,7 @@ public final class EconomyHotpathActualAgentSmokeTest {
         requireIdentityList(economy.getMarketsInGroup("C"), cycle.market);
         Object state = stateField.get(economy);
         require(state != null && groupIndexMarkets(state) != null,
-                "P2 GC fixture did not build owner-local state");
+                "econ-group GC fixture did not build owner-local state");
 
         WeakReference<Object> engineRef = new WeakReference<>(engine);
         WeakReference<ReachEconomy> economyRef = new WeakReference<>(economy);
@@ -164,11 +164,11 @@ public final class EconomyHotpathActualAgentSmokeTest {
 
     private static void requireIdentityList(List<?> actual, Object... expected) {
         require(actual.size() == expected.length,
-                "P2 list size mismatch: expected=" + expected.length
+                "econ-group list size mismatch: expected=" + expected.length
                         + " actual=" + actual.size());
         for (int i = 0; i < expected.length; i++) {
             require(actual.get(i) == expected[i],
-                    "P2 changed market identity/order at " + i);
+                    "econ-group index changed market identity/order at " + i);
         }
     }
 
@@ -194,7 +194,7 @@ public final class EconomyHotpathActualAgentSmokeTest {
             if (value != null) retained.append(i).append(':')
                     .append(value.getClass().getName()).append(' ');
         }
-        throw new AssertionError("P2 transformed owner cycle remained rooted: " + retained);
+        throw new AssertionError("econ-group transformed owner cycle remained rooted: " + retained);
     }
 
     private static Object defaultValue(Object proxy, Method method, Object[] args) {

@@ -7,38 +7,51 @@ import jdk.internal.org.objectweb.asm.tree.AbstractInsnNode;
 import jdk.internal.org.objectweb.asm.tree.ClassNode;
 import jdk.internal.org.objectweb.asm.tree.FieldNode;
 import jdk.internal.org.objectweb.asm.tree.InsnList;
-import jdk.internal.org.objectweb.asm.tree.InsnNode;
+import jdk.internal.org.objectweb.asm.tree.JumpInsnNode;
 import jdk.internal.org.objectweb.asm.tree.LabelNode;
 import jdk.internal.org.objectweb.asm.tree.MethodInsnNode;
 import jdk.internal.org.objectweb.asm.tree.MethodNode;
-import jdk.internal.org.objectweb.asm.tree.TryCatchBlockNode;
 import jdk.internal.org.objectweb.asm.tree.VarInsnNode;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
 
-/**
- * Publishes the market argument before CampaignEngine invokes Economy.nextStep().
- * Vanilla stores currentlyOpenMarket only after that call, which otherwise makes
- * the AoTD fork select its all-market synchronous branch.
- */
+/** Guards the exact market-open Economy.nextStep call with an explicit runtime action. */
 final class AoTDMarketOpenContextTransformer implements ClassFileTransformer {
     static final String TARGET = "com/fs/starfarer/campaign/CampaignEngine";
     private static final String METHOD = "reportPlayerOpenedMarket";
     private static final String DESC =
             "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)V";
-    private static final String RAW = "spp$raw$reportPlayerOpenedMarket";
+    private static final String LEGACY_RAW = "spp$raw$reportPlayerOpenedMarket";
     private static final String RUNTIME =
             "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
     private static final String MARKER = "spp$patched$aotdMarketOpenContext";
     private static final String MARKER_VALUE =
-            "StarsectorPrepatcher:aotd-market-open-context-v1";
+            "StarsectorPrepatcher:aotd-market-open-explicit-guard-v4";
+    private static final String MARKET_OPEN_GUARD =
+            "shouldHandleVanillaMarketOpenEconomyStep";
+    private static final String MARKET_OPEN_GUARD_DESC =
+            "(Ljava/lang/Object;Ljava/lang/Object;)Z";
 
     private final boolean enabled;
     private final ClassLoader runtimeLoader;
 
     AoTDMarketOpenContextTransformer(boolean enabled, ClassLoader runtimeLoader) {
-        this.enabled = enabled;
+        this(enabled, enabled, enabled, runtimeLoader);
+    }
+
+    AoTDMarketOpenContextTransformer(
+            boolean contextEnabled, boolean conditionOnlyEnabled,
+            ClassLoader runtimeLoader) {
+        this(contextEnabled, conditionOnlyEnabled, false, runtimeLoader);
+    }
+
+    AoTDMarketOpenContextTransformer(
+            boolean contextEnabled, boolean conditionOnlyEnabled,
+            boolean vanillaMarketOpenLocalizationEnabled,
+            ClassLoader runtimeLoader) {
+        this.enabled = contextEnabled || conditionOnlyEnabled
+                || vanillaMarketOpenLocalizationEnabled;
         this.runtimeLoader = runtimeLoader;
     }
 
@@ -62,13 +75,13 @@ final class AoTDMarketOpenContextTransformer implements ClassFileTransformer {
                 record("ALREADY_APPLIED");
                 return null;
             }
-            if (method(node, RAW, DESC) != null) {
-                throw new StructuralMismatch("raw helper exists without owned marker");
+            if (method(node, LEGACY_RAW, DESC) != null) {
+                throw new StructuralMismatch("legacy raw helper exists without owned marker");
             }
 
             MethodNode original = requireMethod(node, METHOD, DESC);
             requireOriginalShape(original);
-            installWrapper(node, original);
+            patchMarketOpenGuard(original);
             node.fields.add(new FieldNode(Opcodes.ASM8,
                     Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL
                             | Opcodes.ACC_SYNTHETIC,
@@ -82,7 +95,8 @@ final class AoTDMarketOpenContextTransformer implements ClassFileTransformer {
             requirePatchedShape(read(transformed));
             record("APPLIED");
             PrepatcherLog.info("APPLIED aotdMarketOpenContext to " + className
-                    + ": early market argument + finally-cleared runtime context");
+                    + ": explicit condition-only/live-market guard with original"
+                    + " Economy.nextStep global fallback");
             return transformed;
         } catch (StructuralMismatch mismatch) {
             record("SKIPPED_STRUCTURAL");
@@ -97,50 +111,36 @@ final class AoTDMarketOpenContextTransformer implements ClassFileTransformer {
         }
     }
 
-    private static void installWrapper(ClassNode node, MethodNode original) {
-        int wrapperAccess = original.access;
-        String signature = original.signature;
-        String[] exceptions = original.exceptions == null
-                ? null : original.exceptions.toArray(String[]::new);
-
-        original.name = RAW;
-        original.access = (original.access
-                & ~(Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED | Opcodes.ACC_FINAL
-                | Opcodes.ACC_SYNCHRONIZED))
-                | Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC;
-
-        MethodNode wrapper = new MethodNode(Opcodes.ASM8, wrapperAccess,
-                METHOD, DESC, signature, exceptions);
-        LabelNode tryStart = new LabelNode();
-        LabelNode tryEnd = new LabelNode();
-        LabelNode handler = new LabelNode();
-        InsnList code = wrapper.instructions;
-
-        code.add(new VarInsnNode(Opcodes.ALOAD, 1));
-        code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME,
-                "beginAoTDOpeningMarket", "(Ljava/lang/Object;)J", false));
-        code.add(new VarInsnNode(Opcodes.LSTORE, 2));
-
-        code.add(tryStart);
-        code.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        code.add(new VarInsnNode(Opcodes.ALOAD, 1));
-        code.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, node.name, RAW, DESC, false));
-        code.add(tryEnd);
-        code.add(new VarInsnNode(Opcodes.LLOAD, 2));
-        code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME,
-                "endAoTDOpeningMarket", "(J)V", false));
-        code.add(new InsnNode(Opcodes.RETURN));
-
-        code.add(handler);
-        code.add(new VarInsnNode(Opcodes.ASTORE, 4));
-        code.add(new VarInsnNode(Opcodes.LLOAD, 2));
-        code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME,
-                "endAoTDOpeningMarket", "(J)V", false));
-        code.add(new VarInsnNode(Opcodes.ALOAD, 4));
-        code.add(new InsnNode(Opcodes.ATHROW));
-        wrapper.tryCatchBlocks.add(new TryCatchBlockNode(
-                tryStart, tryEnd, handler, "java/lang/Throwable"));
-        node.methods.add(wrapper);
+    private static void patchMarketOpenGuard(MethodNode method) {
+        MethodInsnNode nextStepCall = null;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof MethodInsnNode call
+                    && call.getOpcode() == Opcodes.INVOKEVIRTUAL
+                    && "com/fs/starfarer/campaign/econ/Economy".equals(call.owner)
+                    && "nextStep".equals(call.name) && "()V".equals(call.desc)) {
+                if (nextStepCall != null) {
+                    throw new StructuralMismatch("multiple Economy.nextStep calls");
+                }
+                nextStepCall = call;
+            }
+        }
+        if (nextStepCall == null) {
+            throw new StructuralMismatch("missing Economy.nextStep call");
+        }
+        int economyLocal = method.maxLocals;
+        method.maxLocals = economyLocal + 1;
+        LabelNode afterStep = new LabelNode();
+        InsnList guard = new InsnList();
+        // The Economy receiver is already on the stack at this point.
+        guard.add(new VarInsnNode(Opcodes.ASTORE, economyLocal));
+        guard.add(new VarInsnNode(Opcodes.ALOAD, economyLocal));
+        guard.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        guard.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME,
+                MARKET_OPEN_GUARD, MARKET_OPEN_GUARD_DESC, false));
+        guard.add(new JumpInsnNode(Opcodes.IFNE, afterStep));
+        guard.add(new VarInsnNode(Opcodes.ALOAD, economyLocal));
+        method.instructions.insertBefore(nextStepCall, guard);
+        method.instructions.insert(nextStepCall, afterStep);
     }
 
     private static void requireOriginalShape(MethodNode method) {
@@ -161,10 +161,8 @@ final class AoTDMarketOpenContextTransformer implements ClassFileTransformer {
         requireCount("setCurrentlyOpenMarket calls", countCalls(method,
                 TARGET, "setCurrentlyOpenMarket",
                 "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)V"), 1);
-        requireCount("runtime begin calls", countCalls(method, RUNTIME,
-                "beginAoTDOpeningMarket", "(Ljava/lang/Object;)J"), 0);
-        requireCount("runtime end calls", countCalls(method, RUNTIME,
-                "endAoTDOpeningMarket", "(J)V"), 0);
+        requireCount("market-open guards", countCalls(method, RUNTIME,
+                MARKET_OPEN_GUARD, MARKET_OPEN_GUARD_DESC), 0);
 
         int nextStep = instructionIndex(method, "com/fs/starfarer/campaign/econ/Economy",
                 "nextStep", "()V");
@@ -176,25 +174,97 @@ final class AoTDMarketOpenContextTransformer implements ClassFileTransformer {
         }
     }
 
+    private static void requireGuardedShape(MethodNode method) {
+        if ((method.access & Opcodes.ACC_PUBLIC) == 0
+                || (method.access & (Opcodes.ACC_STATIC | Opcodes.ACC_ABSTRACT
+                | Opcodes.ACC_NATIVE)) != 0) {
+            throw new StructuralMismatch("guarded reportPlayerOpenedMarket access changed");
+        }
+        requireCount("guarded exception regions", method.tryCatchBlocks.size(), 0);
+        requireCount("guarded nextStep calls", countCalls(method,
+                "com/fs/starfarer/campaign/econ/Economy", "nextStep", "()V"), 1);
+        requireCount("guarded market-open guards", countCalls(method, RUNTIME,
+                MARKET_OPEN_GUARD, MARKET_OPEN_GUARD_DESC), 1);
+        requireCount("guarded setCurrentlyOpenMarket calls", countCalls(method,
+                TARGET, "setCurrentlyOpenMarket",
+                "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)V"), 1);
+        int nextStep = instructionIndex(method, "com/fs/starfarer/campaign/econ/Economy",
+                "nextStep", "()V");
+        int publish = instructionIndex(method, TARGET, "setCurrentlyOpenMarket",
+                "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)V");
+        if (nextStep < 0 || publish < 0 || nextStep >= publish) {
+            throw new StructuralMismatch(
+                    "guarded nextStep-before-currentlyOpenMarket ordering changed");
+        }
+        MethodInsnNode guard = null;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof MethodInsnNode call
+                    && call.getOpcode() == Opcodes.INVOKESTATIC
+                    && RUNTIME.equals(call.owner)
+                    && MARKET_OPEN_GUARD.equals(call.name)
+                    && MARKET_OPEN_GUARD_DESC.equals(call.desc)) {
+                guard = call;
+                break;
+            }
+        }
+        if (guard == null) throw new StructuralMismatch("market-open guard missing");
+        AbstractInsnNode marketLoad = previousMeaningful(guard);
+        AbstractInsnNode economyLoad = previousMeaningful(marketLoad);
+        if (!(marketLoad instanceof VarInsnNode marketVar)
+                || marketVar.getOpcode() != Opcodes.ALOAD || marketVar.var != 1) {
+            throw new StructuralMismatch("market-open guard market argument changed");
+        }
+        if (!(economyLoad instanceof VarInsnNode economyVar)
+                || economyVar.getOpcode() != Opcodes.ALOAD) {
+            throw new StructuralMismatch("market-open guard economy argument changed");
+        }
+        AbstractInsnNode branch = nextMeaningful(guard);
+        if (!(branch instanceof JumpInsnNode jump) || jump.getOpcode() != Opcodes.IFNE) {
+            throw new StructuralMismatch("market-open guard branch changed");
+        }
+        MethodInsnNode fallback = null;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof MethodInsnNode call
+                    && call.getOpcode() == Opcodes.INVOKEVIRTUAL
+                    && "com/fs/starfarer/campaign/econ/Economy".equals(call.owner)
+                    && "nextStep".equals(call.name) && "()V".equals(call.desc)) {
+                fallback = call;
+                break;
+            }
+        }
+        if (fallback == null) throw new StructuralMismatch("market-open fallback missing");
+        AbstractInsnNode fallbackReceiver = previousMeaningful(fallback);
+        if (!(fallbackReceiver instanceof VarInsnNode receiverLoad)
+                || receiverLoad.getOpcode() != Opcodes.ALOAD
+                || receiverLoad.var != economyVar.var) {
+            throw new StructuralMismatch("market-open fallback receiver changed");
+        }
+        if (instructionIndex(method, branch) >= instructionIndex(method, fallback)
+                || instructionIndex(method, fallback)
+                >= instructionIndex(method, jump.label)) {
+            throw new StructuralMismatch(
+                    "market-open guard does not enclose only nextStep fallback");
+        }
+    }
+
     private static void requirePatchedShape(ClassNode node) {
         requireMarker(field(node, MARKER));
-        MethodNode wrapper = requireMethod(node, METHOD, DESC);
-        MethodNode raw = requireMethod(node, RAW, DESC);
-        requireOriginalBodyShape(raw);
-        if ((raw.access & (Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC))
-                != (Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC)
-                || (raw.access & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED
-                | Opcodes.ACC_STATIC)) != 0) {
-            throw new StructuralMismatch("raw helper access changed");
+        if (method(node, LEGACY_RAW, DESC) != null) {
+            throw new StructuralMismatch("guarded class retained legacy raw helper");
         }
-        requireCount("wrapper begin", countCalls(wrapper, RUNTIME,
-                "beginAoTDOpeningMarket", "(Ljava/lang/Object;)J"), 1);
-        requireCount("wrapper end", countCalls(wrapper, RUNTIME,
-                "endAoTDOpeningMarket", "(J)V"), 2);
-        requireCount("wrapper raw call", countCalls(wrapper, node.name, RAW, DESC), 1);
-        requireCount("wrapper try/finally", wrapper.tryCatchBlocks.size(), 1);
-        requireCount("wrapper returns", countOpcode(wrapper, Opcodes.RETURN), 1);
-        requireCount("wrapper rethrows", countOpcode(wrapper, Opcodes.ATHROW), 1);
+        requireGuardedShape(requireMethod(node, METHOD, DESC));
+    }
+
+    private static AbstractInsnNode previousMeaningful(AbstractInsnNode instruction) {
+        AbstractInsnNode current = instruction == null ? null : instruction.getPrevious();
+        while (current != null && current.getOpcode() < 0) current = current.getPrevious();
+        return current;
+    }
+
+    private static AbstractInsnNode nextMeaningful(AbstractInsnNode instruction) {
+        AbstractInsnNode current = instruction == null ? null : instruction.getNext();
+        while (current != null && current.getOpcode() < 0) current = current.getNext();
+        return current;
     }
 
     private static int instructionIndex(
@@ -209,6 +279,15 @@ final class AoTDMarketOpenContextTransformer implements ClassFileTransformer {
         return -1;
     }
 
+    private static int instructionIndex(MethodNode method, AbstractInsnNode target) {
+        int index = 0;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction == target) return index;
+            index++;
+        }
+        return -1;
+    }
+
     private static int countCalls(
             MethodNode method, String owner, String name, String desc) {
         int count = 0;
@@ -217,13 +296,6 @@ final class AoTDMarketOpenContextTransformer implements ClassFileTransformer {
                     && owner.equals(call.owner) && name.equals(call.name)
                     && desc.equals(call.desc)) count++;
         }
-        return count;
-    }
-
-    private static int countOpcode(MethodNode method, int opcode) {
-        int count = 0;
-        for (AbstractInsnNode instruction : method.instructions)
-            if (instruction.getOpcode() == opcode) count++;
         return count;
     }
 
@@ -276,6 +348,9 @@ final class AoTDMarketOpenContextTransformer implements ClassFileTransformer {
 
     private static void record(String status) {
         System.setProperty("starsector.prepatcher.aotdMarketOpenContextPatch", status);
+        System.setProperty(
+                "starsector.prepatcher.planetConditionMarketOpenNoGlobalEconomyStepPatch",
+                status);
     }
 
     private static String loaderName(ClassLoader loader) {

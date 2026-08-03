@@ -2,7 +2,7 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Current version: **0.13.0**. Supported game build: **Starsector 0.98a-RC8**.
+Current version: **0.17.0**. Supported game build: **Starsector 0.98a-RC8**.
 
 [![Unplayable without Prepatcher versus smooth with Prepatcher](media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
@@ -20,7 +20,7 @@ The project has a broader direction than map optimization alone:
 - keep version-specific bytecode knowledge inside the prepatcher instead of duplicating it across
   gameplay mods.
 
-The public API is a roadmap item, not a published compatibility surface in `0.13.0`. Its intended
+The public API is a roadmap item, not a published compatibility surface in `0.17.0`. Its intended
 namespace is `com.starsector.prepatcher.api`; API types will only become supported once they are
 documented and covered by compatibility tests.
 
@@ -62,8 +62,9 @@ log and warns when the mod is enabled without the startup agent.
 
 If you use **AoTD — Theory of Toolbox**, install the maintained
 [Scheduler Fork](https://github.com/cyrrp/AoTD-Theory-Of-Toolbox-Scheduler-Fork), release
-`1.0.14-spp2` or newer. The fork is required for optimal AoTD performance and for the supported
-native scheduler/capability path. It is not required when AoTD is absent.
+`1.0.14-spp7`. The fork is required for optimal AoTD performance and for the supported native
+scheduler/capability path. Future fork revisions remain fail-closed until their contracts are
+reviewed. The fork is not required when AoTD is absent.
 
 On Windows, double-click `StarsectorPrepatcher.bat`, choose **Install javaagent**, and select
 Vanilla, Faster Rendering, or both. The same actions are available from a terminal:
@@ -98,8 +99,11 @@ The prepatcher does not modify save data, and its runtime caches are never seria
   entity indexes, nebula metadata, scratch collections, and grid LOD;
 - campaign and economy: lifecycle-bound caches, listener refresh, reusable snapshots, one unified
   scheduler for all transformed engine-owned market updates, corrected
-  observation of direct mod `Market.advance()` calls, owner-local persistent copy-on-write
-  market/condition/industry snapshots with structure epochs and bounded audits, an owner-local
+  observation of direct mod `Market.advance()` calls, an atomic targeted/local UI market-mutation
+  refresh for proven policy/trade/free-port/industry changes; administrator, unsupported, and
+  unknown callers retain the original global step,
+  owner-local persistent copy-on-write market/condition/industry snapshots with structure
+  epochs and bounded audits, an owner-local
   ReachEconomy fingerprint, an ordered inactive-commodity fast path combined with the direct
   expiry-aware `MutableStatWithTempMods` scheduler, a guarded dormant inherited-`BaseIndustry`
   fast path, repeated absent commodity event-mod removal suppression, empty-script/empty-memory
@@ -225,26 +229,61 @@ classloader smoke. Build details are in [`BUILDING.md`](BUILDING.md).
 - [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) — structural matching and fail-open rules;
 - [`docs/VALIDATION.md`](docs/VALIDATION.md) — regression and performance validation playbook;
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — structural discovery, architecture, tooling, and platform plan;
-- [`docs/releases/0.13.0.md`](docs/releases/0.13.0.md) — current detailed release report.
+- [`docs/architecture/MARKET_SCHEDULER.md`](docs/architecture/MARKET_SCHEDULER.md) — durable
+  scheduler design and invariants;
+- [`docs/releases/0.17.0.md`](docs/releases/0.17.0.md) — current detailed release report.
 
 StarsectorPrepatcher is distributed under the terms in [`LICENSE`](LICENSE).
 
 ## AoTD Scheduler Fork integration
 
-Prepatcher 0.13.0 installs a clean wrapper around the original
+Prepatcher 0.17.0 supports Scheduler Fork `1.0.14-spp7` and installs a clean wrapper around the original
 `BaseIndustry.getMaxDeficit()`. The preserved vanilla implementation remains active until a
-compatible AoTD Scheduler Fork registers the complete native capability profile `0x1ff`.
-Bridge schema V6 publishes campaign/economy epochs and reads the live runtime capability mask.
+compatible AoTD Scheduler Fork registers the complete native capability profile `0x3ff`, including
+the explicit UI economy dispatcher. Bridge schema V9 retains V7 campaign/economy epochs and reads
+the live runtime capability mask; the optional UI market-mutation bit extends the full profile to
+`0x7ff`.
+The required dispatcher capability does not depend on optional optimization switches, so the safe
+profile still negotiates `0x3ff`. Registration is current-only: a non-V9 shape, any fork identifier
+other than `1.0.14-spp7`, or a declared mask other than `0x7ff` is logged and rejected with no
+partial compatibility mode.
 Late callbacks from an older epoch are rejected; a listener fail-stop triggers one generation
 resynchronization before fallback dirtying is enabled. Do not install the obsolete modified
 `starfarer.api.jar`.
 
-The maintained Scheduler Fork `1.0.14-spp2` is required for optimal performance when AoTD Theory of
+The read-only UI patch also removes the exact UI-triggered global `tripleStep()` from Command/Colonies,
+current and legacy commodity-detail dialogs, and the independently matched vanilla
+`MarketCMD.showDefenses()` and Nexerelin `Nex_MarketCMD.showDefenses()` after their defense inputs have
+already been captured. These are pure inline, fail-closed removals with no runtime cache or market
+reference; the safe profile leaves them disabled. The real AoTD fork contains no descendant on the
+vanilla surfaces, while the optional Nex class is transformed in memory without changing its JAR.
+
+The exact detached-Cargo `fake_market` constructor branch is also optimized without requiring
+AoTD. When both runtime classes are the exact vanilla `Economy` and `ReachEconomy`, and the final
+bytecode contract still proves `tripleStep()` is exactly three `nextStep()` calls, Prepatcher skips
+that unrelated sector-wide refresh. For the owned fork, the same exact call-site guard invokes its
+explicit dispatcher with a classified synthetic-Cargo intent. A rejected or failed dispatch and any
+replacement/subclass economy retain the original virtual call, which is always global. No
+market-open, Cargo, or trade guard publishes a fork context. Local Resources tooltips use a
+call-local stockpile snapshot; no market or commodity is retained after the tooltip call.
+
+Schema V8 carries reason/scope data for the proven local immigration, incentives, and
+stockpile-policy mutations. Schema V9 extends the same atomic optional capability with an immutable
+sorted commodity-ID payload. For non-trade mutations, the one-shot context remains internal to
+Prepatcher between an exact vanilla setter or industry wrapper and its shared helper; the fork
+receives only the already classified intent. Exact free-port changes and five exact industry dialog
+branches refresh one market and rebuild global/econ-group data only for affected commodity IDs; an
+industry mutation with no commodity diff performs only the local industry/state refresh. Trade uses
+no setter/helper context: its exact guard derives affected IDs directly from immutable bought/sold
+cargo and uses the same affected-commodity commit. Administrator, stabilization, construction queue,
+custom providers, and unknown helper callers retain the original global step.
+
+The maintained Scheduler Fork `1.0.14-spp7` is required for optimal performance when AoTD Theory of
 Toolbox is installed. Prepatcher does not require AoTD or the fork in any other setup. The original
 AoTD build may use preserved fail-closed/raw paths, but it does not provide the complete supported
 native scheduler contract.
 
-The market-share P0/P0.5/P1 set also treats the owned
+The market-share optimization group also treats the owned
 `AoTDCommodityMarketData` as a supported implementation. A loader-local `ClassValue` admits the
 current fork only while all five critical market-share methods remain inherited from vanilla. A
 future fork override fails closed to the preserved raw implementation for that runtime class; it
@@ -264,11 +303,12 @@ periodic construction audit. These compatibility paths add no static campaign/mo
 optional accessors use `ClassValue`, and group-index arrays remain transient state of the owning
 `ReachEconomy`.
 
-The integration also fixes the synchronous market/Cargo refresh sequence. Vanilla calls
-`Economy.nextStep()` before publishing `currentlyOpenMarket`; an exact, finally-cleared
-`CampaignEngine.reportPlayerOpenedMarket()` wrapper now supplies that argument early. The fork
-performs a committed single-market refresh, limits immigration and post-immigration snapshot work
-to that market, skips global `commodity × econGroup` construction, and coalesces the immediately
-following Cargo step only when the exact runtime and market revisions are unchanged. Global
-internal-trade settlement remains on the normal economy cadence; the UI path still publishes one
-`economyUpdated` listener boundary.
+The integration also fixes the synchronous market/Cargo refresh sequence without redefining the
+standard economy API. `AoTDEconomy.nextStep(...)`, `doubleStep()`, `tripleStep()` and
+`AoTDReachEconomy.nextStep(...)` are always full global steps and never infer UI intent from
+`currentlyOpenMarket` or an absent payload; double/triple retain vanilla two/three-step
+multiplicity. Exact Prepatcher call-site guards instead invoke the
+fork's single public final dispatcher for market-open, Cargo or market-mutation actions. A supported
+intent performs the committed single-market cut; `GLOBAL_TOPOLOGY`, a missing barrier/capability,
+an unsupported action, `false`, or an exception executes the preserved original virtual call and
+therefore the global path.

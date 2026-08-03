@@ -5,6 +5,8 @@ import com.fs.starfarer.api.StarsectorPrepatcherHyperspaceHooks;
 import com.fs.starfarer.api.campaign.SectorEntityToken;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 
+import java.lang.ref.Reference;
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -23,6 +25,8 @@ import java.util.function.LongSupplier;
 public final class CacheMaintenanceRuntimeTest {
     private static final long MS = 1_000_000L;
     private static final AtomicLong CLOCK = new AtomicLong(1_000L * MS);
+    /** Strong owner for the engine published only weakly by production hooks. */
+    private static Object activeEngineFixture;
 
     private CacheMaintenanceRuntimeTest() {}
 
@@ -43,13 +47,17 @@ public final class CacheMaintenanceRuntimeTest {
             testScratchGaugeAggregationAndReset(config);
             testScratchGraceTrimming(config);
             testStarfieldClockAndGraceTrimming(config);
+            testStarfieldLifecycleResetAndStaleLease();
             testGenerationIsolation(config);
             System.out.println("CacheMaintenanceRuntimeTest PASSED");
         } finally {
             installClock(StarsectorPrepatcherHooks.class, System::nanoTime);
             installClock(StarsectorPrepatcherHyperspaceHooks.class, System::nanoTime);
+            Object engine = activeEngineFixture;
             long transition = StarsectorPrepatcherHooks.beginCampaignEngineChange(null);
             StarsectorPrepatcherHooks.completeCampaignEngineChange(null, transition);
+            Reference.reachabilityFence(engine);
+            activeEngineFixture = null;
         }
     }
 
@@ -332,10 +340,12 @@ public final class CacheMaintenanceRuntimeTest {
         require(((java.util.Deque<?>) read(pool, "free")).size() == 1,
                 "ordinary starfield release did not return list to pool");
         CLOCK.addAndGet((config.starfieldPoolOversizedGraceMs - 1L) * MS);
+        requireCampaignFixtureActive();
         StarsectorPrepatcherHooks.runCacheMaintenance(true);
         require(((java.util.Deque<?>) read(pool, "free")).size() == 1,
                 "oversized starfield list dropped before grace period");
         CLOCK.addAndGet(MS);
+        requireCampaignFixtureActive();
         StarsectorPrepatcherHooks.runCacheMaintenance(true);
         require(((java.util.Deque<?>) read(pool, "free")).isEmpty(),
                 "oversized starfield backing storage retained after grace period");
@@ -348,6 +358,57 @@ public final class CacheMaintenanceRuntimeTest {
         }
         require(((java.util.Deque<?>) read(pool, "free")).size() <= 32,
                 "starfield retained-list count exceeded hard pool limit");
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void testStarfieldLifecycleResetAndStaleLease() throws Exception {
+        removeThreadLocal(StarsectorPrepatcherHyperspaceHooks.class, "LISTS");
+        CLOCK.set(65_000L * MS);
+
+        ArrayList staleLease = StarsectorPrepatcherHyperspaceHooks.borrowArrayList();
+        for (int i = 0; i < 1000; i++) staleLease.add(new Object());
+
+        ArrayList retained = StarsectorPrepatcherHyperspaceHooks.borrowArrayList();
+        for (int i = 0; i < 1000; i++) retained.add(new Object());
+        StarsectorPrepatcherHyperspaceHooks.removeAllAndRelease(
+                new ArrayList(), retained);
+
+        Object oldPool = threadLocalValue(
+                StarsectorPrepatcherHyperspaceHooks.class, "LISTS");
+        require(((java.util.Deque<?>) read(oldPool, "free")).size() == 1,
+                "starfield lifecycle setup did not retain a backing array");
+
+        long resetsBefore = hyperspaceMetric("starfieldLifecyclePoolResets");
+        long staleBefore = hyperspaceMetric("starfieldStaleLeaseDrops");
+        activateCampaign(new Object());
+
+        require(((java.util.Deque<?>) read(oldPool, "free")).isEmpty(),
+                "campaign lifecycle reset retained old starfield backing arrays");
+        require(hyperspaceMetric("starfieldLifecyclePoolResets")
+                        == resetsBefore + 1L,
+                "starfield lifecycle reset counter mismatch");
+        require(((Number) staticField(StarsectorPrepatcherHyperspaceHooks.class,
+                        "starfieldFreeListCount")).intValue() == 0,
+                "starfield free-list gauge survived campaign reset");
+        require(((Number) staticField(StarsectorPrepatcherHyperspaceHooks.class,
+                        "starfieldRetainedCapacity")).longValue() == 0L,
+                "starfield retained-capacity gauge survived campaign reset");
+
+        Object newPool = threadLocalValue(
+                StarsectorPrepatcherHyperspaceHooks.class, "LISTS");
+        require(newPool != oldPool,
+                "campaign lifecycle reset did not detach the ThreadLocal pool");
+        require(((java.util.Deque<?>) read(newPool, "free")).isEmpty(),
+                "new campaign inherited old starfield free lists");
+
+        StarsectorPrepatcherHyperspaceHooks.removeAllAndRelease(
+                new ArrayList(), staleLease);
+        require(staleLease.isEmpty(),
+                "stale starfield lease retained campaign objects after release");
+        require(((java.util.Deque<?>) read(newPool, "free")).isEmpty(),
+                "stale old-generation lease repopulated the new campaign pool");
+        require(hyperspaceMetric("starfieldStaleLeaseDrops") == staleBefore + 1L,
+                "stale starfield lease drop counter mismatch");
     }
 
     private static void testGenerationIsolation(PrepatcherConfig config) throws Exception {
@@ -488,9 +549,27 @@ public final class CacheMaintenanceRuntimeTest {
     }
 
     private static void activateCampaign(Object engine) {
+        Object previous = activeEngineFixture;
+        activeEngineFixture = engine;
         long transition = StarsectorPrepatcherHooks.beginCampaignEngineChange(engine);
         require(transition >= 0L, "campaign maintenance lifecycle did not open generation");
         StarsectorPrepatcherHooks.completeCampaignEngineChange(engine, transition);
+        requireCampaignFixtureActive();
+        Reference.reachabilityFence(previous);
+        Reference.reachabilityFence(engine);
+    }
+
+    private static void requireCampaignFixtureActive() {
+        try {
+            Field field = StarsectorPrepatcherHooks.class
+                    .getDeclaredField("activeCampaignEngine");
+            field.setAccessible(true);
+            WeakReference<?> active = (WeakReference<?>) field.get(null);
+            require(active.get() == activeEngineFixture,
+                    "test campaign fixture is no longer strongly reachable");
+        } catch (ReflectiveOperationException ex) {
+            throw new AssertionError("unable to verify campaign fixture", ex);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -612,6 +691,12 @@ public final class CacheMaintenanceRuntimeTest {
 
     private static long metric(String name) throws Exception {
         Field field = StarsectorPrepatcherHooks.class.getDeclaredField(name);
+        field.setAccessible(true);
+        return ((LongAdder) field.get(null)).sum();
+    }
+
+    private static long hyperspaceMetric(String name) throws Exception {
+        Field field = StarsectorPrepatcherHyperspaceHooks.class.getDeclaredField(name);
         field.setAccessible(true);
         return ((LongAdder) field.get(null)).sum();
     }

@@ -40,7 +40,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.jar.JarFile;
 
-/** Exact owned-fork compatibility and fail-closed checks for economy P0/P2. */
+/** Exact owned-fork compatibility and fail-closed checks for economy hot paths. */
 public final class EconomyHotpathAoTDForkCompatibilityTest {
     private static final Unsafe U = unsafe();
 
@@ -64,6 +64,8 @@ public final class EconomyHotpathAoTDForkCompatibilityTest {
             "data.kaysaar.aotd.tot.scripts.submarket.aotd.AoTDLocalResourcesSubmarketPlugin";
     private static final String NEX_LOCAL_RESOURCES =
             "data.kaysaar.aotd.tot.scripts.submarket.nex.AoTDxNexLocalResourcesSubmarketPlugin";
+    private static final String LOCAL_RESOURCES_TOOLTIP =
+            "data.kaysaar.aotd.tot.scripts.submarket.aotd.AoTDLocalResourcesTooltipSnapshot";
 
     private EconomyHotpathAoTDForkCompatibilityTest() {}
 
@@ -94,8 +96,9 @@ public final class EconomyHotpathAoTDForkCompatibilityTest {
         auditClassLoaderRetention(jar);
 
         System.out.println("OK economy-hotpath-aotd-fork"
-                + " p0-committed-converted-no-materialization"
-                + " p2-inherited-surface/add-super/bulk-init"
+                + " committed-converted-legality-no-materialization"
+                + " econ-group-inherited-surface/add-super/bulk-init"
+                + " local-resources-tooltip-one-call-read-only"
                 + " local-resources-inheritance temporal-super"
                 + " future-contract-fail-closed classvalue-loader-gc");
     }
@@ -117,10 +120,10 @@ public final class EconomyHotpathAoTDForkCompatibilityTest {
                     "AoTD reach economy no longer extends ReachEconomy");
             require(StarsectorPrepatcherEconomyHotpathRuntime
                             .isAoTDCommodityClassEligible(commodity),
-                    "AoTD commodity P0 surface was rejected");
+                    "AoTD commodity legality surface was rejected");
             require(StarsectorPrepatcherEconomyHotpathRuntime
                             .isReachEconomyClassEligible(reach),
-                    "AoTD ReachEconomy P2 surface was rejected");
+                    "AoTD ReachEconomy econ-group surface was rejected");
 
             Method getAvailable = commodity.getMethod("getAoTDAvailableStat");
             require(getAvailable.getDeclaringClass() == commodity
@@ -204,6 +207,7 @@ public final class EconomyHotpathAoTDForkCompatibilityTest {
 
         auditLocalResourcesInheritance(readNode(jar, LOCAL_RESOURCES));
         auditLocalResourcesInheritance(readNode(jar, NEX_LOCAL_RESOURCES));
+        auditLocalResourcesTooltipSnapshot(jar);
 
         ClassNode commodityNode = readNode(jar, COMMODITY);
         require(findMethod(commodityNode, "advance", "(F)V") == null,
@@ -275,30 +279,30 @@ public final class EconomyHotpathAoTDForkCompatibilityTest {
                 // Raw demand is positive, but 7 / (10 * 10 * 0.3) floors to zero.
                 require(!StarsectorPrepatcherHooks.localResourcesShouldHaveCommodity(
                                 illegal, (CommodityOnMarketAPI) commodity),
-                        "P0 used raw AoTD demand positivity instead of converted maxDemand");
+                        "legality path used raw AoTD demand positivity instead of converted maxDemand");
                 dataType.getField("demand").setInt(data, 31);
                 require(StarsectorPrepatcherHooks.localResourcesShouldHaveCommodity(
                                 illegal, (CommodityOnMarketAPI) commodity),
-                        "P0 ignored positive converted AoTD maxDemand");
+                        "legality path ignored positive converted AoTD maxDemand");
                 require(commodityVar("commodityMarketData", CommodityMarketData.class)
                                 .get(commodity) == null,
-                        "P0 materialized AoTD CommodityMarketData");
+                        "legality path materialized AoTD CommodityMarketData");
                 require(committed.get(available) == data,
-                        "P0 replaced/materialized AoTD supply-demand state");
+                        "legality path replaced/materialized AoTD supply-demand state");
 
                 dataType.getField("demand").setInt(data, 0);
                 require(!StarsectorPrepatcherHooks.localResourcesShouldHaveCommodity(
                                 illegal, (CommodityOnMarketAPI) commodity),
-                        "P0 returned true without legal converted supply or demand");
+                        "legality path returned true without legal converted supply or demand");
                 dataType.getField("supply").setInt(data, 4);
                 core.setSupplyLegal(true);
                 require(!StarsectorPrepatcherHooks.localResourcesShouldHaveCommodity(
                                 illegal, (CommodityOnMarketAPI) commodity),
-                        "P0 used raw AoTD supply positivity instead of converted maxSupply");
+                        "legality path used raw AoTD supply positivity instead of converted maxSupply");
                 dataType.getField("supply").setInt(data, 40);
                 require(StarsectorPrepatcherHooks.localResourcesShouldHaveCommodity(
                                 illegal, (CommodityOnMarketAPI) commodity),
-                        "P0 ignored positive converted AoTD maxSupply");
+                        "legality path ignored positive converted AoTD maxSupply");
             } finally {
                 // Do not leave Global holding an object from the disposable AoTD loader.
                 installSettingsStub();
@@ -369,6 +373,64 @@ public final class EconomyHotpathAoTDForkCompatibilityTest {
         require(findMethod(node, "getStockpileLimit",
                         "(Lcom/fs/starfarer/api/campaign/econ/CommodityOnMarketAPI;)I") != null,
                 node.name + " no longer owns its AoTD stockpile calculation");
+        MethodNode tooltip = requireMethod(node, "createTooltipAfterDescription",
+                "(Lcom/fs/starfarer/api/ui/TooltipMakerAPI;Z)V");
+        require(countCalls(tooltip, Opcodes.INVOKESTATIC,
+                        LOCAL_RESOURCES_TOOLTIP.replace('.', '/'), "render",
+                        "(Lcom/fs/starfarer/api/impl/campaign/submarkets/"
+                                + "LocalResourcesSubmarketPlugin;"
+                                + "Lcom/fs/starfarer/api/ui/TooltipMakerAPI;"
+                                + "Ldata/kaysaar/aotd/tot/scripts/submarket/aotd/"
+                                + "AoTDLocalResourcesTooltipSnapshot$LimitResolver;)V") == 1,
+                node.name + " does not delegate tooltip rendering to the snapshot helper");
+        require(countCalls(tooltip, Opcodes.INVOKESTATIC,
+                        "java/util/Collections", "sort",
+                        "(Ljava/util/List;Ljava/util/Comparator;)V") == 0,
+                node.name + " retained economic comparator work");
+    }
+
+    private static void auditLocalResourcesTooltipSnapshot(Path jar) throws Exception {
+        ClassNode helper = readNode(jar, LOCAL_RESOURCES_TOOLTIP);
+        MethodNode render = requireMethod(helper, "render",
+                "(Lcom/fs/starfarer/api/impl/campaign/submarkets/"
+                        + "LocalResourcesSubmarketPlugin;"
+                        + "Lcom/fs/starfarer/api/ui/TooltipMakerAPI;"
+                        + "Ldata/kaysaar/aotd/tot/scripts/submarket/aotd/"
+                        + "AoTDLocalResourcesTooltipSnapshot$LimitResolver;)V");
+        require(countCalls(render, Opcodes.INVOKEINTERFACE,
+                        LOCAL_RESOURCES_TOOLTIP.replace('.', '/') + "$LimitResolver",
+                        "getStockpileLimit",
+                        "(Lcom/fs/starfarer/api/campaign/econ/CommodityOnMarketAPI;)I") == 1,
+                "AoTD tooltip snapshot does not calculate each row through one resolver site");
+        require(countCalls(render, Opcodes.INVOKEVIRTUAL,
+                        "com/fs/starfarer/api/impl/campaign/submarkets/"
+                                + "LocalResourcesSubmarketPlugin",
+                        "getStockpileLimit",
+                        "(Lcom/fs/starfarer/api/campaign/econ/CommodityOnMarketAPI;)I") == 0,
+                "AoTD tooltip comparator retained virtual stockpile calculations");
+
+        MethodNode peek = requireMethod(helper, "peekAoTDStockpileLimit",
+                "(Ldata/kaysaar/aotd/tot/scripts/commoditydata/AoTDCommodityOnMarket;"
+                        + "Ljava/util/Map;)Ljava/lang/Integer;");
+        require(countCalls(peek, Opcodes.INVOKEVIRTUAL,
+                        COMMODITY.replace('.', '/'), "peekSupplyDemandData",
+                        "()Ldata/kaysaar/aotd/tot/scripts/commoditydata/"
+                                + "AoTDSupplyDemandData;") == 1,
+                "AoTD tooltip does not use the read-only committed-state accessor");
+        require(countCalls(peek, Opcodes.INVOKEVIRTUAL,
+                        COMMODITY.replace('.', '/'), "getSupplyDemandData",
+                        "()Ldata/kaysaar/aotd/tot/scripts/commoditydata/"
+                                + "AoTDSupplyDemandData;") == 0,
+                "AoTD tooltip can materialize supply/demand data");
+
+        ClassNode commodity = readNode(jar, COMMODITY);
+        MethodNode commodityPeek = requireMethod(commodity, "peekSupplyDemandData",
+                "()Ldata/kaysaar/aotd/tot/scripts/commoditydata/AoTDSupplyDemandData;");
+        require(countCalls(commodityPeek, Opcodes.INVOKEVIRTUAL,
+                        AVAILABLE.replace('.', '/'), "peekSupplyDemandData",
+                        "()Ldata/kaysaar/aotd/tot/scripts/commoditydata/"
+                                + "AoTDSupplyDemandData;") == 1,
+                "AoTD commodity peek no longer delegates to the read-only stat accessor");
     }
 
     private static void requireVanillaReachDeclaration(

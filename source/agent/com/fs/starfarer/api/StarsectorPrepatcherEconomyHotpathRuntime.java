@@ -13,7 +13,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 /**
- * Loader-safe compatibility gate for Local Resources P0 and econ-group P2.
+ * Loader-safe compatibility gate for Local Resources legality and econ-group indexing.
  *
  * <p>The maintained AoTD Scheduler Fork is admitted only while the exact runtime
  * classes retain the semantic surfaces used by the optimized paths. Decisions

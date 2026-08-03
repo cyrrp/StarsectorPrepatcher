@@ -2440,6 +2440,29 @@ public final class StructuralCompatibilityTest {
                 "Local Resources cold-safe predicate wrapper changed");
     }
 
+    private static void assertLocalResourcesTooltipSnapshotPatch(byte[] bytes) {
+        ClassNode node = read(bytes);
+        String desc = "(Lcom/fs/starfarer/api/ui/TooltipMakerAPI;Z)V";
+        MethodNode wrapper = method(node, "createTooltipAfterDescription", desc);
+        MethodNode raw = method(node, "spp$rawCreateTooltipAfterDescription", desc);
+        require(wrapper != null && raw != null,
+                "Local Resources tooltip wrapper/raw pair missing");
+        require(countCalls(wrapper, Opcodes.INVOKESTATIC, HOOKS,
+                        "renderLocalResourcesTooltipSnapshot",
+                        "(Lcom/fs/starfarer/api/impl/campaign/submarkets/"
+                                + "LocalResourcesSubmarketPlugin;"
+                                + "Lcom/fs/starfarer/api/ui/TooltipMakerAPI;Z)Z") == 1,
+                "Local Resources tooltip snapshot hook count changed");
+        require(countCalls(wrapper, Opcodes.INVOKESPECIAL,
+                        PrepatcherTransformer.LOCAL_RESOURCES_SUBMARKET,
+                        "spp$rawCreateTooltipAfterDescription", desc) == 1,
+                "Local Resources tooltip raw fallback missing");
+        require(countCalls(raw, Opcodes.INVOKESTATIC,
+                        "java/util/Collections", "sort",
+                        "(Ljava/util/List;Ljava/util/Comparator;)V") == 1,
+                "preserved Local Resources raw tooltip changed");
+    }
+
     private static void assertMarketSharePatches(byte[] bytes) {
         ClassNode node = read(bytes);
         require(hasOwnershipMarker(node, "marketShareLinearAggregation"),
@@ -2620,7 +2643,9 @@ public final class StructuralCompatibilityTest {
             }
             case PrepatcherTransformer.LOCAL_RESOURCES_SUBMARKET -> {
                 expected.put("localResourcesShouldHaveCommodity", 1);
+                expected.put("renderLocalResourcesTooltipSnapshot", 1);
                 assertLocalResourcesColdDataPatch(bytes);
+                assertLocalResourcesTooltipSnapshotPatch(bytes);
             }
             case PrepatcherTransformer.REACH_ECONOMY -> {
                 expected.put("borrowMarketsInGroupIndexed", 1);

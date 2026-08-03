@@ -553,6 +553,11 @@ public final class DocumentationConsistencyTest {
                 "fast-forward-presentation-actual-agent.txt",
                 "direct-market-transformer.txt",
                 "runtime-regression.txt",
+                "vanilla-detached-cargo-economy-contract.txt",
+                "aotd-detached-cargo-context.txt",
+                "ui-economy-scenario-contract.txt",
+                "vanilla-detached-cargo-actual-agent.txt",
+                "ui-economy-actual-agent.txt",
                 "temp-mod-actual-agent-smoke.txt",
                 "commodity-temporal-agent-smoke.txt",
                 "market-noop-actual-agent-smoke.txt",
@@ -626,7 +631,7 @@ public final class DocumentationConsistencyTest {
                     .sorted()
                     .forEach(inputs::add);
         }
-        for (String directory : List.of("agent", "docs", "jars", "media", "profiles", "source")) {
+        for (String directory : List.of("agent", "baseline", "docs", "jars", "media", "profiles", "source")) {
             Path base = root.resolve(directory);
             require(Files.isDirectory(base), "checksum input directory is missing: " + base);
             try (Stream<Path> files = Files.walk(base)) {
@@ -690,6 +695,7 @@ public final class DocumentationConsistencyTest {
             paths.filter(Files::isRegularFile)
                     .map(path -> path.toAbsolutePath().normalize())
                     .filter(DocumentationConsistencyTest::isMarkdown)
+                    .filter(path -> !path.getFileName().toString().equalsIgnoreCase("AGENTS.md"))
                     .sorted()
                     .forEach(markdown::add);
         }

@@ -6,16 +6,19 @@ import jdk.internal.org.objectweb.asm.Opcodes;
 import jdk.internal.org.objectweb.asm.tree.AbstractInsnNode;
 import jdk.internal.org.objectweb.asm.tree.ClassNode;
 import jdk.internal.org.objectweb.asm.tree.FieldNode;
+import jdk.internal.org.objectweb.asm.tree.JumpInsnNode;
 import jdk.internal.org.objectweb.asm.tree.MethodInsnNode;
 import jdk.internal.org.objectweb.asm.tree.MethodNode;
+import jdk.internal.org.objectweb.asm.tree.VarInsnNode;
 import jdk.internal.org.objectweb.asm.tree.analysis.Analyzer;
 import jdk.internal.org.objectweb.asm.tree.analysis.BasicValue;
 import jdk.internal.org.objectweb.asm.tree.analysis.BasicVerifier;
 
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.jar.JarFile;
 
-/** Exact structural coverage for the early market-open context wrapper. */
+/** Exact structural coverage for the direct market-open economy guard. */
 public final class AoTDMarketOpenContextTransformerTest {
     private static final String TARGET =
             "com/fs/starfarer/campaign/CampaignEngine";
@@ -62,33 +65,52 @@ public final class AoTDMarketOpenContextTransformerTest {
                 "unexpected idempotence status");
 
         byte[] future = removeNextStep(original);
+        byte[] futureBefore = future.clone();
         require(transformer.transform(null, TARGET, null, null, future) == null,
                 "future method without Economy.nextStep patched");
+        require(Arrays.equals(future, futureBefore),
+                "failed market-open transformation mutated its input bytes");
         require("SKIPPED_STRUCTURAL".equals(System.getProperty(
                         "starsector.prepatcher.aotdMarketOpenContextPatch")),
                 "future method did not fail closed");
 
-        System.out.println("OK aotd-market-open-context exact/idempotent/fail-closed/basic-verifier");
+        System.out.println("OK aotd-market-open direct-guard/global-fallback/"
+                + "idempotent/rollback/basic-verifier");
     }
 
     private static void inspect(byte[] bytes) {
         ClassNode node = read(bytes);
-        require(field(node, "spp$patched$aotdMarketOpenContext") != null,
-                "marker missing");
-        MethodNode wrapper = method(node, "reportPlayerOpenedMarket", DESC);
-        MethodNode raw = method(node, "spp$raw$reportPlayerOpenedMarket", DESC);
-        require(wrapper != null && raw != null, "wrapper/raw pair missing");
-        require(calls(wrapper, RUNTIME, "beginAoTDOpeningMarket",
-                "(Ljava/lang/Object;)J") == 1, "begin count mismatch");
-        require(calls(wrapper, RUNTIME, "endAoTDOpeningMarket", "(J)V") == 2,
-                "end/finally count mismatch");
-        require(calls(wrapper, TARGET, "spp$raw$reportPlayerOpenedMarket", DESC) == 1,
-                "raw call missing");
-        require(wrapper.tryCatchBlocks.size() == 1
-                        && "java/lang/Throwable".equals(wrapper.tryCatchBlocks.get(0).type),
-                "Throwable finally missing");
-        require(calls(raw, "com/fs/starfarer/campaign/econ/Economy",
-                "nextStep", "()V") == 1, "raw nextStep missing");
+        FieldNode marker = field(node, "spp$patched$aotdMarketOpenContext");
+        require(marker != null
+                        && "StarsectorPrepatcher:aotd-market-open-explicit-guard-v4"
+                        .equals(marker.value),
+                "marker missing or stale");
+        MethodNode guarded = method(node, "reportPlayerOpenedMarket", DESC);
+        require(guarded != null, "guarded reportPlayerOpenedMarket missing");
+        require(method(node, "spp$raw$reportPlayerOpenedMarket", DESC) == null,
+                "legacy raw helper remains");
+        require(guarded.tryCatchBlocks.isEmpty(), "guard added an exception region");
+        MethodInsnNode fallback = uniqueCall(guarded,
+                "com/fs/starfarer/campaign/econ/Economy", "nextStep", "()V");
+        MethodInsnNode guard = uniqueCall(guarded, RUNTIME,
+                "shouldHandleVanillaMarketOpenEconomyStep",
+                "(Ljava/lang/Object;Ljava/lang/Object;)Z");
+        AbstractInsnNode branchInsn = nextMeaningful(guard);
+        require(branchInsn instanceof JumpInsnNode branch
+                        && branch.getOpcode() == Opcodes.IFNE,
+                "market-open guard does not branch around fallback");
+        AbstractInsnNode fallbackReceiver = previousMeaningful(fallback);
+        AbstractInsnNode guardedEconomy = previousMeaningful(previousMeaningful(guard));
+        require(fallbackReceiver instanceof VarInsnNode fallbackLoad
+                        && fallbackLoad.getOpcode() == Opcodes.ALOAD
+                        && guardedEconomy instanceof VarInsnNode guardedLoad
+                        && guardedLoad.getOpcode() == Opcodes.ALOAD
+                        && fallbackLoad.var == guardedLoad.var,
+                "market-open global fallback receiver changed");
+        require(indexOf(guarded, branchInsn) < indexOf(guarded, fallback)
+                        && indexOf(guarded, fallback)
+                        < indexOf(guarded, ((JumpInsnNode) branchInsn).label),
+                "market-open guard target does not follow the virtual fallback");
     }
 
     private static byte[] removeNextStep(byte[] bytes) {
@@ -144,6 +166,42 @@ public final class AoTDMarketOpenContextTransformerTest {
                     && desc.equals(call.desc)) count++;
         }
         return count;
+    }
+
+    private static MethodInsnNode uniqueCall(
+            MethodNode method, String owner, String name, String desc) {
+        MethodInsnNode result = null;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof MethodInsnNode call
+                    && owner.equals(call.owner) && name.equals(call.name)
+                    && desc.equals(call.desc)) {
+                require(result == null, "duplicate call " + owner + '.' + name + desc);
+                result = call;
+            }
+        }
+        require(result != null, "missing call " + owner + '.' + name + desc);
+        return result;
+    }
+
+    private static AbstractInsnNode previousMeaningful(AbstractInsnNode instruction) {
+        AbstractInsnNode current = instruction == null ? null : instruction.getPrevious();
+        while (current != null && current.getOpcode() < 0) current = current.getPrevious();
+        return current;
+    }
+
+    private static AbstractInsnNode nextMeaningful(AbstractInsnNode instruction) {
+        AbstractInsnNode current = instruction == null ? null : instruction.getNext();
+        while (current != null && current.getOpcode() < 0) current = current.getNext();
+        return current;
+    }
+
+    private static int indexOf(MethodNode method, AbstractInsnNode target) {
+        int index = 0;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction == target) return index;
+            index++;
+        }
+        return -1;
     }
 
     private static void require(boolean condition, String message) {

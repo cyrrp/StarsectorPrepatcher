@@ -163,6 +163,8 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             "com/fs/starfarer/campaign/econ/CommodityOnMarket";
     static final String LOCAL_RESOURCES_SUBMARKET =
             "com/fs/starfarer/api/impl/campaign/submarkets/LocalResourcesSubmarketPlugin";
+    private static final String LOCAL_RESOURCES_TOOLTIP_RAW =
+            "spp$rawCreateTooltipAfterDescription";
     static final String REACH_ECONOMY =
             "com/fs/starfarer/campaign/econ/reach/ReachEconomy";
     private static final String ECONOMY_GROUP_INDEX_STATE_FIELD =
@@ -454,10 +456,14 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
                         config.economyGroupIndex,
                         this::patchEconomyGroupIndexMarketMutation);
             }
-            case LOCAL_RESOURCES_SUBMARKET -> apply(state,
-                    "localResourcesNoColdMarketData",
-                    config.localResourcesNoColdMarketData,
-                    this::patchLocalResourcesNoColdMarketData);
+            case LOCAL_RESOURCES_SUBMARKET -> {
+                apply(state, "localResourcesNoColdMarketData",
+                        config.localResourcesNoColdMarketData,
+                        this::patchLocalResourcesNoColdMarketData);
+                apply(state, "localResourcesTooltipSnapshot",
+                        config.localResourcesTooltipSnapshot,
+                        this::patchLocalResourcesTooltipSnapshot);
+            }
             case REACH_ECONOMY -> apply(state,
                     "economyGroupIndexReachEconomy",
                     config.economyGroupIndex,
@@ -855,7 +861,8 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             case MARKET -> config.economyPersistentSnapshots
                     || config.commodityTemporalFastPath || config.directMarketObservation
                     || config.marketScheduler || config.economyGroupIndex;
-            case LOCAL_RESOURCES_SUBMARKET -> config.localResourcesNoColdMarketData;
+            case LOCAL_RESOURCES_SUBMARKET -> config.localResourcesNoColdMarketData
+                    || config.localResourcesTooltipSnapshot;
             case REACH_ECONOMY -> config.economyGroupIndex;
             case COMMODITY_MARKET_DATA -> config.marketShareLinearAggregation
                     || config.marketShareDataPutElision;
@@ -7400,6 +7407,117 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
         if (code.get(4).getOpcode() != Opcodes.IRETURN) {
             throw mismatch("Local Resources should-have wrapper return changed");
         }
+    }
+
+    private PatchReport patchLocalResourcesTooltipSnapshot(ClassNode node) {
+        final String tooltipDesc = "Lcom/fs/starfarer/api/ui/TooltipMakerAPI;";
+        final String methodDesc = "(" + tooltipDesc + "Z)V";
+        final String hookDesc = "(L" + LOCAL_RESOURCES_SUBMARKET + ";"
+                + tooltipDesc + "Z)Z";
+
+        List<MethodNode> publicMethods = methods(
+                node, "createTooltipAfterDescription", methodDesc);
+        List<MethodNode> rawMethods = methods(
+                node, LOCAL_RESOURCES_TOOLTIP_RAW, methodDesc);
+        int hookCalls = countCalls(node, Opcodes.INVOKESTATIC, HOOKS,
+                "renderLocalResourcesTooltipSnapshot", hookDesc);
+
+        if (publicMethods.size() == 1 && rawMethods.size() == 1 && hookCalls == 1) {
+            MethodNode wrapper = publicMethods.get(0);
+            MethodNode raw = rawMethods.get(0);
+            requireLocalResourcesTooltipRawShape(node.name, raw);
+            requireLocalResourcesTooltipWrapper(node.name, wrapper, hookDesc);
+            throw already("Local Resources tooltip uses a one-call stockpile snapshot");
+        }
+        if (publicMethods.size() != 1 || !rawMethods.isEmpty() || hookCalls != 0) {
+            throw mismatch("Local Resources tooltip wrapper collision/mixed state: public="
+                    + publicMethods.size() + ", raw=" + rawMethods.size()
+                    + ", hooks=" + hookCalls);
+        }
+
+        MethodNode original = publicMethods.get(0);
+        requireLocalResourcesTooltipRawShape(node.name, original);
+        MethodNode wrapper = renameForPrivateOriginal(
+                node, original, LOCAL_RESOURCES_TOOLTIP_RAW);
+        installLocalResourcesTooltipWrapper(node.name, wrapper, hookDesc);
+        requireLocalResourcesTooltipRawShape(node.name,
+                requireMethod(node, LOCAL_RESOURCES_TOOLTIP_RAW, methodDesc));
+        requireLocalResourcesTooltipWrapper(node.name, wrapper, hookDesc);
+
+        PatchReport report = new PatchReport();
+        report.add("one-call Local Resources tooltip stockpile snapshot", 1);
+        report.add("unknown-subclass raw tooltip fallback", 1);
+        return report;
+    }
+
+    private static void requireLocalResourcesTooltipRawShape(
+            String owner, MethodNode method) {
+        if ((method.access & (Opcodes.ACC_STATIC | Opcodes.ACC_ABSTRACT
+                | Opcodes.ACC_NATIVE)) != 0) {
+            throw mismatch("Local Resources tooltip access changed");
+        }
+        requireCount("Local Resources tooltip Collections.sort",
+                countCalls(method, Opcodes.INVOKESTATIC,
+                        "java/util/Collections", "sort",
+                        "(Ljava/util/List;Ljava/util/Comparator;)V"), 1);
+        requireCount("Local Resources tooltip comparator allocation",
+                countNew(method, owner + "$1"), 1);
+        String commodityDesc =
+                "Lcom/fs/starfarer/api/campaign/econ/CommodityOnMarketAPI;";
+        requireCount("Local Resources tooltip render getStockpileLimit",
+                countCalls(method, Opcodes.INVOKEVIRTUAL, owner,
+                        "getStockpileLimit", "(" + commodityDesc + ")I"), 1);
+        requireCount("Local Resources tooltip shouldHaveCommodity",
+                countCalls(method, Opcodes.INVOKEVIRTUAL, owner,
+                        "shouldHaveCommodity", "(" + commodityDesc + ")Z"), 1);
+        requireCount("Local Resources tooltip add-rate multiplier",
+                countCalls(method, Opcodes.INVOKEVIRTUAL, owner,
+                        "getStockpilingAddRateMult", "(" + commodityDesc + ")F"), 1);
+        requireCount("Local Resources tooltip beginGridFlipped",
+                countCalls(method, Opcodes.INVOKEINTERFACE,
+                        "com/fs/starfarer/api/ui/TooltipMakerAPI",
+                        "beginGridFlipped", "(FIFF)V"), 1);
+        requireCount("Local Resources tooltip addToGrid",
+                countCalls(method, Opcodes.INVOKEINTERFACE,
+                        "com/fs/starfarer/api/ui/TooltipMakerAPI",
+                        "addToGrid",
+                        "(IILjava/lang/String;Ljava/lang/String;)Ljava/lang/Object;"), 1);
+    }
+
+    private static void installLocalResourcesTooltipWrapper(
+            String owner, MethodNode wrapper, String hookDesc) {
+        LabelNode rawFallback = new LabelNode();
+        InsnList code = wrapper.instructions;
+        code.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        code.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        code.add(new VarInsnNode(Opcodes.ILOAD, 2));
+        code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS,
+                "renderLocalResourcesTooltipSnapshot", hookDesc, false));
+        code.add(new JumpInsnNode(Opcodes.IFEQ, rawFallback));
+        code.add(new InsnNode(Opcodes.RETURN));
+        code.add(rawFallback);
+        code.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        code.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        code.add(new VarInsnNode(Opcodes.ILOAD, 2));
+        code.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, owner,
+                LOCAL_RESOURCES_TOOLTIP_RAW, wrapper.desc, false));
+        code.add(new InsnNode(Opcodes.RETURN));
+        wrapper.maxLocals = 3;
+        wrapper.maxStack = 3;
+    }
+
+    private static void requireLocalResourcesTooltipWrapper(
+            String owner, MethodNode wrapper, String hookDesc) {
+        requireCount("Local Resources tooltip wrapper hook",
+                countCalls(wrapper, Opcodes.INVOKESTATIC, HOOKS,
+                        "renderLocalResourcesTooltipSnapshot", hookDesc), 1);
+        requireCount("Local Resources tooltip raw fallback",
+                countCalls(wrapper, Opcodes.INVOKESPECIAL, owner,
+                        LOCAL_RESOURCES_TOOLTIP_RAW, wrapper.desc), 1);
+        requireCount("Local Resources tooltip wrapper returns",
+                countOpcode(wrapper, Opcodes.RETURN), 2);
+        requireCount("Local Resources tooltip wrapper branches",
+                countOpcode(wrapper, Opcodes.IFEQ), 1);
     }
 
     private PatchReport patchEconomyGroupIndexReachEconomy(ClassNode node) {

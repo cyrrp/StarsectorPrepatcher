@@ -279,6 +279,30 @@ $aotdForkOwnedTransformerReport =
     Join-Path $reportDir 'aotd-fork-owned-transformer.txt'
 $aotdSchedulerBridgeReport = Join-Path $reportDir 'aotd-scheduler-bridge.txt'
 $aotdMarketOpenContextReport = Join-Path $reportDir 'aotd-market-open-context.txt'
+$vanillaDetachedCargoContractReport =
+    Join-Path $reportDir 'vanilla-detached-cargo-economy-contract.txt'
+$vanillaMarketOpenLocalizationContractReport =
+    Join-Path $reportDir 'vanilla-market-open-localization-contract.txt'
+$commodityMarketDataContractReport =
+    Join-Path $reportDir 'commodity-market-data-contract.txt'
+$marketOverviewMutationTransformerReport =
+    Join-Path $reportDir 'market-overview-mutation-transformer.txt'
+$tradeMarketMutationTransformerReport =
+    Join-Path $reportDir 'trade-market-mutation-transformer.txt'
+$industryMarketMutationTransformerReport =
+    Join-Path $reportDir 'industry-market-mutation-transformer.txt'
+$marketMutationContextRuntimeReport =
+    Join-Path $reportDir 'market-mutation-context-runtime.txt'
+$marketMutationFailOpenRuntimeReport =
+    Join-Path $reportDir 'market-mutation-fail-open-runtime.txt'
+$tradeMutationPreparationRuntimeReport =
+    Join-Path $reportDir 'trade-mutation-preparation-runtime.txt'
+$industryMutationRuntimeReport =
+    Join-Path $reportDir 'industry-mutation-runtime.txt'
+$aotdDetachedCargoContextReport =
+    Join-Path $reportDir 'aotd-detached-cargo-context.txt'
+$uiEconomyScenarioReport = Join-Path $reportDir 'ui-economy-scenario-contract.txt'
+$readOnlyUiEconomyReport = Join-Path $reportDir 'read-only-ui-economy-step.txt'
 $aotdUiEconomyBehaviorReport = Join-Path $reportDir 'aotd-ui-economy-behavior.txt'
 $aotdMarkerScannerReport = Join-Path $reportDir 'aotd-marker-scanner.txt'
 
@@ -300,6 +324,160 @@ $aotdMarketOpenContextLines
     $utf8)
 if ($aotdMarketOpenContextExitCode -ne 0) {
     throw 'AoTD market-open context verification failed.'
+}
+
+foreach ($case in @(
+    @('com.starsector.prepatcher.agent.VanillaDetachedCargoEconomyContractTransformerTest',
+      $vanillaDetachedCargoContractReport,
+      (Join-Path $core 'starfarer_obf.jar')),
+    @('com.starsector.prepatcher.agent.VanillaMarketOpenLocalizationContractTransformerTest',
+      $vanillaMarketOpenLocalizationContractReport,
+      (Join-Path $core 'starfarer_obf.jar')),
+    @('com.starsector.prepatcher.agent.CommodityMarketDataContractTransformerTest',
+      $commodityMarketDataContractReport,
+      (Join-Path $core 'starfarer_obf.jar')),
+    @('com.starsector.prepatcher.agent.MarketOverviewMutationTransformerTest',
+      $marketOverviewMutationTransformerReport,
+      (Join-Path $core 'starfarer_obf.jar')),
+    @('com.starsector.prepatcher.agent.TradeMarketMutationTransformerTest',
+      $tradeMarketMutationTransformerReport,
+      (Join-Path $core 'starfarer_obf.jar')),
+    @('com.starsector.prepatcher.agent.IndustryMarketMutationTransformerTest',
+      $industryMarketMutationTransformerReport,
+      (Join-Path $core 'starfarer_obf.jar')),
+    @('com.starsector.prepatcher.agent.AoTDDetachedCargoContextTransformerTest',
+      $aotdDetachedCargoContextReport,
+      (Join-Path $core 'starfarer_obf.jar'))
+)) {
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = @(& java @exports -cp $classPath $case[0] $case[2] 2>&1)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    $lines = @($output | ForEach-Object { $_.ToString() })
+    $lines
+    [IO.File]::WriteAllLines($case[1], [string[]] $lines, $utf8)
+    if ($exitCode -ne 0) {
+        throw "Detached-Cargo compatibility test failed: $($case[0])"
+    }
+}
+
+$marketMutationContextCp = @($testClasses, $testCp) -join [IO.Path]::PathSeparator
+$ErrorActionPreference = 'Continue'
+try {
+    $marketMutationContextOutput = @(& java @exports -cp $marketMutationContextCp `
+        com.fs.starfarer.api.UiMarketMutationContextRuntimeTest 2>&1)
+    $marketMutationContextExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$marketMutationContextLines = @(
+    $marketMutationContextOutput | ForEach-Object { $_.ToString() })
+$marketMutationContextLines
+[IO.File]::WriteAllLines(
+    $marketMutationContextRuntimeReport,
+    [string[]] $marketMutationContextLines,
+    $utf8)
+if ($marketMutationContextExitCode -ne 0) {
+    throw 'UI market-mutation context runtime verification failed.'
+}
+
+$ErrorActionPreference = 'Continue'
+try {
+    $marketMutationFailOpenOutput = @(& java @exports -cp $marketMutationContextCp `
+        com.fs.starfarer.api.UiMarketMutationFailOpenRuntimeTest 2>&1)
+    $marketMutationFailOpenExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$marketMutationFailOpenLines = @(
+    $marketMutationFailOpenOutput | ForEach-Object { $_.ToString() })
+$marketMutationFailOpenLines
+[IO.File]::WriteAllLines(
+    $marketMutationFailOpenRuntimeReport,
+    [string[]] $marketMutationFailOpenLines,
+    $utf8)
+if ($marketMutationFailOpenExitCode -ne 0) {
+    throw 'UI market-mutation fail-open runtime verification failed.'
+}
+
+$ErrorActionPreference = 'Continue'
+try {
+    $tradeMutationPreparationOutput = @(& java @exports -cp $marketMutationContextCp `
+        com.fs.starfarer.api.TradeMutationPreparationRuntimeTest 2>&1)
+    $tradeMutationPreparationExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$tradeMutationPreparationLines = @(
+    $tradeMutationPreparationOutput | ForEach-Object { $_.ToString() })
+$tradeMutationPreparationLines
+[IO.File]::WriteAllLines(
+    $tradeMutationPreparationRuntimeReport,
+    [string[]] $tradeMutationPreparationLines,
+    $utf8)
+if ($tradeMutationPreparationExitCode -ne 0) {
+    throw 'Trade-mutation preparation runtime verification failed.'
+}
+
+$ErrorActionPreference = 'Continue'
+try {
+    $industryMutationRuntimeOutput = @(& java @exports -cp $marketMutationContextCp `
+        com.fs.starfarer.api.IndustryMutationRuntimeTest 2>&1)
+    $industryMutationRuntimeExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$industryMutationRuntimeLines = @(
+    $industryMutationRuntimeOutput | ForEach-Object { $_.ToString() })
+$industryMutationRuntimeLines
+[IO.File]::WriteAllLines(
+    $industryMutationRuntimeReport,
+    [string[]] $industryMutationRuntimeLines,
+    $utf8)
+if ($industryMutationRuntimeExitCode -ne 0) {
+    throw 'Industry-mutation runtime verification failed.'
+}
+
+$ErrorActionPreference = 'Continue'
+try {
+    $uiEconomyScenarioOutput = @(& java @exports -cp $classPath `
+        com.starsector.prepatcher.agent.UiEconomyScenarioContractTest `
+        (Join-Path $core 'starfarer_obf.jar') `
+        (Join-Path $core 'starfarer.api.jar') 2>&1)
+    $uiEconomyScenarioExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$uiEconomyScenarioLines = @($uiEconomyScenarioOutput | ForEach-Object { $_.ToString() })
+$uiEconomyScenarioLines
+[IO.File]::WriteAllLines($uiEconomyScenarioReport, [string[]] $uiEconomyScenarioLines, $utf8)
+if ($uiEconomyScenarioExitCode -ne 0) {
+    throw 'UI economy scenario contract verification failed.'
+}
+
+$ErrorActionPreference = 'Continue'
+$readOnlyUiEconomyArgs = @(
+    (Join-Path $core 'starfarer_obf.jar'),
+    (Join-Path $core 'starfarer.api.jar'))
+if ($nexAvailable) { $readOnlyUiEconomyArgs += $nexJar }
+try {
+    $readOnlyUiEconomyOutput = @(& java @exports -cp $classPath `
+        com.starsector.prepatcher.agent.ReadOnlyUiEconomyStepTransformerTest `
+        @readOnlyUiEconomyArgs 2>&1)
+    $readOnlyUiEconomyExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$readOnlyUiEconomyLines = @(
+    $readOnlyUiEconomyOutput | ForEach-Object { $_.ToString() })
+$readOnlyUiEconomyLines
+[IO.File]::WriteAllLines(
+    $readOnlyUiEconomyReport, [string[]] $readOnlyUiEconomyLines, $utf8)
+if ($readOnlyUiEconomyExitCode -ne 0) {
+    throw 'Read-only UI economy-step verification failed.'
 }
 
 if ($aotdAvailable) {
@@ -476,7 +654,12 @@ foreach ($test in @(
     'com.starsector.prepatcher.runtime.LoadingSaveRuntimeRegressionTest',
     'com.starsector.prepatcher.runtime.AoTDDomainRevisionRuntimeTest',
     'com.starsector.prepatcher.runtime.AoTDDeliveryListenerFailStopTest',
-    'com.starsector.prepatcher.runtime.AoTDOpeningMarketContextRuntimeTest',
+    'com.starsector.prepatcher.runtime.AoTDCurrentContractNegotiationTest',
+    'com.starsector.prepatcher.runtime.AoTDExplicitUiEconomyDispatchRuntimeTest',
+    'com.starsector.prepatcher.runtime.AoTDScriptLoaderUiDispatchRuntimeTest',
+    'com.starsector.prepatcher.runtime.AoTDDetachedCargoContextRuntimeTest',
+    'com.starsector.prepatcher.runtime.ConditionOnlyMarketOpenRuntimeTest',
+    'com.fs.starfarer.api.VanillaMarketOpenCoalescingRuntimeTest',
     'com.fs.starfarer.api.EconomyHotpathRuntimeTest',
     'com.fs.starfarer.api.StrategicJumpDestinationIndexRuntimeTest'
 )) {
@@ -539,6 +722,20 @@ $presentationRuntimeLines
 [IO.File]::WriteAllLines(
     $presentationRuntimeReport, $presentationRuntimeLines, $utf8)
 
+$startupAuditReport = Join-Path $reportDir 'startup-audit-coverage.txt'
+$ErrorActionPreference = 'Continue'
+try {
+    $startupAuditOutput = @(& java @exports -cp $runtimeCp `
+        com.starsector.prepatcher.agent.StartupAuditCoverageTest 2>&1)
+    $startupAuditExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$startupAuditLines = @($startupAuditOutput | ForEach-Object { $_.ToString() })
+$startupAuditLines
+[IO.File]::WriteAllLines($startupAuditReport, [string[]] $startupAuditLines, $utf8)
+if ($startupAuditExitCode -ne 0) { throw 'Startup audit coverage test failed.' }
+
 $mainAgentJar = Join-Path $modRoot 'agent\StarsectorPrepatcherAgent.jar'
 $coreWorldsAgentReport = Join-Path $reportDir 'core-worlds-actual-agent.txt'
 $ErrorActionPreference = 'Continue'
@@ -557,6 +754,51 @@ $coreWorldsAgentLines
     $coreWorldsAgentReport, [string[]] $coreWorldsAgentLines, $utf8)
 if ($coreWorldsAgentExitCode -ne 0) {
     throw 'Core-worlds actual-agent smoke failed.'
+}
+
+$vanillaDetachedCargoAgentReport =
+    Join-Path $reportDir 'vanilla-detached-cargo-actual-agent.txt'
+$ErrorActionPreference = 'Continue'
+try {
+    $vanillaDetachedCargoAgentOutput = @(& java `
+        "-javaagent:$mainAgentJar=config=$(Join-Path $modRoot 'profiles\aggressive.properties')" `
+        -cp $runtimeCp `
+        com.starsector.prepatcher.runtime.VanillaDetachedCargoContractActualAgentSmokeTest `
+        2>&1)
+    $vanillaDetachedCargoAgentExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$vanillaDetachedCargoAgentLines = @(
+    $vanillaDetachedCargoAgentOutput | ForEach-Object { $_.ToString() })
+$vanillaDetachedCargoAgentLines
+[IO.File]::WriteAllLines(
+    $vanillaDetachedCargoAgentReport,
+    [string[]] $vanillaDetachedCargoAgentLines,
+    $utf8)
+if ($vanillaDetachedCargoAgentExitCode -ne 0) {
+    throw 'Vanilla detached-Cargo actual-agent smoke failed.'
+}
+
+$uiEconomyAgentReport = Join-Path $reportDir 'ui-economy-actual-agent.txt'
+$ErrorActionPreference = 'Continue'
+$uiEconomyAgentArgs = @()
+if ($nexAvailable) { $uiEconomyAgentArgs += $nexJar }
+try {
+    $uiEconomyAgentOutput = @(& java `
+        "-javaagent:$mainAgentJar=config=$(Join-Path $modRoot 'profiles\aggressive.properties')" `
+        -cp $runtimeCp `
+        com.starsector.prepatcher.runtime.UiEconomyActualAgentSmokeTest `
+        @uiEconomyAgentArgs 2>&1)
+    $uiEconomyAgentExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$uiEconomyAgentLines = @($uiEconomyAgentOutput | ForEach-Object { $_.ToString() })
+$uiEconomyAgentLines
+[IO.File]::WriteAllLines($uiEconomyAgentReport, [string[]] $uiEconomyAgentLines, $utf8)
+if ($uiEconomyAgentExitCode -ne 0) {
+    throw 'UI economy actual-agent smoke failed.'
 }
 
 $presentationAgentReport = Join-Path $reportDir 'fast-forward-presentation-actual-agent.txt'
@@ -613,7 +855,8 @@ if ($marketStepReplayExitCode -ne 0) {
     throw 'Market step-replay actual-agent smoke failed.'
 }
 
-# Exercise P0, P0.5 and P1 through the real javaagent with all unrelated
+# Exercise the read-only UI, condition-only opening and localization paths through
+# the real javaagent with all unrelated
 # bytecode patches disabled. Nexerelin remains an optional target.
 $marketShareAgentConfig = Join-Path $build 'market-share-agent-smoke.properties'
 $marketShareAgentText = [IO.File]::ReadAllText(
@@ -677,7 +920,7 @@ if ($marketShareAgentExitCode -ne 0) {
     throw 'Market-share actual-agent smoke failed.'
 }
 
-# Exercise Local Resources P0 and owner-local econ-group P2 with unrelated
+# Exercise Local Resources legality and the owner-local econ-group index with unrelated
 # transformations disabled. Include exact AoTDReachEconomy when available.
 $economyHotpathAgentConfig = Join-Path $build 'economy-hotpath-agent-smoke.properties'
 $economyHotpathAgentText = [IO.File]::ReadAllText(
@@ -688,6 +931,7 @@ $economyHotpathAgentText = [regex]::Replace(
     { param($match) $match.Groups[1].Value + '=false' })
 foreach ($key in @(
     'patch.localResourcesNoColdMarketData',
+    'patch.localResourcesTooltipSnapshot',
     'patch.economyGroupIndex'
 )) {
     $economyHotpathAgentText = [regex]::Replace(

@@ -2,14 +2,14 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Текущая версия: **0.13.0**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
+Текущая версия: **0.17.0**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
 
 [![Без препатчера и с ним](media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
 Нажмите на превью, чтобы открыть полное сравнение в WebM при 60 FPS.
 
-StarsectorPrepatcher — compatibility-first слой ранних патчей Starsector. Startup-javaagent'ы
-запускаются до обычной загрузки игровых и модовых classloader'ов, поэтому защищённые структурные
+StarsectorPrepatcher — compatibility-first слой ранних патчей Starsector. Startup-javaagent
+запускается до обычной загрузки игровых и модовых classloader'ов, поэтому защищённые структурные
 патчи применяются в момент первого появления целевых классов в JVM.
 
 Задача проекта шире одной только оптимизации карты:
@@ -21,7 +21,7 @@ StarsectorPrepatcher — compatibility-first слой ранних патчей 
 - хранить зависимое от версии игры знание о bytecode внутри prepatcher, а не размножать его по
   игровым модам.
 
-Публичный API в `0.13.0` ещё не выпущен и остаётся пунктом roadmap. Планируемый namespace —
+Публичный API в `0.17.0` ещё не выпущен и остаётся пунктом roadmap. Планируемый namespace —
 `com.starsector.prepatcher.api`; типы станут поддерживаемым контрактом только после появления
 документации и compatibility-тестов.
 
@@ -61,8 +61,9 @@ Bootstrap plugin не меняет bytecode. Он выводит состоян�
 
 Если установлен **AoTD — Theory of Toolbox**, используйте поддерживаемый
 [Scheduler Fork](https://github.com/cyrrp/AoTD-Theory-Of-Toolbox-Scheduler-Fork) выпуска
-`1.0.14-spp2` или новее. Форк необходим для оптимальной производительности AoTD и поддерживаемого
-native scheduler/capability path. Без AoTD форк не требуется.
+`1.0.14-spp7`. Форк необходим для оптимальной производительности AoTD и поддерживаемого native
+scheduler/capability path. Будущие ревизии остаются fail-closed до проверки их контрактов. Без AoTD
+форк не требуется.
 
 В Windows запустите двойным щелчком `StarsectorPrepatcher.bat`, выберите
 **Install javaagent**, затем Vanilla, Faster Rendering или оба варианта. Интерфейс BAT-файла
@@ -97,9 +98,12 @@ Prepatcher не изменяет формат сохранений, а его ru
 
 - sector, system и Intel map: reconciliation, spatial candidates, callbacks, hover, entity indexes,
   nebula metadata, scratch collections и grid LOD;
-- campaign и economy: lifecycle-bound кэши, listener refresh, reusable snapshots, агрессивные
-  staggered scheduler'ы центральных удалённых рынков и `planetConditionMarketOnly`, исправленное
-  observation прямых mod-вызовов `Market.advance()`, owner-local persistent copy-on-write snapshots
+- campaign и economy: lifecycle-bound кэши, listener refresh, reusable snapshots, единый scheduler
+  всех преобразованных engine-owned обновлений рынков, исправленное observation прямых mod-вызовов
+  `Market.advance()`, атомарный targeted/local UI market-mutation refresh для доказанных
+  policy/trade/free-port/industry изменений; admin, unsupported и unknown callers сохраняют исходный
+  global step,
+  owner-local persistent copy-on-write snapshots
   markets/conditions/industries со structure epochs и bounded audit, owner-local ReachEconomy
   fingerprint, ordered fast path неактивных commodities вместе с direct expiry-aware scheduler
   `MutableStatWithTempMods`, guarded fast path для dormant-наследников `BaseIndustry`, подавление
@@ -229,25 +233,61 @@ Rendering. Сборка описана в [`BUILDING.md`](BUILDING.md).
 - [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) — structural matching и fail-open правила;
 - [`docs/VALIDATION.md`](docs/VALIDATION.md) — playbook регрессионных и performance-проверок;
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — план structural discovery, архитектуры, tooling и платформ;
-- [`docs/releases/0.13.0.md`](docs/releases/0.13.0.md) — подробный отчёт текущего выпуска.
+- [`docs/architecture/MARKET_SCHEDULER.md`](docs/architecture/MARKET_SCHEDULER.md) — долговременное
+  устройство и инварианты scheduler;
+- [`docs/releases/0.17.0.md`](docs/releases/0.17.0.md) — подробный отчёт текущего выпуска.
 
 Условия распространения находятся в [`LICENSE`](LICENSE).
 
 ## Интеграция с AoTD Scheduler Fork
 
-Prepatcher 0.13.0 устанавливает clean wrapper на оригинальный `BaseIndustry.getMaxDeficit()`.
-Vanilla-реализация сохраняется и используется, пока совместимый AoTD Scheduler Fork не зарегистрирует
-полный native-профиль `0x1ff`. Bridge schema V6 публикует campaign/economy epoch и читает актуальную
-runtime capability mask. Поздние callbacks старой эпохи отклоняются, а fail-stop listener запускает
+Prepatcher 0.17.0 сохраняет clean wrapper на оригинальный `BaseIndustry.getMaxDeficit()` и
+поддерживает Scheduler Fork `1.0.14-spp7`. Обязательный production-профиль `0x3ff` включает explicit
+UI economy dispatcher; optional UI market-mutation capability расширяет полный V9-профиль до
+`0x7ff`. Bridge публикует campaign/economy epoch и читает актуальную runtime
+capability mask. Поздние callbacks старой эпохи отклоняются, а fail-stop listener запускает
 однократную синхронизацию поколений перед включением fallback dirtying. Старый изменённый
 `starfarer.api.jar` устанавливать нельзя.
 
-При установленном AoTD Theory of Toolbox поддерживаемый Scheduler Fork `1.0.14-spp2` необходим для
+Обязательный dispatcher capability не зависит от optional optimization switches, поэтому safe
+profile тоже согласует `0x3ff`. Регистрация поддерживает только текущий контракт: форма bridge
+должна быть V9, версия — точно `1.0.14-spp7`, declared mask — точно `0x7ff`. Любое расхождение
+логируется и целиком отклоняется без режима частичной совместимости.
+
+Read-only UI patch также удаляет точный UI-triggered глобальный `tripleStep()` при открытии
+Command/Colonies, текущего и legacy commodity-detail dialog, а также из независимо проверяемых
+vanilla `MarketCMD.showDefenses()` и Nexerelin `Nex_MarketCMD.showDefenses()` после захвата входных
+данных обороны. Это чистые inline fail-closed удаления без runtime cache и ссылок на рынки; safe
+profile оставляет их выключенными. В реальном AoTD fork descendants vanilla surfaces нет, а
+optional Nex-класс преобразуется только в памяти без изменения его JAR.
+
+Exact ветка detached Cargo с `fake_market` теперь оптимизируется и без AoTD. Если runtime-классы
+являются точными vanilla `Economy` и `ReachEconomy`, а финальный bytecode по-прежнему доказывает, что
+`tripleStep()` состоит ровно из трёх `nextStep()`, Prepatcher пропускает этот не относящийся к
+инвентарю пересчёт сектора. Для поддерживаемого форка тот же exact call-site guard вызывает его
+explicit dispatcher с классифицированным synthetic-Cargo intent. Отклонённый/ошибочный dispatch и
+replacement/subclass экономики сохраняют исходный virtual call, который всегда остаётся глобальным.
+Market-open, Cargo и trade guards больше не публикуют fork context. Tooltip Local Resources
+использует call-local snapshot лимитов и не удерживает рынки или commodities после завершения
+вызова.
+
+Schema V8 передаёт packed reason/scope для доказанных local policy mutations. Schema V9 расширяет
+ту же атомарную feature-группу immutable sorted commodity-ID payload. Для non-trade mutations
+one-shot context остаётся внутренним для Prepatcher между exact vanilla setter или industry wrapper
+и shared helper; форк получает только уже классифицированный intent. Exact free-port change и пять
+exact vanilla industry branches — start-upgrade, downgrade, два remove/shut-down и cancel-upgrade —
+обновляют один рынок и перестраивают global/econ-group records только затронутых товаров; industry
+mutation без commodity diff выполняет только local industry/state refresh. Trade не использует
+setter/helper context: exact guard получает affected IDs непосредственно из immutable bought/sold
+cargo и применяет тот же affected-commodity commit. Admin assignment, stabilization, construction
+queue и неизвестные/custom helper callers сохраняют исходный global step.
+
+При установленном AoTD Theory of Toolbox поддерживаемый Scheduler Fork `1.0.14-spp7` необходим для
 оптимальной производительности. В остальных конфигурациях Prepatcher не требует ни AoTD, ни форк.
 Исходная сборка AoTD может использовать сохранённые fail-closed/raw пути, но не предоставляет полный
 поддерживаемый native scheduler contract.
 
-P0/P0.5/P1 для market share также явно поддерживают принадлежащий проекту
+Группа market-share optimizations также явно поддерживает принадлежащий проекту
 `AoTDCommodityMarketData`. Loader-local `ClassValue` допускает текущий fork только пока пять
 критических market-share методов наследуются из vanilla. Будущий override локально переводит
 данный runtime class на сохранённое raw-поведение, не отключает vanilla-патч и не удерживает
@@ -267,13 +307,14 @@ construction audit. Эти пути не добавляют статически
 accessors используют `ClassValue`, а массивы group index остаются transient-состоянием владельца
 `ReachEconomy`.
 
-Интеграция также исправляет синхронную последовательность открытия рынка/Cargo. Vanilla вызывает
-`Economy.nextStep()` до публикации `currentlyOpenMarket`; exact wrapper
-`CampaignEngine.reportPlayerOpenedMarket()` теперь передаёт аргумент заранее и очищает context в
-`finally`. Форк выполняет committed refresh только открываемого рынка, ограничивает этим рынком
-immigration и post-immigration snapshot, не строит global `commodity × econGroup` и пропускает
-немедленный Cargo step только при точном совпадении runtime/registry/market revisions. Global
-internal-trade settlement остаётся на штатной economy cadence, а UI path по-прежнему публикует одну
-границу `economyUpdated`.
+Интеграция также исправляет синхронную последовательность открытия рынка/Cargo, не меняя смысл
+стандартного economy API. `AoTDEconomy.nextStep(...)`, `doubleStep()`, `tripleStep()` и
+`AoTDReachEconomy.nextStep(...)` всегда выполняют полный global step и не выводят UI intent из
+`currentlyOpenMarket` или отсутствующего payload; double/triple сохраняют vanilla-кратность в два
+и три шага. Exact Prepatcher call-site guards вместо этого
+вызывают единый public final dispatcher форка для market-open, Cargo или market-mutation action.
+Поддержанный intent выполняет committed single-market cut; `GLOBAL_TOPOLOGY`, отсутствующий
+barrier/capability, неподдержанный action, `false` или exception запускают сохранённый исходный
+virtual call и тем самым глобальный путь.
 
 Патч управляется ключом `patch.aotdCleanDeficitPath=true` и включён во всех поставляемых профилях.

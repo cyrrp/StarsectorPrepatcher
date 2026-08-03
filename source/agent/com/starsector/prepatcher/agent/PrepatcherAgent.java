@@ -10,12 +10,13 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 public final class PrepatcherAgent {
-    public static final String VERSION = "0.13.0";
+    public static final String VERSION = "0.17.0";
     private PrepatcherAgent() {}
 
     public static void premain(String agentArgs, Instrumentation instrumentation) {
@@ -62,11 +63,44 @@ public final class PrepatcherAgent {
                 return;
             }
 
+            // Transformer plans reference JDK-internal ASM types. Export the packages before
+            // constructing any plan whose verifier may resolve a ClassWriter subclass.
+            exportInternalAsm(instrumentation);
+
             PrepatcherTransformer transformPlan = new PrepatcherTransformer(config);
+            ReadOnlyUiEconomyStepTransformer readOnlyUiEconomyPlan =
+                    new ReadOnlyUiEconomyStepTransformer(
+                            config.commandTabNoGlobalEconomyStep,
+                            config.commodityDetailNoGlobalEconomyStep,
+                            config.marketDefensesNoGlobalEconomyStep, null);
+            MarketOverviewMutationTransformer marketOverviewMutationPlan =
+                    new MarketOverviewMutationTransformer(
+                            config.uiMarketMutationRefresh, null);
+            TradeMarketMutationTransformer tradeMutationPlan =
+                    new TradeMarketMutationTransformer(
+                            config.uiMarketMutationRefresh, null);
+            IndustryMarketMutationTransformer industryMutationPlan =
+                    new IndustryMarketMutationTransformer(
+                            config.uiMarketMutationRefresh, null);
+            boolean syntheticCargoEconomySkipEnabled =
+                    config.campaignCargoNoGlobalEconomyStep
+                            || config.lootTransferNoGlobalEconomyStep;
+            boolean marketOpenContextEnabled = config.marketScheduler
+                    || config.planetConditionMarketOpenNoGlobalEconomyStep
+                    || config.vanillaMarketOpenLocalization;
+            boolean syntheticCargoUiEnabled = config.campaignCargoNoGlobalEconomyStep
+                    || config.lootTransferNoGlobalEconomyStep
+                    || config.vanillaMarketOpenLocalization;
+            Set<String> startupAuditTargets = collectStartupAuditTargets(
+                    transformPlan, readOnlyUiEconomyPlan,
+                    marketOverviewMutationPlan, tradeMutationPlan, industryMutationPlan,
+                    config.uiMarketMutationRefresh, syntheticCargoEconomySkipEnabled,
+                    marketOpenContextEnabled, syntheticCargoUiEnabled,
+                    config.vanillaMarketOpenLocalization, config.marketScheduler, false);
             FastForwardPresentationTransformer presentationPlan =
                     new FastForwardPresentationTransformer(config);
             Class<?> loadedTarget = findLoadedTarget(
-                    instrumentation, transformPlan, ClassLoader.getSystemClassLoader());
+                    instrumentation, startupAuditTargets, ClassLoader.getSystemClassLoader());
             if (loadedTarget != null) {
                 failForLoadedTarget("before runtime installation", loadedTarget,
                         "target-loaded-before-runtime");
@@ -83,7 +117,8 @@ public final class PrepatcherAgent {
                 return;
             }
 
-            loadedTarget = findLoadedTarget(instrumentation, transformPlan, runtimeLoader);
+            loadedTarget = findLoadedTarget(
+                    instrumentation, startupAuditTargets, runtimeLoader);
             if (loadedTarget != null) {
                 failForLoadedTarget("during runtime installation", loadedTarget,
                         "target-loaded-during-runtime-install");
@@ -92,7 +127,6 @@ public final class PrepatcherAgent {
 
             boolean presentationMarkerLoaded = recordLoadedPresentationTargets(
                     instrumentation, presentationPlan, runtimeLoader);
-            exportInternalAsm(instrumentation);
 
             // AoTD owns an inert bridge class. Patch only that verified class at
             // load time so the mod never uses reflection or loader probing.
@@ -114,14 +148,95 @@ public final class PrepatcherAgent {
             }
             ClassFileTransformer transformer = new PrepatcherTransformer(config, runtimeLoader);
             instrumentation.addTransformer(transformer, false);
-            // Registered after the structural plan so it wraps the final
-            // CampaignEngine method body and publishes the market before
-            // vanilla Economy.nextStep() observes currentlyOpenMarket.
             instrumentation.addTransformer(
-                    new AoTDMarketOpenContextTransformer(config.marketScheduler, runtimeLoader),
+                    new ReadOnlyUiEconomyStepTransformer(
+                            config.commandTabNoGlobalEconomyStep,
+                            config.commodityDetailNoGlobalEconomyStep,
+                            config.marketDefensesNoGlobalEconomyStep, runtimeLoader),
+                    false);
+            initializeReadOnlyUiEconomyStatuses(config);
+            instrumentation.addTransformer(
+                    new MarketOverviewMutationTransformer(
+                            config.uiMarketMutationRefresh, runtimeLoader), false);
+            System.setProperty(MarketOverviewMutationTransformer.statusProperty(),
+                    config.uiMarketMutationRefresh
+                            ? "transformer-installed" : "disabled");
+            instrumentation.addTransformer(
+                    new TradeMarketMutationTransformer(
+                            config.uiMarketMutationRefresh, runtimeLoader), false);
+            System.setProperty(TradeMarketMutationTransformer.statusProperty(),
+                    config.uiMarketMutationRefresh
+                            ? "transformer-installed" : "disabled");
+            instrumentation.addTransformer(
+                    new IndustryMarketMutationTransformer(
+                            config.uiMarketMutationRefresh, runtimeLoader), false);
+            for (String industryTarget
+                    : IndustryMarketMutationTransformer.TARGET_CLASSES) {
+                System.setProperty(
+                        IndustryMarketMutationTransformer
+                                .statusProperty(industryTarget),
+                        config.uiMarketMutationRefresh
+                                ? "transformer-installed" : "disabled");
+            }
+            // Registered after the structural plan so it validates the final
+            // Economy body seen by later detached-Cargo call-site logic.
+            instrumentation.addTransformer(
+                    new VanillaDetachedCargoEconomyContractTransformer(
+                            syntheticCargoEconomySkipEnabled, runtimeLoader),
+                    false);
+            System.setProperty(
+                    "starsector.prepatcher.detachedCargoVanillaEconomyContract",
+                    syntheticCargoEconomySkipEnabled
+                            ? "awaiting-economy-load" : "disabled");
+            instrumentation.addTransformer(
+                    new VanillaMarketOpenLocalizationContractTransformer(
+                            config.vanillaMarketOpenLocalization, runtimeLoader),
+                    false);
+            System.setProperty(
+                    "starsector.prepatcher.vanillaMarketOpenLocalizationContract",
+                    config.vanillaMarketOpenLocalization
+                            ? "awaiting-economy-and-reach-load" : "disabled");
+            instrumentation.addTransformer(
+                    new CommodityMarketDataContractTransformer(
+                            config.uiMarketMutationRefresh, runtimeLoader), false);
+            System.setProperty(
+                    "starsector.prepatcher.commodityMarketDataContract",
+                    config.uiMarketMutationRefresh
+                            ? "awaiting-commodity-market-data-load" : "disabled");
+            // Registered after the structural plan so it guards the final
+            // CampaignEngine Economy.nextStep call with the explicit market
+            // action while retaining that virtual call as the global fallback.
+            instrumentation.addTransformer(
+                    new AoTDMarketOpenContextTransformer(
+                            marketOpenContextEnabled,
+                            config.planetConditionMarketOpenNoGlobalEconomyStep,
+                            config.vanillaMarketOpenLocalization,
+                            runtimeLoader),
                     false);
             System.setProperty("starsector.prepatcher.aotdMarketOpenContextPatch",
-                    config.marketScheduler ? "transformer-installed" : "disabled");
+                    marketOpenContextEnabled ? "transformer-installed" : "disabled");
+            System.setProperty(
+                    "starsector.prepatcher.planetConditionMarketOpenNoGlobalEconomyStepPatch",
+                    config.planetConditionMarketOpenNoGlobalEconomyStep
+                            ? "transformer-installed" : "disabled");
+            System.setProperty(
+                    "starsector.prepatcher.vanillaMarketOpenLocalizationPatch",
+                    config.vanillaMarketOpenLocalization
+                            ? "transformer-installed" : "disabled");
+            instrumentation.addTransformer(
+                    new AoTDDetachedCargoContextTransformer(
+                            syntheticCargoUiEnabled, runtimeLoader),
+                    false);
+            String detachedCargoPatchStatus = syntheticCargoUiEnabled
+                    ? "transformer-installed" : "disabled";
+            System.setProperty(
+                    "starsector.prepatcher.campaignCargoNoGlobalEconomyStepPatch",
+                    detachedCargoPatchStatus);
+            System.setProperty("starsector.prepatcher.aotdDetachedCargoContextPatch",
+                    detachedCargoPatchStatus);
+            System.setProperty("starsector.prepatcher.lootTransferNoGlobalEconomyStepPatch",
+                    config.lootTransferNoGlobalEconomyStep
+                            ? "transformer-installed" : "disabled");
             System.setProperty("starsector.prepatcher.presentationStructuralOrder",
                     presentationMarkerLoaded ? "structural-only" : "presentation->structural");
             if (config.directMarketObservation || config.marketScheduler
@@ -155,15 +270,73 @@ public final class PrepatcherAgent {
         }
     }
 
-    private static Class<?> findLoadedTarget(Instrumentation instrumentation,
-                                             PrepatcherTransformer transformPlan,
-                                             ClassLoader runtimeLoader) {
+    static Set<String> collectStartupAuditTargets(
+            PrepatcherTransformer transformPlan,
+            ReadOnlyUiEconomyStepTransformer readOnlyUiEconomyPlan,
+            MarketOverviewMutationTransformer marketOverviewMutationPlan,
+            TradeMarketMutationTransformer tradeMutationPlan,
+            IndustryMarketMutationTransformer industryMutationPlan,
+            boolean commodityMarketDataContractEnabled,
+            boolean detachedCargoContractEnabled,
+            boolean marketOpenContextEnabled,
+            boolean detachedCargoContextEnabled,
+            boolean marketOpenContractEnabled,
+            boolean aotdForkCompatibilityEnabled,
+            boolean includeDisabled) {
+        Set<String> targets = new LinkedHashSet<>();
+        for (String target : PrepatcherTransformer.TARGET_CLASSES) {
+            if (includeDisabled || transformPlan.isTargetEnabled(target)) targets.add(target);
+        }
+        for (String target : PrepatcherTransformer.OPTIONAL_TARGET_CLASSES) {
+            if (includeDisabled || transformPlan.isTargetEnabled(target)) targets.add(target);
+        }
+        for (String target : ReadOnlyUiEconomyStepTransformer.TARGET_CLASSES) {
+            if (includeDisabled || readOnlyUiEconomyPlan.isTargetEnabled(target)) {
+                targets.add(target);
+            }
+        }
+        if (includeDisabled
+                || marketOverviewMutationPlan.isTargetEnabled(
+                MarketOverviewMutationTransformer.TARGET)) {
+            targets.add(MarketOverviewMutationTransformer.TARGET);
+        }
+        if (includeDisabled
+                || tradeMutationPlan.isTargetEnabled(TradeMarketMutationTransformer.TARGET)) {
+            targets.add(TradeMarketMutationTransformer.TARGET);
+        }
+        for (String target : IndustryMarketMutationTransformer.TARGET_CLASSES) {
+            if (includeDisabled || industryMutationPlan.isTargetEnabled(target)) targets.add(target);
+        }
+        if (includeDisabled || commodityMarketDataContractEnabled) {
+            targets.add(CommodityMarketDataContractTransformer.TARGET);
+        }
+        if (includeDisabled || detachedCargoContractEnabled) {
+            targets.add(VanillaDetachedCargoEconomyContractTransformer.TARGET);
+        }
+        if (includeDisabled || marketOpenContextEnabled) {
+            targets.add(AoTDMarketOpenContextTransformer.TARGET);
+        }
+        if (includeDisabled || detachedCargoContextEnabled) {
+            targets.add(AoTDDetachedCargoContextTransformer.TARGET);
+        }
+        if (includeDisabled || marketOpenContractEnabled) {
+            targets.addAll(VanillaMarketOpenLocalizationContractTransformer.TARGET_CLASSES);
+        }
+        // The bridge transformer is always registered. The fork-owned mutation
+        // boundary follows the scheduler feature switch.
+        targets.add(AoTDSchedulerBridgeTransformer.TARGET);
+        if (includeDisabled || aotdForkCompatibilityEnabled) {
+            targets.add(AoTDForkCompatibilityTransformer.TARGET);
+        }
+        return Collections.unmodifiableSet(targets);
+    }
+
+    static Class<?> findLoadedTarget(Instrumentation instrumentation,
+                                     Set<String> startupAuditTargets,
+                                     ClassLoader runtimeLoader) {
         for (Class<?> loaded : instrumentation.getAllLoadedClasses()) {
             String internalName = loaded.getName().replace('.', '/');
-            if (!PrepatcherTransformer.TARGET_CLASSES.contains(internalName)
-                    || !transformPlan.isTargetEnabled(internalName)) {
-                continue;
-            }
+            if (!startupAuditTargets.contains(internalName)) continue;
             ClassLoader expectedLoader = runtimeLoader;
             if (PrepatcherTransformer.SOUND.equals(internalName)
                     && runtimeLoader != null && runtimeLoader.getParent() != null) {
@@ -174,9 +347,39 @@ public final class PrepatcherAgent {
                 if (actual == runtimeLoader || actual == runtimeLoader.getParent()) return loaded;
                 continue;
             }
+            if (ReadOnlyUiEconomyStepTransformer.NEX_MARKET_CMD.equals(internalName)) {
+                if (ReadOnlyUiEconomyStepTransformer.isSameOrChildLoader(
+                        loaded.getClassLoader(), runtimeLoader)) return loaded;
+                continue;
+            }
             if (loaded.getClassLoader() == expectedLoader) return loaded;
         }
         return null;
+    }
+
+
+    private static void initializeReadOnlyUiEconomyStatuses(PrepatcherConfig config) {
+        initializeReadOnlyUiEconomyStatus(
+                ReadOnlyUiEconomyStepTransformer.COMMAND_TAB,
+                config.commandTabNoGlobalEconomyStep);
+        initializeReadOnlyUiEconomyStatus(
+                ReadOnlyUiEconomyStepTransformer.COMMODITY_DETAIL_V2,
+                config.commodityDetailNoGlobalEconomyStep);
+        initializeReadOnlyUiEconomyStatus(
+                ReadOnlyUiEconomyStepTransformer.COMMODITY_DETAIL_LEGACY,
+                config.commodityDetailNoGlobalEconomyStep);
+        initializeReadOnlyUiEconomyStatus(
+                ReadOnlyUiEconomyStepTransformer.MARKET_CMD,
+                config.marketDefensesNoGlobalEconomyStep);
+        initializeReadOnlyUiEconomyStatus(
+                ReadOnlyUiEconomyStepTransformer.NEX_MARKET_CMD,
+                config.marketDefensesNoGlobalEconomyStep);
+    }
+
+    private static void initializeReadOnlyUiEconomyStatus(
+            String className, boolean enabled) {
+        System.setProperty(ReadOnlyUiEconomyStepTransformer.statusProperty(className),
+                enabled ? "transformer-installed" : "disabled");
     }
 
     private static boolean recordLoadedPresentationTargets(

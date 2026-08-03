@@ -82,8 +82,9 @@ Linux/macOS:
 3. проверяет SemVer/changelog, относительные ссылки, достижимость документации и все SHA-256;
 4. трансформирует `starfarer_obf.jar`, `fs.common_obf.jar`, `fs.sound_obf.jar` в памяти;
 5. выполняет ASM `Analyzer + BasicVerifier` для concrete methods;
-6. проверяет idempotency/ownership/negative structural cases, затем exact-hash safe/aggressive
-   presentation profiles, 24 target-класса и цепочку с пятью пересекающимися presentation/structural targets;
+6. проверяет idempotency/ownership/negative structural cases, включая четыре read-only UI
+   target-класса, затем exact-hash safe/aggressive presentation profiles, 24 presentation targets и
+   цепочку с пятью пересекающимися presentation/structural targets;
 7. запускает presentation scheduler/actual-agent smoke, lifecycle, exp6/exp8, unified market
    scheduler, direct-market observation, persistent
    economy, commodity temporal, dormant-industry, temp-mod и loading/save runtime suites;
@@ -104,6 +105,8 @@ profile и только там включает known-disabled loading/startup p
 `fast-forward-presentation-structural-plan.txt`,
 `fast-forward-presentation-compatibility.txt`, `fast-forward-presentation-runtime.txt`,
 `fast-forward-presentation-actual-agent.txt`, `core-worlds-structural-matcher.txt`,
+`ui-economy-scenario-contract.txt`, `read-only-ui-economy-step.txt`,
+`aotd-ui-economy-behavior.txt`,
 `core-worlds-actual-agent.txt`, `direct-market-transformer.txt`,
 `runtime-regression.txt`, `temp-mod-actual-agent-smoke.txt`,
 `market-step-replay-actual-agent-smoke.txt`,
@@ -112,9 +115,10 @@ profile и только там включает known-disabled loading/startup p
 `faster-rendering-loader-smoke.txt` создаются в `.build/reports/` и намеренно не входят в
 документацию или дистрибутив. Если `fr.jar` отсутствует, FR smoke явно получает `SKIPPED`; такой
 результат допустим для обычной разработки, но не для выпуска с заявленной FR-совместимостью.
-Краткие пользовательские изменения фиксируются в [`CHANGELOG.md`](CHANGELOG.md), а причины,
-измерения и остаточные риски — в [`docs/releases/`](docs/releases/0.13.0.md). Обязательные regression
-gates для новых pre-load патчей описаны в [`docs/VALIDATION.md`](docs/VALIDATION.md).
+Краткие пользовательские изменения фиксируются в [`CHANGELOG.md`](CHANGELOG.md), обязательные
+regression gates — в [`docs/VALIDATION.md`](docs/VALIDATION.md), а итоговые решения, evidence и
+остаточные риски конкретного выпуска — в единственном каноническом
+[`docs/releases/<version>.md`](docs/releases/0.17.0.md).
 
 ## Java 17 compatibility
 

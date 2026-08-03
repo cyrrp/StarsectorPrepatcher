@@ -15,6 +15,8 @@ import com.fs.starfarer.api.campaign.rules.MemoryAPI;
 import com.fs.starfarer.api.impl.campaign.econ.impl.ConstructionQueue;
 import com.fs.starfarer.api.impl.campaign.econ.impl.BaseIndustry;
 import com.fs.starfarer.api.impl.campaign.ids.Conditions;
+import com.fs.starfarer.api.impl.campaign.ids.Strings;
+import com.fs.starfarer.api.impl.campaign.submarkets.LocalResourcesSubmarketPlugin;
 import com.fs.starfarer.api.combat.MutableStatWithTempMods;
 import com.fs.starfarer.campaign.CampaignEngine;
 import com.fs.starfarer.campaign.JumpPoint;
@@ -28,6 +30,8 @@ import com.fs.starfarer.api.impl.campaign.procgen.StarSystemGenerator;
 import com.fs.starfarer.api.impl.campaign.terrain.BaseTiledTerrain;
 import com.fs.starfarer.api.util.Misc;
 import com.fs.starfarer.api.ui.SectorMapAPI;
+import com.fs.starfarer.api.ui.Alignment;
+import com.fs.starfarer.api.ui.TooltipMakerAPI;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 import com.starsector.prepatcher.agent.PrepatcherLog;
 import org.lwjgl.util.vector.Vector2f;
@@ -801,6 +805,7 @@ public final class StarsectorPrepatcherHooks {
         ROUTE_JUMP_INDEXES = Collections.synchronizedMap(new WeakHashMap<>());
         ROUTE_SYSTEM_INDEXES = Collections.synchronizedMap(new WeakHashMap<>());
         StarsectorPrepatcherCoreWorldsRuntime.campaignLifecycleReset();
+        StarsectorPrepatcherHyperspaceHooks.campaignLifecycleReset(campaignCacheGeneration);
         StarsectorPrepatcherStrategicJumpIndex.reset();
         ECONOMY_LOCATION_STATES = Collections.synchronizedMap(new WeakHashMap<>());
         MARKET_SCHEDULER_STATES = new WeakIdentityMap<>();
@@ -1671,6 +1676,33 @@ public final class StarsectorPrepatcherHooks {
     public static void flushPendingMarketBeforeAoTDMutation(Object rawMarket) {
         if (!(rawMarket instanceof MarketAPI market)) return;
         flushPendingMarketBeforeMutation(market);
+    }
+
+    /**
+     * Exact pending replay barrier before a synchronous localized UI refresh.
+     * Unlike a mutation barrier, this does not dirty construction-state caches.
+     */
+    public static void flushPendingMarketBeforeUiRefresh(MarketAPI market) {
+        if (market == null || !marketSchedulerReady) return;
+        PrepatcherConfig c = config;
+        if (c == null || !c.marketScheduler) return;
+        MarketScheduleState state;
+        try {
+            state = MARKET_SCHEDULER_STATES.get(market);
+        } catch (Throwable ignored) {
+            MARKET_SCHEDULER_STATE_FAILURES.increment();
+            return;
+        }
+        if (state == null) return;
+        boolean pending;
+        synchronized (state) {
+            if (state.inAdvance || state.disabled) return;
+            pending = state.pendingSteps > 0;
+        }
+        if (pending) {
+            deliverPendingExact(
+                    market, state, MARKET_ORIGIN_SCHEDULER_FALLBACK, false);
+        }
     }
 
     /** Exact pending replay barrier inserted before construction-structure mutation. */
@@ -3351,6 +3383,87 @@ public final class StarsectorPrepatcherHooks {
         LOCAL_RESOURCES_PEEK_FALLBACKS.increment();
         return !commodity.getCommodityMarketData()
                 .getMarketShareData(market).isSourceIsIllegal();
+    }
+
+    /**
+     * Renders a point-in-time Local Resources tooltip for the exact vanilla and
+     * Nexerelin plugins. Unknown subclasses return false and execute the
+     * preserved original method.
+     */
+    public static boolean renderLocalResourcesTooltipSnapshot(
+            LocalResourcesSubmarketPlugin plugin,
+            TooltipMakerAPI tooltip,
+            boolean expanded) {
+        PrepatcherConfig c = config;
+        if (c == null || !c.localResourcesTooltipSnapshot
+                || plugin == null || tooltip == null) {
+            return false;
+        }
+        String className = plugin.getClass().getName();
+        if (!"com.fs.starfarer.api.impl.campaign.submarkets.LocalResourcesSubmarketPlugin"
+                .equals(className)
+                && !"exerelin.campaign.submarkets.Nex_LocalResourcesSubmarketPlugin"
+                .equals(className)) {
+            return false;
+        }
+        MarketAPI market = plugin.getMarket();
+        if (market == null) return false;
+
+        List<CommodityOnMarketAPI> commodities =
+                new ArrayList<>(market.getAllCommodities());
+        List<Object[]> rows = new ArrayList<>(commodities.size());
+        for (CommodityOnMarketAPI commodity : commodities) {
+            rows.add(new Object[] {
+                    commodity,
+                    Integer.valueOf(plugin.getStockpileLimit(commodity))
+            });
+        }
+        rows.sort((left, right) -> Integer.compare(
+                ((Integer) right[1]).intValue(),
+                ((Integer) left[1]).intValue()));
+
+        float opad = 10f;
+        tooltip.beginGridFlipped(400f, 1, 70f, opad);
+        int shown = 0;
+        for (Object[] row : rows) {
+            CommodityOnMarketAPI commodity = (CommodityOnMarketAPI) row[0];
+            if (commodity.isNonEcon()) continue;
+            if (commodity.getCommodity().isMeta()) continue;
+            if (!plugin.shouldHaveCommodity(commodity)) continue;
+
+            int rawLimit = ((Integer) row[1]).intValue();
+            int displayLimit = Math.round(
+                    rawLimit * plugin.getStockpilingAddRateMult(commodity));
+            if (displayLimit <= 0) continue;
+            tooltip.addToGrid(0, shown++,
+                    commodity.getCommodity().getName(),
+                    Misc.getWithDGS(displayLimit));
+        }
+
+        tooltip.addPara("A portion of the resources produced by the colony will be made available here. "
+                        + "These resources can be extracted from the colony's economy for a cost equal to %s of their base value. "
+                        + "This cost will be deducted at the end of the month.", opad,
+                Misc.getHighlightColor(), "" + (int) Math.round(
+                        LocalResourcesSubmarketPlugin.STOCKPILE_COST_MULT * 100f) + "%");
+        tooltip.addPara("These resources can also be used to counter temporary shortages, for a "
+                        + "cost equal to %s of their base value. If additional resources are placed here, they "
+                        + "will be used as well, at no cost.", opad,
+                Misc.getHighlightColor(), "" + (int) Math.round(
+                        LocalResourcesSubmarketPlugin.STOCKPILE_SHORTAGE_COST_MULT * 100f) + "%");
+        tooltip.addSectionHeading("Stockpiled per month",
+                market.getFaction().getBaseUIColor(),
+                market.getFaction().getDarkUIColor(),
+                Alignment.MID, opad);
+        if (shown > 0) {
+            tooltip.addGrid(opad);
+            tooltip.addPara("Stockpiles are limited to %s the monthly rate.", opad,
+                    Misc.getHighlightColor(), ""
+                            + (int) LocalResourcesSubmarketPlugin.STOCKPILE_MAX_MONTHS
+                            + Strings.X);
+        } else {
+            tooltip.addPara("No stockpiling.", opad);
+        }
+        return true;
     }
 
     private static VarHandle commodityMarketDataHandle() {

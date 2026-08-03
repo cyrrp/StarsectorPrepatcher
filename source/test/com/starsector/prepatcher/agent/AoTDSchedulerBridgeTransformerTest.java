@@ -1,6 +1,7 @@
 package com.starsector.prepatcher.agent;
 
 import jdk.internal.org.objectweb.asm.ClassReader;
+import jdk.internal.org.objectweb.asm.ClassWriter;
 import jdk.internal.org.objectweb.asm.Opcodes;
 import jdk.internal.org.objectweb.asm.tree.AbstractInsnNode;
 import jdk.internal.org.objectweb.asm.tree.ClassNode;
@@ -56,6 +57,21 @@ public final class AoTDSchedulerBridgeTransformerTest {
         require(transformer.transform(modLoader,
                 AoTDSchedulerBridgeTransformer.TARGET, null, null, patched) == null,
                 "repeated transformation was not idempotent");
+        require(transformer.transform(modLoader,
+                AoTDSchedulerBridgeTransformer.TARGET, null, null,
+                withBridgeContract(original, 8, "AOTD_SCHEDULER_BRIDGE_V8")) == null,
+                "obsolete V8 bridge was transformed");
+        require("UNSUPPORTED_CONTRACT".equals(System.getProperty(
+                        "starsector.prepatcher.aotdBridgePatch")),
+                "obsolete bridge did not publish unsupported-contract status");
+        require(transformer.transform(modLoader,
+                AoTDSchedulerBridgeTransformer.TARGET, null, null,
+                withBridgeContract(original, 10, "AOTD_SCHEDULER_BRIDGE_V10")) == null,
+                "future V10 bridge was transformed");
+        require(transformer.transform(modLoader,
+                AoTDSchedulerBridgeTransformer.TARGET, null, null,
+                withoutMethod(original, "publishRuntimeEpoch", "(JJ)V")) == null,
+                "partial current bridge was transformed");
 
         Class<?> unpatchedBridge = new ByteMapLoader(classes, false).loadClass(
                 "data.kaysaar.aotd.tot.compat.SchedulerBridge");
@@ -68,19 +84,22 @@ public final class AoTDSchedulerBridgeTransformerTest {
         require(rejected, "unpatched bridge accepted the production profile");
 
         Path configPath = Files.createTempFile("spp-aotd-bridge-", ".properties");
-        Files.writeString(configPath, "patch.aotdCleanDeficitPath=true\n");
+        Files.writeString(configPath,
+                "patch.aotdCleanDeficitPath=true\n"
+                        + "patch.campaignCargoNoGlobalEconomyStep=true\n");
         com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge.configure(
                 PrepatcherConfig.load(configPath), Path.of("."));
         Map<String, byte[]> patchedClasses = new HashMap<>(classes);
         patchedClasses.put(BRIDGE_ENTRY, patched);
-        Class<?> patchedBridge = new ByteMapLoader(patchedClasses, true).loadClass(
+        ByteMapLoader patchedLoader = new ByteMapLoader(patchedClasses, true);
+        Class<?> patchedBridge = patchedLoader.loadClass(
                 "data.kaysaar.aotd.tot.compat.SchedulerBridge");
         Object active = patchedBridge.getMethod("initialize").invoke(null);
         require("ACTIVE".equals(String.valueOf(active)),
                 "patched bridge did not activate: " + active);
         long capabilities = ((Long) patchedBridge.getMethod(
                 "getNegotiatedCapabilities").invoke(null)).longValue();
-        require(capabilities == 511L, "unexpected negotiated capabilities: " + capabilities);
+        require(capabilities == 2047L, "unexpected negotiated capabilities: " + capabilities);
         patchedBridge.getMethod("requireProductionProfile").invoke(null);
         patchedBridge.getMethod("publishRuntimeEpoch", long.class, long.class)
                 .invoke(null, 11L, 23L);
@@ -234,22 +253,16 @@ public final class AoTDSchedulerBridgeTransformerTest {
         require(runtimeCommit, "runtime mutation commit call missing");
         require(localQueueCommit, "fork-local dirty queue commit call missing");
 
-        MethodNode consumeOpeningMarket = null;
         MethodNode publishEpoch = null;
         MethodNode runtimeCapabilities = null;
         MethodNode beforeGlobal = null;
         MethodNode afterGlobal = null;
         for (MethodNode method : node.methods) {
-            if ("consumeOpeningMarket".equals(method.name)
-                    && "()Ljava/lang/Object;".equals(method.desc)) consumeOpeningMarket = method;
             if ("publishRuntimeEpoch".equals(method.name) && "(JJ)V".equals(method.desc)) publishEpoch = method;
             if ("getRuntimeCapabilities".equals(method.name) && "()J".equals(method.desc)) runtimeCapabilities = method;
             if ("beforeGlobalBoundary".equals(method.name) && "(IZ)J".equals(method.desc)) beforeGlobal = method;
             if ("afterGlobalBoundary".equals(method.name) && "(JJ)V".equals(method.desc)) afterGlobal = method;
         }
-        require(consumeOpeningMarket != null, "consumeOpeningMarket method missing");
-        require(calls(consumeOpeningMarket, "consumeAoTDOpeningMarket"),
-                "runtime opening-market context call missing");
         require(publishEpoch != null, "publishRuntimeEpoch method missing");
         require(calls(publishEpoch, "publishAoTDRuntimeEpoch"),
                 "runtime epoch publication call missing");
@@ -269,6 +282,27 @@ public final class AoTDSchedulerBridgeTransformerTest {
                     && name.equals(call.name)) return true;
         }
         return false;
+    }
+
+    private static byte[] withBridgeContract(byte[] original, int schema, String marker) {
+        ClassNode node = new ClassNode();
+        new ClassReader(original).accept(node, 0);
+        for (FieldNode field : node.fields) {
+            if ("BRIDGE_SCHEMA".equals(field.name)) field.value = Integer.valueOf(schema);
+            if ("BRIDGE_MARKER".equals(field.name)) field.value = marker;
+        }
+        ClassWriter writer = new ClassWriter(0);
+        node.accept(writer);
+        return writer.toByteArray();
+    }
+
+    private static byte[] withoutMethod(byte[] original, String name, String desc) {
+        ClassNode node = new ClassNode();
+        new ClassReader(original).accept(node, 0);
+        node.methods.removeIf(method -> name.equals(method.name) && desc.equals(method.desc));
+        ClassWriter writer = new ClassWriter(0);
+        node.accept(writer);
+        return writer.toByteArray();
     }
 
     private static Map<String, byte[]> readClasses(Path jarPath) throws Exception {
@@ -307,6 +341,21 @@ public final class AoTDSchedulerBridgeTransformerTest {
             super(ClassLoader.getSystemClassLoader());
             this.classes = classes;
             this.patched = patched;
+        }
+
+        @Override
+        protected Class<?> loadClass(String name, boolean resolve)
+                throws ClassNotFoundException {
+            String entry = name.replace('.', '/') + ".class";
+            if (classes.containsKey(entry)) {
+                synchronized (getClassLoadingLock(name)) {
+                    Class<?> loaded = findLoadedClass(name);
+                    if (loaded == null) loaded = findClass(name);
+                    if (resolve) resolveClass(loaded);
+                    return loaded;
+                }
+            }
+            return super.loadClass(name, resolve);
         }
 
         @Override

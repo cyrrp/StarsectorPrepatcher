@@ -162,11 +162,13 @@ public final class StrategicJumpDestinationIndexRuntimeTest {
         LocationAPI other = location("other");
         LocationAPI missing = location("missing");
 
-        JumpFixture p0 = jumpPoint(current, other);
-        JumpFixture p1 = jumpPoint(current, fallback);
-        JumpFixture p2 = jumpPoint(current, target);
-        JumpFixture p3 = jumpPoint(current, fallback, target);
-        List<Object> live = new ArrayList<>(List.of(p0.point, p1.point, p2.point, p3.point));
+        JumpFixture unrelatedPoint = jumpPoint(current, other);
+        JumpFixture fallbackPoint = jumpPoint(current, fallback);
+        JumpFixture targetPoint = jumpPoint(current, target);
+        JumpFixture combinedPoint = jumpPoint(current, fallback, target);
+        List<Object> live = new ArrayList<>(List.of(
+                unrelatedPoint.point, fallbackPoint.point,
+                targetPoint.point, combinedPoint.point));
         ENTITIES.put(current, live);
 
         DESTINATION_LIST_READS.set(0L);
@@ -196,8 +198,9 @@ public final class StrategicJumpDestinationIndexRuntimeTest {
 
         List<?> candidates = lookup(current, target, fallback, config, generation);
         require(candidates.size() == 3, "target+fallback union size changed");
-        require(candidates.get(0) == p1.point && candidates.get(1) == p2.point
-                        && candidates.get(2) == p3.point,
+        require(candidates.get(0) == fallbackPoint.point
+                        && candidates.get(1) == targetPoint.point
+                        && candidates.get(2) == combinedPoint.point,
                 "candidate outer order or identity deduplication changed");
 
         List<?> negative = lookup(current, missing, current, config, generation);
@@ -205,57 +208,58 @@ public final class StrategicJumpDestinationIndexRuntimeTest {
         require(negative != live, "verified miss fell back to the full vanilla source");
 
         long buildsBeforeRefresh = diagnostics().buildsStarted();
-        p2.destinations.clear();
-        p2.destinations.add(destination(token(other)));
-        StarsectorPrepatcherStrategicJumpIndex.destinationsChanged(p2.point);
+        targetPoint.destinations.clear();
+        targetPoint.destinations.add(destination(token(other)));
+        StarsectorPrepatcherStrategicJumpIndex.destinationsChanged(targetPoint.point);
         require(lookup(current, target, fallback, config, generation).isEmpty(),
                 "point refresh exposed a partially updated index");
         awaitReady(current, clock, config, generation, 100);
         require(diagnostics().buildsStarted() == buildsBeforeRefresh,
                 "single-point destination change triggered a full location rebuild");
         candidates = lookup(current, target, fallback, config, generation);
-        require(candidates.size() == 2 && candidates.get(0) == p1.point
-                        && candidates.get(1) == p3.point,
+        require(candidates.size() == 2 && candidates.get(0) == fallbackPoint.point
+                        && candidates.get(1) == combinedPoint.point,
                 "point-level refresh did not update ordered candidates");
 
-        JumpPointAPI.JumpDestination retargeted = p1.destinations.get(0);
+        JumpPointAPI.JumpDestination retargeted = fallbackPoint.destinations.get(0);
         retargeted.setDestination(token(target));
         StarsectorPrepatcherStrategicJumpIndex.destinationRetargeted(retargeted);
         awaitReady(current, clock, config, generation, 100);
         candidates = lookup(current, target, fallback, config, generation);
-        require(candidates.size() == 2 && candidates.get(0) == p1.point
-                        && candidates.get(1) == p3.point,
+        require(candidates.size() == 2 && candidates.get(0) == fallbackPoint.point
+                        && candidates.get(1) == combinedPoint.point,
                 "JumpDestination.setDestination delta refresh changed ordering");
 
         JumpPointAPI.JumpDestination added = destination(token(target));
-        p0.destinations.add(added);
-        StarsectorPrepatcherStrategicJumpIndex.destinationAdded(p0.point, added);
+        unrelatedPoint.destinations.add(added);
+        StarsectorPrepatcherStrategicJumpIndex.destinationAdded(unrelatedPoint.point, added);
         awaitReady(current, clock, config, generation, 100);
         candidates = lookup(current, target, fallback, config, generation);
-        require(candidates.size() == 3 && candidates.get(0) == p0.point
-                        && candidates.get(1) == p1.point
-                        && candidates.get(2) == p3.point,
+        require(candidates.size() == 3 && candidates.get(0) == unrelatedPoint.point
+                        && candidates.get(1) == fallbackPoint.point
+                        && candidates.get(2) == combinedPoint.point,
                 "addDestination delta refresh changed source order");
 
-        JumpFixture p4 = jumpPoint(current, target);
+        JumpFixture appendedPoint = jumpPoint(current, target);
         long buildsBeforeSourceMutation = diagnostics().buildsStarted();
-        live.add(p4.point);
-        StarsectorPrepatcherStrategicJumpIndex.locationEntityChanged(current, p4.point);
+        live.add(appendedPoint.point);
+        StarsectorPrepatcherStrategicJumpIndex.locationEntityChanged(
+                current, appendedPoint.point);
         require(lookup(current, target, fallback, config, generation).isEmpty(),
                 "source mutation did not defer the replacement build");
         awaitReady(current, clock, config, generation, 300);
         require(diagnostics().buildsStarted() == buildsBeforeSourceMutation + 1,
                 "source mutation did not coalesce to one replacement build");
         candidates = lookup(current, target, fallback, config, generation);
-        require(candidates.get(candidates.size() - 1) == p4.point,
+        require(candidates.get(candidates.size() - 1) == appendedPoint.point,
                 "source-add rebuild did not preserve appended source order");
 
         // No event is fired here: the continuous budgeted audit must detect the
         // changed target identity and schedule one point refresh without a full scan.
-        JumpPointAPI.JumpDestination directEdit = p2.destinations.get(0);
+        JumpPointAPI.JumpDestination directEdit = targetPoint.destinations.get(0);
         directEdit.setDestination(token(target));
         long fullBuildsBeforeAudit = diagnostics().buildsStarted();
-        awaitCandidate(current, p2.point, target, fallback, clock, config,
+        awaitCandidate(current, targetPoint.point, target, fallback, clock, config,
                 generation, 500);
         require(diagnostics().buildsStarted() == fullBuildsBeforeAudit,
                 "direct destination edit audit triggered a full location rebuild");

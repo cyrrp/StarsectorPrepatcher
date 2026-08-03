@@ -29,7 +29,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 
-/** Runtime equivalence, invalidation and retention tests for economy hot-path patches P0-P2. */
+/** Runtime equivalence, invalidation and retention tests for economy hot-path patches. */
 public final class EconomyHotpathRuntimeTest {
     private static final Unsafe U = unsafe();
 
@@ -45,8 +45,8 @@ public final class EconomyHotpathRuntimeTest {
         verifyEconomyGroupIndexDoesNotCreateStaticObjectRoots();
 
         System.out.println("OK economy-hotpath-runtime"
-                + " p0-cold-peek p0-warm-equivalence p0-foreign-fallback"
-                + " p2-copy-order-epoch-audit-bounded-keys gc-no-static-root");
+                + " legality-cold-peek legality-warm-equivalence legality-foreign-fallback"
+                + " econ-group-copy-order-epoch-audit-bounded-keys gc-no-static-root");
     }
 
     private static void verifyLocalResourcesColdPredicate() throws Exception {
@@ -66,17 +66,17 @@ public final class EconomyHotpathRuntimeTest {
             boolean actual = StarsectorPrepatcherHooks.localResourcesShouldHaveCommodity(
                     illegalMarket, commodity);
             require(actual == expected[i],
-                    "P0 cold legality predicate mismatch at row " + i);
+                    "cold legality predicate mismatch at row " + i);
             require(commodityVar("commodityMarketData", CommodityMarketData.class)
                             .get(commodity) == null,
-                    "P0 cold path materialized CommodityMarketData");
+                    "cold legality path materialized CommodityMarketData");
         }
 
         MarketAPI legalMarket = market("legal", null, false, null, false, null);
         CommodityOnMarket empty = coldCommodity(false, 0, false, 0);
         require(StarsectorPrepatcherHooks.localResourcesShouldHaveCommodity(
                         legalMarket, empty),
-                "P0 changed the vanilla legal-market fast path");
+                "legality optimization changed the vanilla legal-market fast path");
     }
 
     private static void verifyLocalResourcesWarmAndForeignFallback() throws Exception {
@@ -93,11 +93,11 @@ public final class EconomyHotpathRuntimeTest {
         shareData.setSourceIsIllegal(false);
         require(StarsectorPrepatcherHooks.localResourcesShouldHaveCommodity(
                         market, commodity),
-                "P0 warm path changed sourceIsIllegal=false semantics");
+                "warm legality path changed sourceIsIllegal=false semantics");
         shareData.setSourceIsIllegal(true);
         require(!StarsectorPrepatcherHooks.localResourcesShouldHaveCommodity(
                         market, commodity),
-                "P0 warm path changed sourceIsIllegal=true semantics");
+                "warm legality path changed sourceIsIllegal=true semantics");
 
         int[] getterCalls = {0};
         CommodityOnMarketAPI foreign = (CommodityOnMarketAPI) Proxy.newProxyInstance(
@@ -113,9 +113,9 @@ public final class EconomyHotpathRuntimeTest {
         shareData.setSourceIsIllegal(false);
         require(StarsectorPrepatcherHooks.localResourcesShouldHaveCommodity(
                         market, foreign),
-                "P0 foreign CommodityOnMarketAPI fallback changed result");
+                "foreign CommodityOnMarketAPI fallback changed result");
         require(getterCalls[0] == 1,
-                "P0 foreign implementation did not retain the vanilla getter fallback");
+                "foreign implementation did not retain the vanilla getter fallback");
     }
 
     private static void verifyEconomyGroupIndexMutationAndAudit() throws Exception {
@@ -142,11 +142,11 @@ public final class EconomyHotpathRuntimeTest {
                 economy, state, "A");
         requireIdentityList(second, a1.market, a2.market);
         require(first != second,
-                "P2 returned a shared mutable cached list");
+                "econ-group index returned a shared mutable cached list");
 
         StarsectorPrepatcherHooks.markEconomyGroupStructureChanged(state);
         require(groupIndexKeyCount(state) == 0,
-                "P2 owner-local mutation barrier did not release indexed references immediately");
+                "owner-local econ-group mutation barrier did not release indexed references immediately");
         requireIdentityList(StarsectorPrepatcherHooks.borrowMarketsInGroupIndexed(
                 economy, state, "A"), a1.market, a2.market);
 
@@ -155,10 +155,10 @@ public final class EconomyHotpathRuntimeTest {
             List<?> unknown = StarsectorPrepatcherHooks.borrowMarketsInGroupIndexed(
                     economy, state, "missing-" + i);
             require(unknown != null && unknown.isEmpty(),
-                    "P2 unknown group did not match vanilla empty-list behavior");
+                    "unknown econ group did not match vanilla empty-list behavior");
         }
         require(groupIndexKeyCount(state) == groupsBeforeUnknownQueries,
-                "P2 retained arbitrary unknown group query strings");
+                "econ-group index retained arbitrary unknown group query strings");
 
         // Direct field/proxy mutation bypasses Market.setEconGroup; zero audit
         // interval must still detect it on the next request.
@@ -184,7 +184,7 @@ public final class EconomyHotpathRuntimeTest {
         StarsectorPrepatcherHooks.configure(config(false), Path.of("."));
         require(StarsectorPrepatcherHooks.borrowMarketsInGroupIndexed(
                         economy, state, "A") == null,
-                "P2 disabled configuration did not fail closed to vanilla");
+                "disabled econ-group index did not fail closed to vanilla");
         StarsectorPrepatcherHooks.configure(config(true), Path.of("."));
     }
 
@@ -207,7 +207,7 @@ public final class EconomyHotpathRuntimeTest {
         activateCampaign(economy, engineMarker, 99L);
         require(StarsectorPrepatcherHooks.borrowMarketsInGroupIndexed(
                         economy, state, "C") != null,
-                "P2 retention fixture did not build an index");
+                "econ-group retention fixture did not build an index");
 
         WeakReference<Object> engineRef = new WeakReference<>(engineMarker);
         WeakReference<ReachEconomy> economyRef = new WeakReference<>(economy);
@@ -394,13 +394,13 @@ public final class EconomyHotpathRuntimeTest {
     }
 
     private static void requireIdentityList(List<?> actual, Object... expected) {
-        require(actual != null, "P2 unexpectedly selected the vanilla fallback");
+        require(actual != null, "econ-group index unexpectedly selected the vanilla fallback");
         require(actual.size() == expected.length,
-                "P2 group size mismatch: expected=" + expected.length
+                "econ-group size mismatch: expected=" + expected.length
                         + " actual=" + actual.size());
         for (int i = 0; i < expected.length; i++) {
             require(actual.get(i) == expected[i],
-                    "P2 changed source order/identity at " + i);
+                    "econ-group index changed source order/identity at " + i);
         }
     }
 
@@ -426,7 +426,7 @@ public final class EconomyHotpathRuntimeTest {
             if (value != null) retained.append(i).append(':')
                     .append(value.getClass().getName()).append(' ');
         }
-        throw new AssertionError("P2 indexed graph remained strongly rooted: " + retained);
+        throw new AssertionError("econ-group indexed graph remained strongly rooted: " + retained);
     }
 
     private static VarHandle commodityVar(String name, Class<?> type) throws Exception {

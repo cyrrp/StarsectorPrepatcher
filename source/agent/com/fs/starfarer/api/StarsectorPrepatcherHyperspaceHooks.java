@@ -20,8 +20,11 @@ public final class StarsectorPrepatcherHyperspaceHooks {
     private static final LongAdder autoInternalReads=new LongAdder();
     private static final LongAdder listBorrows=new LongAdder(), removeCalls=new LongAdder(), linearRemoves=new LongAdder(), removedItems=new LongAdder();
     private static final LongAdder starfieldListDrops=new LongAdder();
+    private static final LongAdder starfieldLifecyclePoolResets=new LongAdder();
+    private static final LongAdder starfieldStaleLeaseDrops=new LongAdder();
     private static volatile int starfieldFreeListCount;
     private static volatile long starfieldRetainedCapacity;
+    private static volatile long starfieldPoolGeneration;
     private static WeakReference<Thread> statsThread=new WeakReference<>(null);
     private static long lastRandomApprox;
 
@@ -198,6 +201,8 @@ public final class StarsectorPrepatcherHyperspaceHooks {
         int highWater;
         boolean oversizedTouched;
         long oversizedLastUseNanos=Long.MIN_VALUE;
+        long leaseGeneration=Long.MIN_VALUE;
+        void beginLease(long generation){leaseGeneration=generation;}
         void observe(int size){
             if(size>highWater)highWater=size;
             PrepatcherConfig c=cfg;
@@ -211,10 +216,37 @@ public final class StarsectorPrepatcherHyperspaceHooks {
         @Override public boolean addAll(Collection<?> values){boolean changed=super.addAll(values);if(changed)observe(size());return changed;}
         @Override public boolean addAll(int index,Collection<?> values){boolean changed=super.addAll(index,values);if(changed)observe(size());return changed;}
     }
-    private static final class ListPool { final ArrayDeque<PooledList> free=new ArrayDeque<>(); }
-    private static final ThreadLocal<ListPool> LISTS=ThreadLocal.withInitial(ListPool::new);
+    private static final class ListPool {
+        long generation;
+        final ArrayDeque<PooledList> free=new ArrayDeque<>();
+        ListPool(long generation){this.generation=generation;}
+    }
+    private static final ThreadLocal<ListPool> LISTS=
+            ThreadLocal.withInitial(()->new ListPool(starfieldPoolGeneration));
+
+    /**
+     * Returns the current thread's pool for the active campaign generation.
+     * Lifecycle changes normally remove the campaign-thread value immediately;
+     * the generation check also lazily detaches any pool created on another
+     * thread without retaining that Thread in a process-lifetime registry.
+     */
+    private static ListPool currentListPool(){
+        long generation=starfieldPoolGeneration;
+        ListPool pool=LISTS.get();
+        if(pool.generation!=generation){
+            int dropped=pool.free.size();
+            pool.free.clear();
+            if(dropped>0)starfieldListDrops.add(dropped);
+            pool.generation=generation;
+            publishPoolGauges(pool);
+        }
+        return pool;
+    }
+
     @SuppressWarnings("rawtypes") public static ArrayList borrowArrayList(){
-        ListPool p=LISTS.get(); PooledList a=p.free.pollFirst(); if(a==null)a=new PooledList(); else a.clear(); listBorrows.increment(); return a;
+        ListPool p=currentListPool();PooledList a=p.free.pollFirst();
+        if(a==null)a=new PooledList();else a.clear();
+        a.beginLease(p.generation);listBorrows.increment();publishPoolGauges(p);return a;
     }
     @SuppressWarnings({"rawtypes","unchecked"}) public static boolean removeAllAndRelease(Collection receiver,Collection removals){
         boolean changed=false; removeCalls.increment();
@@ -229,14 +261,45 @@ public final class StarsectorPrepatcherHyperspaceHooks {
             return changed;
         } finally {
             if(removals instanceof PooledList a){
-                long now=nanoTime();a.finishLease(now);a.clear();ListPool p=LISTS.get();
-                if(p.free.size()<32)p.free.addFirst(a);else starfieldListDrops.increment();
+                long generation=starfieldPoolGeneration;
+                if(a.leaseGeneration!=generation){
+                    a.clear();a.oversizedTouched=false;a.leaseGeneration=Long.MIN_VALUE;
+                    starfieldStaleLeaseDrops.increment();starfieldListDrops.increment();
+                }else{
+                    long now=nanoTime();a.finishLease(now);a.clear();ListPool p=currentListPool();
+                    if(a.leaseGeneration!=p.generation){
+                        a.leaseGeneration=Long.MIN_VALUE;
+                        starfieldStaleLeaseDrops.increment();starfieldListDrops.increment();
+                    }else if(p.free.size()<32){
+                        a.leaseGeneration=Long.MIN_VALUE;p.free.addFirst(a);
+                    }else{
+                        a.leaseGeneration=Long.MIN_VALUE;starfieldListDrops.increment();
+                    }
+                    publishPoolGauges(p);
+                }
             }
         }
     }
 
+    /**
+     * Detaches retained backing arrays at every campaign lifecycle boundary.
+     * Borrowed lists carry the old generation and are discarded when returned,
+     * preventing an in-flight old lease from repopulating the new campaign pool.
+     */
+    static void campaignLifecycleReset(long generation){
+        starfieldPoolGeneration=generation;
+        ListPool pool=LISTS.get();
+        int dropped=pool.free.size();
+        pool.free.clear();
+        pool.generation=generation;
+        if(dropped>0)starfieldListDrops.add(dropped);
+        starfieldLifecyclePoolResets.increment();
+        publishPoolGauges(pool);
+        LISTS.remove();
+    }
+
     static void runPoolMaintenance(long now,boolean forced){
-        PrepatcherConfig c=cfg;if(c==null)return;ListPool p=LISTS.get();
+        PrepatcherConfig c=cfg;if(c==null)return;ListPool p=currentListPool();
         long grace=Math.max(0L,(long)c.starfieldPoolOversizedGraceMs*1_000_000L);
         for(Iterator<PooledList> it=p.free.iterator();it.hasNext();){
             PooledList list=it.next();
@@ -290,7 +353,9 @@ public final class StarsectorPrepatcherHyperspaceHooks {
                 +" removedItems="+removedItems.sum()
                 +" starfieldFreeListCount="+starfieldFreeListCount
                 +" starfieldRetainedCapacity="+starfieldRetainedCapacity
-                +" starfieldListDrops="+starfieldListDrops.sum();
+                +" starfieldListDrops="+starfieldListDrops.sum()
+                +" starfieldLifecyclePoolResets="+starfieldLifecyclePoolResets.sum()
+                +" starfieldStaleLeaseDrops="+starfieldStaleLeaseDrops.sum();
     }
     private static void statsLoop(){
         Thread current=Thread.currentThread();

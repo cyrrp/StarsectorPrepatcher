@@ -92,10 +92,10 @@ fixture будущего override; name-only allowlist недостаточен.
 ## Owned AoTD market-share subclass
 
 `AoTDCommodityMarketData` является намеренно поддерживаемым subclass vanilla
-`CommodityMarketData`. P0/P1 не полагаются только на имя или версию форка: loader-local
+`CommodityMarketData`. Market-share patches не полагаются только на имя или версию форка: loader-local
 `StarsectorPrepatcherMarketShareRuntime` допускает его после одноразовой проверки, что весь
 critical market-share surface по-прежнему объявлен vanilla-классом. Изменение форка, добавляющее
-любой из этих overrides, локально возвращает raw behavior; P0.5 в унаследованном
+любой из этих overrides, локально возвращает raw behavior; no-op write suppression в унаследованном
 `getMarketShareData()` остаётся независимым. Решение хранится в `ClassValue`, поэтому child
 classloader не становится strong root.
 
@@ -108,20 +108,139 @@ classloader не становится strong root.
 | `AoTDCommodityOnMarket` + `AoTDAvailableStat` + `AoTDSupplyDemandData` | `patch.localResourcesNoColdMarketData` читает только уже опубликованное состояние и применяет тот же calculation script; lazy materialization не вызывается. Изменённый контракт локально возвращается к raw getter. |
 | `AoTDCommodityMarketData` | `patch.marketShareLinearAggregation` наследует линейный путь, пока пять critical methods остаются vanilla-owned. |
 | `AoTDReachEconomy` | `patch.economyGroupIndex` наследует wrapper только при vanilla ownership четырёх critical read/mutation methods. Exact supplied JAR отдельно проверяется на one-super-call `addMarket`; future critical read override fail-closed, а changed `addMarket` без `super` восстанавливается через source identity/size и bounded ordered audit вместо обещания немедленной epoch-инвалидации. |
-| `AoTDEconomy` + `AoTDReachEconomy` single-market UI path | Exact `CampaignEngine.reportPlayerOpenedMarket` wrapper передаёт рынок до vanilla `Economy.nextStep()` и очищает context в `finally`. Owner-local transient coordinator выполняет single-market main/update/immigration/snapshot pipeline и coalesces Cargo step только при совпадении campaign/economy/registry/global-dirty/market-dirty revisions. Real-JAR gate запрещает all-market `getMarkets()`, global commodity construction и global trade cut в этом методе. |
-| `AoTDEconomy` | `Economy.advance` не переопределён, поэтому объединённый economy plan применяется к vanilla owner один раз. Bulk initial population покрывается source identity/size validation и ordered audit P2. |
+| `AoTDEconomy` + `AoTDReachEconomy` standard/UI paths | Standard `nextStep(EconWorkParams)`, `doubleStep()`, `tripleStep()` and Reach `nextStep(EconWorkParams)` are verified as unconditional all-market paths. Exact UI call-site guards may instead invoke the one public final fork dispatcher for market-open, Cargo or market-mutation intents. Ownership is proven against the loader-local callbacks registered by the transformed Scheduler Bridge, so the supported child mod loader is accepted while an equal-name class from another loader is rejected. The real-JAR gate verifies both sides of this boundary; a future override/revision is denied dispatch and keeps the original virtual global call. |
+| `AoTDEconomy` | `Economy.advance` не переопределён, поэтому объединённый economy plan применяется к vanilla owner один раз. Bulk initial population покрывается source identity/size validation и ordered audit. |
 | `AoTDAvailableStat.advance(float)` | Exact fork method делегирует один раз в `MutableStatWithTempMods.advance`; temp-mod scheduler сохраняет inherited optimized path. |
 | `AoTDCommodityOnMarket.reapplyEventMod()` | Exact no-op; `commodityEventModDirtyCache` намеренно не нужен этому override, остальные commodity temporal surfaces наследуются/проверяются отдельно. |
 | `AoTDFarming`, `AoTDToolboxPopAndInfra` | Наследуют поддержанные `BaseIndustry` surfaces; dormant/no-op eligibility остаётся dynamic и отклоняет custom override. |
 | `AoTDConstructionSite` | Completion paths уже имеют source-level bridge boundaries. Exact fork-owned `setAssignedWonder(String)` дополнительно трансформируется в `before/afterMarketMutation` `try/finally`, чтобы `building=true` немедленно менял scheduler construction policy. Changed future body remains raw. |
+| Command/Colonies `F`, commodity-detail V2/legacy, `MarketCMD.showDefenses` | The read-only UI patch removes only the exact vanilla UI-triggered `Global.getSector → getEconomy → tripleStep` chain. Full-JAR inventory confirms no AoTD descendant/override; a future descendant fails the compatibility gate pending review. |
 | Остальные target families | В fork JAR нет descendants/overrides для map, Intel, core-worlds, strategic jump, hyperspace, loading/save, ship/particle и presentation targets; они остаются vanilla-owned. |
 
 Compatibility accessors используют `ClassValue`; нет process-lifetime strong map по optional
 `Class`, `Method`, `ClassLoader` или mod object. Economy-group arrays находятся только в transient
 owner-local field `ReachEconomy`; construction wrapper не добавляет instance state, listener или
-cache. UI context хранит strong `MarketAPI` только в campaign-thread `ThreadLocal` между входом в
-`reportPlayerOpenedMarket()` и первым потреблением; ссылка зануляется при consume и повторно в
-`finally`. Coordinator форка сохраняет только primitive revisions, identity hash и market ID.
+cache. Dispatcher lookup is call-local and is not stored in a static `Method`/`Class` cache. Fork
+loader identity is read from the already-negotiated loader-local callbacks; runtime state adds no
+strong `ClassLoader` field or loader map.
+Market-open, Cargo and trade guards retain no fork context. The remaining UI mutation context is an
+agent-internal weak one-shot between an exact vanilla setter/industry wrapper and its shared helper;
+it is cleared on consume, mismatch and epoch transition. A separate same-thread poison is monotonic
+within the current setter batch: any exceptional preparation/snapshot/publication path forces the
+next helper guard to preserve the original global step. Coordinator форка сохраняет только primitive
+revisions, identity hash и market ID.
+
+## Vanilla live-market localization
+
+`patch.vanillaMarketOpenLocalization` is limited to the exact stock `Economy`, `ReachEconomy`,
+`Market` and Cargo-panel bytecode shipped with Starsector 0.98a-RC8. It does not activate for
+subclasses or replacement economies. The initial market-open step is replaced only after both
+final-class semantic contracts are READY and the market is an identity member of that economy.
+The immediate Cargo `tripleStep()` is skipped only when a same-thread weak identity token and a
+post-refresh local fingerprint still match; any intervening mutation consumes the token and keeps
+the original call. The local path deliberately retains the last committed global
+`CommodityMarketData` and updates only the opened market.
+
+
+## UI market-mutation refresh
+
+Prepatcher 0.17.0 and Scheduler Fork `1.0.14-spp7` use bridge schema V9. The required production
+mask `0x3ff` includes `UI_ECONOMY_DISPATCH`; the optional `UI_MARKET_MUTATION_REFRESH` bit extends
+the complete profile to `0x7ff`. The explicit dispatcher receives a classified action, detail value
+and, when needed, an immutable sorted `String[]` of affected commodity IDs.
+
+Compatibility is intentionally current-only. The transformer accepts only the exact V9 bridge
+shape; registration then requires the exact `1.0.14-spp7` identifier, the exact declared mask
+`0x7ff` and both required callbacks. Any old, future or partially declared contract is logged and
+rejected as a whole with negotiated mask `0`, rather than receiving a reduced legacy profile.
+
+The required `UI_ECONOMY_DISPATCH` bit describes the current bridge contract and is therefore
+independent of optional optimization switches. Every shipped profile, including safe, negotiates
+the required mask `0x3ff` for an exact current fork. Only
+`patch.uiMarketMutationRefresh` controls optional bit 10, producing `0x7ff` when enabled.
+
+The vanilla path is enabled only when the final stock `CommodityMarketData(String,String)` bytecode
+matches its constructor, market enumeration, max-supply/demand update, market-data publication and
+market-share adjustment contract. A targeted commit still scans all markets for each affected ID; it
+does not claim that global market-share data can be rebuilt from one market alone.
+
+Active exact mutation paths are trade confirmation, free-port changes and five vanilla industry-dialog
+branches: start upgrading, downgrade, two remove/shut-down calls and cancel upgrade. Trade IDs come
+only from immutable bought/sold cargo in `PlayerMarketTransaction`; free port and industry mutations
+use a before/after local commodity vector. Industry branches with no commodity diff use the local
+industry/state refresh and do not rebuild global commodity records. Administrator assignment,
+construction queue, custom industry providers and unknown shared-helper callers retain their original
+global steps. An older/unreviewed fork, missing optional capability, structural drift, replacement
+economy, stale epoch or exceptional path also retains the original step.
+
+The trade transformation surface is the ordered `campaign.ui.class.confirmTransaction()V` region
+from `TradeWrapper.reportPlayerMarketTransaction(...)` through the following
+`EconomyAPI.doubleStep()V` and price-multiplier update. The transformer inserts one boolean guard and
+preserves that exact original virtual invocation as the only fallback owner. The guard itself never
+calls `doubleStep()`: it returns `true` only after a completed exact-vanilla refresh or accepted owned-
+AoTD dispatch, and returns `false` after any failed transaction/cargo/stack/proof read. The same class
+also contains the independent detached-Cargo constructor surface. Explicit application order is
+`TradeMarketMutationTransformer → AoTDDetachedCargoContextTransformer`; the later transformer reads
+the current trade-transformed bytes, and combined/idempotent postconditions are verified.
+
+`patch.uiMarketMutationRefresh` owns this complete behavior rather than exposing separate development
+stages. The exact stock `marketinfo.s.actionPerformed(Object,Object)` bytecode is
+required to contain the proven setter inventory and one shared `recreateWithEconUpdate()` call.
+Wrappers attempt to deliver pending scheduler debt before invoking the original setter or industry
+mutator and publish a one-shot agent-internal context only after that call returns normally. The
+original mutation is outside instrumentation `catch` regions, executes exactly once, and propagates
+its own exception unchanged. Preparation, before/after snapshots and context publication catch
+`Throwable`; failure poisons the setter batch even when the market itself could not be read. It holds
+its market weakly; consume additionally requires the same thread, market identity, campaign epoch and
+economy epoch. The shared helper consumes the context or poison before deciding between the vanilla
+local path, exact spp7 dispatch and the preserved virtual global call; the fork's standard step
+methods never inspect it.
+
+The following policy scopes are local because they do not require a global commodity rebuild:
+
+- immigration closed/open when the branch does not actually change free-port state;
+- immigration incentives;
+- use-stockpiles-for-shortages policy.
+
+A free-port change requires the affected-commodity contract; if that contract is unavailable its
+exact wrapper records an unsafe/global scope and executes the original `tripleStep()`. Admin
+assignment, stabilization, pure construction
+queue actions and unknown callers of the shared helper have no eligible context and also remain
+global. Any missing/duplicate call, altered
+branch shape, exception, cross-thread consume, epoch change or unsupported economy preserves the
+original global call.
+
+For AoTD spp7, the shared helper passes packed reason/scope and affected IDs only through
+`dispatchPrepatcherUiEconomyStep`. The dispatcher validates the action and optional capability,
+converts supported scopes into existing `MarketRegistry` dirty masks and runs the immediate
+single-market refresh. `GLOBAL_TOPOLOGY`, a failed debt barrier, an unsupported action, missing
+capability, `false` or an exception leaves the original virtual invocation active. All optimization
+reads used to prove market/economy identity, membership, affected IDs and fork capability are inside
+the fail-open boundary; diagnostic counters and logging are best-effort and cannot cancel fallback.
+Because all four standard fork step methods are global, this fallback cannot accidentally become a
+local refresh.
+AoTD `doubleStep()`/`tripleStep()` retain the original two/three global-step multiplicity.
+No second scheduler or per-commodity revision vector is introduced.
+
+The three switches `patch.commandTabNoGlobalEconomyStep`,
+`patch.commodityDetailNoGlobalEconomyStep`, and `patch.marketDefensesNoGlobalEconomyStep` are pure
+inline removals. They introduce no typed runtime dependency, so only the target class loader and the
+exact local bytecode contract matter. Every target must contain one class-local call and an exact
+receiver chain; target-specific control-flow anchors are checked before modification.
+
+Commodity V2 and legacy classes are independent targets. Vanilla `MarketCMD.showDefenses()` and
+optional Nexerelin `Nex_MarketCMD.showDefenses()` are also independent class surfaces. Each requires
+proof that interaction/station state is captured before its owner-local call and that the null-guard
+branch rejoins immediately after it. Any descriptor, invocation kind, branch, call count, ownership
+marker or postcondition mismatch produces `SKIPPED_STRUCTURAL` and preserves that class's original
+behavior. Safe profile disables the feature group; other shipped profiles enable it.
+
+## Read-only UI-only global-step removal
+
+The three switches above are pure inline removals: they retain no market, commodity, game object or
+mod classloader. The real-fork inventory gate proves that the maintained spp7 JAR has no descendant
+or override on the vanilla-owned surfaces. The reviewed Nexerelin surface is transformed directly
+without linking its child loader to a runtime helper.
 
 ## Статусы
 
@@ -460,9 +579,9 @@ Telemetry schema `0.7.1`: старый `pooledRandom` называется `pool
 нулевой activity или structural skip.
 
 Structural proof показывает однозначность site, linkage, no-escape и verifier postconditions, но
-не доказывает величину ускорения. Runtime и performance evidence создаётся в `.build/reports/`, а
-проверенные выводы сохраняются в отчёте выпуска, например
-[`releases/0.13.0.md`](releases/0.13.0.md).
+не доказывает величину ускорения. Runtime и performance evidence создаётся в `.build/reports/`;
+проверенные выводы и остаточные риски фиксируются в отчёте соответствующего выпуска, например
+[`releases/0.17.0.md`](releases/0.17.0.md).
 
 Если несколько javaagent меняют одни и те же классы, располагайте Prepatcher после них:
 transformer увидит bytes, возвращённые ранее зарегистрированными агентами. Installer обеспечивает
@@ -491,15 +610,31 @@ inventory. Structural pass проверяет их до анализа и пос
 
 ## AoTD Scheduler Fork
 
-Scheduler Fork release `1.0.14-spp2` requires Prepatcher `0.13.0`, an active compatible javaagent
+Scheduler Fork release `1.0.14-spp7` requires Prepatcher `0.17.0`, an active compatible javaagent
 and the original game `starfarer.api.jar`. The fork is required for optimal performance when
 AoTD Theory of Toolbox is installed; it is not a dependency for configurations without AoTD.
-A partial capability profile is intentionally rejected. The legacy AoTD core-JAR replacement is
+
+The spp7 contract uses bridge schema V9. Its required production mask remains `0x3ff`, including
+the explicit UI economy dispatcher; the atomic UI market-mutation refresh capability extends the
+complete negotiation to `0x7ff`. Exact market-open, detached Cargo/LOOT and mutation call sites send
+classified intents directly to the dispatcher. Their original virtual call remains the fallback and
+is globally scoped by construction. Market-open/Cargo/trade guards publish no fork context. Fork
+ownership is tied to the exact loader that registered both Scheduler Bridge callbacks, not to
+the parent loader that owns `StarsectorPrepatcherRuntimeBridge`. This matches Starsector's
+parent-runtime/child-mod topology and rejects duplicate or future loaders.
+Non-trade mutation reason/scope/IDs live only in the one-shot Prepatcher setter/helper handoff.
+Missing capability, a
+changed call site, failed barrier, `GLOBAL_TOPOLOGY`, dispatcher rejection/error or replacement
+economy preserves the original global step. Local Resources tooltip snapshots
+are call-local and do not retain markets, commodities or mod classloaders. A partial required
+production capability profile is intentionally rejected. The legacy AoTD core-JAR replacement is
 not compatible with this profile.
 
 The owned fork is validated from its real `AoTDToolboxTheory.jar`. Its scheduler bridge and the
 exact `AoTDConstructionSite.setAssignedWonder(String)` construction-start surface are transformed
-directly. Market-share and economy-group optimizations are inherited only while their audited
+directly. The validation also proves the public final dispatcher signature and implementation,
+unconditional global semantics of all standard AoTD/Reach step methods, absence of legacy UI-context
+consumers from those methods, and a future-override negative fixture. Market-share and economy-group optimizations are inherited only while their audited
 vanilla-owned read surfaces remain compatible. The exact supplied `AoTDReachEconomy.addMarket`
 delegation is also checked by the real-JAR gate; if a future body bypasses `super`, source
 identity/size validation and the bounded ordered audit recover the index, but immediate mutation-
@@ -521,5 +656,21 @@ classfile. Оба caller-флага включены по умолчанию; о
 `patch.punitivePlayerShareLocalCache` и vanilla manager. Nexerelin не является обязательной зависимостью: имя optional target хранится как строка,
 а helper внедряется в mod-owned class без system-loader registry или reflection cache.
 Поддерживаемая приложенная версия содержит один per-faction call и два player-share call sites.
-Другая версия с изменённым data flow получает локальный `SKIPPED_STRUCTURAL`; core P0/P0.5 и
-vanilla P1 продолжают применяться независимо.
+Другая версия с изменённым data flow получает локальный `SKIPPED_STRUCTURAL`; core aggregation,
+no-op write suppression и vanilla player-share cache продолжают применяться независимо.
+
+## Optional Nexerelin market-defenses target
+
+`patch.marketDefensesNoGlobalEconomyStep` also recognizes the exact
+`com.fs.starfarer.api.impl.campaign.rulecmd.salvage.Nex_MarketCMD.showDefenses(Z)V` shipped by
+Nexerelin 0.12.1d. This is a separate transformation surface from vanilla `MarketCMD`: the matcher
+requires the exact superclass, the one class-local `EconomyAPI.tripleStep()` receiver chain, the
+market-null branch/join, and owner-local interaction/station/state calls before the step. Only the
+three stack-neutral call instructions are removed; Nex invasion, responder and dialog code remains
+unchanged.
+
+The agent sees this class in Nexerelin's child mod loader. The emitted class adds only a constant
+ownership marker and no bridge call, static loader field or registry, so no parent/child linkage is
+required and no mod loader is retained. The real `ExerelinCore.jar` is tested directly. A bootstrap
+or unrelated-loader copy, changed superclass, changed control flow or future method shape is rejected
+locally; the JAR on disk is never rewritten.

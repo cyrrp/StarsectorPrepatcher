@@ -18,14 +18,14 @@ find "$MOD_ROOT/source/bootstrap" -name '*.java' -print0 | xargs -0 javac -encod
 printf '%s\n' \
   'Manifest-Version: 1.0' \
   'Implementation-Title: StarsectorPrepatcher Agent' \
-  'Implementation-Version: 0.13.0' \
+  'Implementation-Version: 0.17.0' \
   'Premain-Class: com.starsector.prepatcher.agent.PrepatcherAgent' \
   'Can-Redefine-Classes: false' \
   'Can-Retransform-Classes: false' '' > "$BUILD/agent.mf"
 printf '%s\n' \
   'Manifest-Version: 1.0' \
   'Implementation-Title: StarsectorPrepatcher Bootstrap' \
-  'Implementation-Version: 0.13.0' '' > "$BUILD/bootstrap.mf"
+  'Implementation-Version: 0.17.0' '' > "$BUILD/bootstrap.mf"
 jar cfm "$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" "$BUILD/agent.mf" -C "$BUILD/agent-classes" .
 jar cfm "$MOD_ROOT/jars/StarsectorPrepatcherBootstrap.jar" "$BUILD/bootstrap.mf" -C "$BUILD/bootstrap-classes" .
 
@@ -74,7 +74,7 @@ fi
       printf '%s\n' "$top_level"
     fi
   done
-  find agent docs jars media profiles source -type f -print
+  find agent baseline docs jars media profiles source -type f -print
   printf '%s\n' 'logs/README.txt'
 ) | sed 's#^\./##' | LC_ALL=C sort -u > "$CHECKSUM_INPUTS"
 

@@ -27,20 +27,25 @@ public final class AoTDCleanDeficitCompatibilityTest {
 
     StarsectorPrepatcherRuntimeBridge.configure(config,Path.of("."));
     long caps=StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract(
-      "aotd_theory_of_toolbox",1,"clean-deficit-test",0xffL,
+      "aotd_theory_of_toolbox",
+      StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
+      StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES,
       new Consumer<Object>() { public void accept(Object event) {} },
       new BiFunction<Object,Object,Object>() {
         public Object apply(Object industry,Object ids) {
           Pair<String,Integer> p=new Pair<>(); p.one="aotd"; p.two=39; return p;
         }
       });
-    require(caps==0xffL,"production capabilities not negotiated: 0x"+Long.toHexString(caps));
+    require((caps & StarsectorPrepatcherRuntimeBridge.AOTD_REQUIRED_CAPABILITIES)
+        == StarsectorPrepatcherRuntimeBridge.AOTD_REQUIRED_CAPABILITIES,
+      "production capabilities not negotiated: 0x"+Long.toHexString(caps));
     Object aotd=type.getMethod("getMaxDeficit",String[].class)
       .invoke(instance,(Object)new String[]{"fuel"});
     require(((Pair<?,?>)aotd).two.equals(39),"resolver path not active");
     require(type.getDeclaredMethod("spp$baseIndustryRawGetMaxDeficit",String[].class)!=null,
       "preserved raw method missing");
-    System.out.println("OK clean deficit wrapper raw=7 resolver=39 caps=0xff bytes="+transformed.length);
+    System.out.println("OK clean deficit wrapper raw=7 resolver=39 caps=0x"
+      +Long.toHexString(caps)+" bytes="+transformed.length);
   }
   private static void require(boolean c,String m){if(!c)throw new AssertionError(m);}
   private static final class Loader extends ClassLoader {

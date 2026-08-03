@@ -28,7 +28,7 @@ public final class StarsectorPrepatcherMarketShareRuntime {
 
     private StarsectorPrepatcherMarketShareRuntime() {}
 
-    /** Hot-path entry used by the injected P0 and P1 bodies. */
+    /** Hot-path entry used by the injected aggregation and put-elision bodies. */
     public static boolean isEligible(Object value) {
         return value != null && ELIGIBLE.get(value.getClass()).booleanValue();
     }
@@ -44,8 +44,8 @@ public final class StarsectorPrepatcherMarketShareRuntime {
         if (!CommodityMarketData.class.isAssignableFrom(type)) return false;
 
         try {
-            // P0 replaces repeated virtual getMarketSharePercent() calls with
-            // one getMarkets()/getExportMarketSharePercent() pass. P1 reuses
+            // Linear aggregation replaces repeated virtual getMarketSharePercent()
+            // calls with one getMarkets()/getExportMarketSharePercent() pass. Put elision reuses
             // the per-faction result for the single-faction player query. Any
             // fork override of these methods, including the indirect data
             // accessor, therefore makes the inherited optimization unsafe.

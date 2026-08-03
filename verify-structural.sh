@@ -107,6 +107,71 @@ java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
   "$CORE/starfarer_obf.jar" "$VERIFICATION_CONFIG" \
   2>&1 | tee "$REPORT_DIR/aotd-market-open-context.txt"
 
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.VanillaDetachedCargoEconomyContractTransformerTest \
+  "$CORE/starfarer_obf.jar" \
+  2>&1 | tee "$REPORT_DIR/vanilla-detached-cargo-economy-contract.txt"
+
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.VanillaMarketOpenLocalizationContractTransformerTest \
+  "$CORE/starfarer_obf.jar" \
+  2>&1 | tee "$REPORT_DIR/vanilla-market-open-localization-contract.txt"
+
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.CommodityMarketDataContractTransformerTest \
+  "$CORE/starfarer_obf.jar" \
+  2>&1 | tee "$REPORT_DIR/commodity-market-data-contract.txt"
+
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.MarketOverviewMutationTransformerTest \
+  "$CORE/starfarer_obf.jar" \
+  2>&1 | tee "$REPORT_DIR/market-overview-mutation-transformer.txt"
+
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.TradeMarketMutationTransformerTest \
+  "$CORE/starfarer_obf.jar" \
+  2>&1 | tee "$REPORT_DIR/trade-market-mutation-transformer.txt"
+
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.IndustryMarketMutationTransformerTest \
+  "$CORE/starfarer_obf.jar" \
+  2>&1 | tee "$REPORT_DIR/industry-market-mutation-transformer.txt"
+
+java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
+  com.fs.starfarer.api.UiMarketMutationContextRuntimeTest \
+  2>&1 | tee "$REPORT_DIR/market-mutation-context-runtime.txt"
+
+java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
+  com.fs.starfarer.api.UiMarketMutationFailOpenRuntimeTest \
+  2>&1 | tee "$REPORT_DIR/market-mutation-fail-open-runtime.txt"
+
+java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
+  com.fs.starfarer.api.TradeMutationPreparationRuntimeTest \
+  2>&1 | tee "$REPORT_DIR/trade-mutation-preparation-runtime.txt"
+
+java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
+  com.fs.starfarer.api.IndustryMutationRuntimeTest \
+  2>&1 | tee "$REPORT_DIR/industry-mutation-runtime.txt"
+
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.AoTDDetachedCargoContextTransformerTest \
+  "$CORE/starfarer_obf.jar" \
+  2>&1 | tee "$REPORT_DIR/aotd-detached-cargo-context.txt"
+
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.UiEconomyScenarioContractTest \
+  "$CORE/starfarer_obf.jar" "$CORE/starfarer.api.jar" \
+  2>&1 | tee "$REPORT_DIR/ui-economy-scenario-contract.txt"
+
+READ_ONLY_UI_ARGS=("$CORE/starfarer_obf.jar" "$CORE/starfarer.api.jar")
+if [[ -f "$NEX_JAR" ]]; then
+  READ_ONLY_UI_ARGS+=("$NEX_JAR")
+fi
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.ReadOnlyUiEconomyStepTransformerTest \
+  "${READ_ONLY_UI_ARGS[@]}" \
+  2>&1 | tee "$REPORT_DIR/read-only-ui-economy-step.txt"
+
 if [[ -f "$AOTD_JAR" ]]; then
   AOTD_MOD_ROOT="$(cd "$(dirname "$AOTD_JAR")/.." && pwd)"
   java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
@@ -193,8 +258,19 @@ RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$CORE/st
   java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.AoTDDomainRevisionRuntimeTest
   echo '== AoTDDeliveryListenerFailStopTest =='
   java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.AoTDDeliveryListenerFailStopTest
-  echo '== AoTDOpeningMarketContextRuntimeTest =='
-  java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.AoTDOpeningMarketContextRuntimeTest
+  echo '== AoTDCurrentContractNegotiationTest =='
+  java -cp "$RUNTIME_CP" \
+    com.starsector.prepatcher.runtime.AoTDCurrentContractNegotiationTest
+  echo '== AoTDExplicitUiEconomyDispatchRuntimeTest =='
+  java -cp "$RUNTIME_CP" \
+    com.starsector.prepatcher.runtime.AoTDExplicitUiEconomyDispatchRuntimeTest
+  echo '== AoTDScriptLoaderUiDispatchRuntimeTest =='
+  java -cp "$RUNTIME_CP" \
+    com.starsector.prepatcher.runtime.AoTDScriptLoaderUiDispatchRuntimeTest
+  echo '== AoTDDetachedCargoContextRuntimeTest =='
+  java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.AoTDDetachedCargoContextRuntimeTest
+  echo '== ConditionOnlyMarketOpenRuntimeTest =='
+  java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.ConditionOnlyMarketOpenRuntimeTest
   echo '== EconomyHotpathRuntimeTest =='
   java -cp "$RUNTIME_CP" com.fs.starfarer.api.EconomyHotpathRuntimeTest
   echo '== AoTDSemanticBaselineTest =='
@@ -213,11 +289,36 @@ RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$CORE/st
     com.starsector.prepatcher.agent.FastForwardPresentationLoadedTargetPolicyTest
 } 2>&1 | tee "$REPORT_DIR/fast-forward-presentation-runtime.txt"
 
+java "${EXPORTS[@]}" -cp "$RUNTIME_CP" \
+  com.starsector.prepatcher.agent.StartupAuditCoverageTest \
+  2>&1 | tee "$REPORT_DIR/startup-audit-coverage.txt"
+
+UI_ECONOMY_AGENT_ARGS=()
+if [[ -f "$NEX_JAR" ]]; then
+  UI_ECONOMY_AGENT_ARGS+=("$NEX_JAR")
+fi
 java \
   "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MOD_ROOT/profiles/aggressive.properties" \
   -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.runtime.CoreWorldsActualAgentSmokeTest \
   2>&1 | tee "$REPORT_DIR/core-worlds-actual-agent.txt"
+
+java \
+  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MOD_ROOT/profiles/aggressive.properties" \
+  -cp "$RUNTIME_CP" \
+  com.starsector.prepatcher.runtime.VanillaDetachedCargoContractActualAgentSmokeTest \
+  2>&1 | tee "$REPORT_DIR/vanilla-detached-cargo-actual-agent.txt"
+
+java -cp "$RUNTIME_CP" \
+  com.fs.starfarer.api.VanillaMarketOpenCoalescingRuntimeTest \
+  2>&1 | tee "$REPORT_DIR/vanilla-market-open-coalescing-runtime.txt"
+
+java \
+  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MOD_ROOT/profiles/aggressive.properties" \
+  -cp "$RUNTIME_CP" \
+  com.starsector.prepatcher.runtime.UiEconomyActualAgentSmokeTest \
+  "${UI_ECONOMY_AGENT_ARGS[@]}" \
+  2>&1 | tee "$REPORT_DIR/ui-economy-actual-agent.txt"
 
 java -noverify \
   "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MOD_ROOT/profiles/aggressive.properties" \
@@ -239,7 +340,8 @@ java \
   com.starsector.prepatcher.runtime.MarketStepReplayActualAgentSmokeTest \
   2>&1 | tee "$REPORT_DIR/market-step-replay-actual-agent-smoke.txt"
 
-# Exercise P0, P0.5 and P1 through the real javaagent with all unrelated
+# Exercise the read-only UI, condition-only opening and localization paths through
+# the real javaagent with all unrelated
 # bytecode patches disabled. Nexerelin remains an optional target.
 MARKET_SHARE_AGENT_CONFIG="$BUILD/market-share-agent-smoke.properties"
 sed -E \
@@ -270,7 +372,7 @@ java -Xverify:all \
   "${MARKET_SHARE_AGENT_ARGS[@]}" \
   2>&1 | tee "$REPORT_DIR/market-share-actual-agent-smoke.txt"
 
-# Exercise Local Resources P0 and the owner-local econ-group P2 in isolation.
+# Exercise Local Resources legality and the owner-local econ-group index in isolation.
 # The exact AoTDReachEconomy path is added when the maintained fork JAR is present.
 ECONOMY_HOTPATH_AGENT_CONFIG="$BUILD/economy-hotpath-agent-smoke.properties"
 sed -E \
@@ -280,6 +382,7 @@ sed -E \
   "$MOD_ROOT/prepatcher.properties" | \
   sed -E \
     -e 's/^patch\.localResourcesNoColdMarketData=false/patch.localResourcesNoColdMarketData=true/' \
+    -e 's/^patch\.localResourcesTooltipSnapshot=false/patch.localResourcesTooltipSnapshot=true/' \
     -e 's/^patch\.economyGroupIndex=false/patch.economyGroupIndex=true/' \
   > "$ECONOMY_HOTPATH_AGENT_CONFIG"
 ECONOMY_HOTPATH_AGENT_CP="$RUNTIME_CP"
