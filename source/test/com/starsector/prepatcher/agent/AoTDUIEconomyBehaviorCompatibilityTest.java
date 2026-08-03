@@ -68,7 +68,7 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
         verifySubsetRegistryAudit(post);
 
         System.out.println("OK aotd-ui-economy-behavior"
-                + " spp7-explicit-dispatch standard-steps-global"
+                + " spp8-explicit-dispatch standard-steps-global"
                 + " owner-local-transient-revision-gate"
                 + " single-market-main/update/immigration/snapshot"
                 + " no-ui-global-commodity-build no-ui-global-trade-cut"
@@ -80,7 +80,7 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
     private static void verifyExplicitDispatcherContract(
             ClassNode contract, ClassNode bridge, ClassNode economy) {
         requireConstant(contract, "FORK_VERSION", "Ljava/lang/String;",
-                "1.0.14-spp7");
+                "1.0.14-spp8");
         requireConstant(contract, "PRODUCTION_CAPABILITIES", "J",
                 Long.valueOf(0x3ffL));
         requireConstant(contract, "DECLARED_CAPABILITIES", "J",

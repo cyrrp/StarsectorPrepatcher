@@ -86,7 +86,7 @@ public final class StarsectorPrepatcherRuntimeBridge {
             "dispatchPrepatcherUiEconomyStep";
 
     private static final String AOTD_MOD_ID = "aotd_theory_of_toolbox";
-    public static final String AOTD_CURRENT_FORK_VERSION = "1.0.14-spp7";
+    public static final String AOTD_CURRENT_FORK_VERSION = "1.0.14-spp8";
     private static final String AOTD_ECONOMY_CLASS =
             "data.kaysaar.aotd.tot.scripts.economy.AoTDEconomy";
     private static final String VANILLA_ECONOMY_CLASS =

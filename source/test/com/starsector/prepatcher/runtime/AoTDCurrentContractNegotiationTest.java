@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** Strict-current spp7 negotiation, safe profile, and mismatch diagnostics. */
+/** Strict-current spp8 negotiation, safe profile, and mismatch diagnostics. */
 public final class AoTDCurrentContractNegotiationTest {
     private AoTDCurrentContractNegotiationTest() {}
 
@@ -40,7 +40,7 @@ public final class AoTDCurrentContractNegotiationTest {
 
             for (String unsupported : new String[] {
                     "1.0.14-spp4", "1.0.14-spp5", "1.0.14-spp6",
-                    "1.0.14-spp7-unreviewed-future"}) {
+                    "1.0.14-spp8-unreviewed-future"}) {
                 long rejected = register(unsupported,
                         StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES,
                         ignored -> { }, (industry, ids) -> null);
@@ -92,7 +92,7 @@ public final class AoTDCurrentContractNegotiationTest {
         } finally {
             Files.deleteIfExists(configFile);
         }
-        System.out.println("OK AoTD strict spp7 contract required=0x3ff optional=0x7ff "
+        System.out.println("OK AoTD strict spp8 contract required=0x3ff optional=0x7ff "
                 + "safe/current/obsolete/future/mask/callback diagnostics");
     }
 

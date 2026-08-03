@@ -7,7 +7,7 @@ if not "%~1"=="" goto dispatch
 :menu
 cls
 echo ================================================================
-echo                    StarsectorPrepatcher 0.17.0
+echo                    StarsectorPrepatcher 0.17.1
 echo ================================================================
 echo.
 echo  1. Build release JARs

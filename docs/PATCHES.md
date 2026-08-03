@@ -86,7 +86,7 @@ fail-closed: original bytes, including `tripleStep()`, are returned unchanged.
 
 ### Explicit AoTD UI economy dispatch
 
-Scheduler Fork `1.0.14-spp7` restores the standard virtual-step contract:
+Scheduler Fork `1.0.14-spp8` restores the standard virtual-step contract:
 `AoTDEconomy.nextStep(EconWorkParams)`, `doubleStep()`, `tripleStep()` and
 `AoTDReachEconomy.nextStep(EconWorkParams)` always run the full all-market pipeline. They do not
 inspect `currentlyOpenMarket`, infer UI intent from a null payload or consume a Prepatcher context;
@@ -112,7 +112,7 @@ the helper consumes it. The helper then executes the preserved global step. Trad
 its immutable transaction IDs directly inside its guard and uses no record/consume round trip. No
 static `Class`, `Method`, `ClassLoader`, campaign object or mod instance is cached for dispatch.
 
-Only exact Scheduler Fork `1.0.14-spp7` registers. The current declared mask must be exactly
+Only exact Scheduler Fork `1.0.14-spp8` registers. The current declared mask must be exactly
 `0x7ff`; old, future and partially declared contracts are logged and rejected wholesale with mask
 `0`. For the exact current fork, the required dispatcher bit is independent of profile switches:
 safe negotiates `0x3ff`, while `patch.uiMarketMutationRefresh=true` adds the sole optional bit and
