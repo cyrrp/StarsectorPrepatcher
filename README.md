@@ -2,7 +2,7 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Current version: **0.17.1**. Supported game build: **Starsector 0.98a-RC8**.
+Current version: **0.17.2**. Supported game build: **Starsector 0.98a-RC8**.
 
 [![Unplayable without Prepatcher versus smooth with Prepatcher](media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
@@ -20,7 +20,7 @@ The project has a broader direction than map optimization alone:
 - keep version-specific bytecode knowledge inside the prepatcher instead of duplicating it across
   gameplay mods.
 
-The public API is a roadmap item, not a published compatibility surface in `0.17.1`. Its intended
+The public API is a roadmap item, not a published compatibility surface in `0.17.2`. Its intended
 namespace is `com.starsector.prepatcher.api`; API types will only become supported once they are
 documented and covered by compatibility tests.
 
@@ -62,7 +62,7 @@ log and warns when the mod is enabled without the startup agent.
 
 If you use **AoTD — Theory of Toolbox**, install the maintained
 [Scheduler Fork](https://github.com/cyrrp/AoTD-Theory-Of-Toolbox-Scheduler-Fork), release
-`1.0.14-spp8`. The fork is required for optimal AoTD performance and for the supported native
+`1.0.14-spp9`. The fork is required for optimal AoTD performance and for the supported native
 scheduler/capability path. Future fork revisions remain fail-closed until their contracts are
 reviewed. The fork is not required when AoTD is absent.
 
@@ -231,13 +231,13 @@ classloader smoke. Build details are in [`BUILDING.md`](BUILDING.md).
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — structural discovery, architecture, tooling, and platform plan;
 - [`docs/architecture/MARKET_SCHEDULER.md`](docs/architecture/MARKET_SCHEDULER.md) — durable
   scheduler design and invariants;
-- [`docs/releases/0.17.1.md`](docs/releases/0.17.1.md) — current detailed release report.
+- [`docs/releases/0.17.2.md`](docs/releases/0.17.2.md) — current detailed release report.
 
 StarsectorPrepatcher is distributed under the terms in [`LICENSE`](LICENSE).
 
 ## AoTD Scheduler Fork integration
 
-Prepatcher 0.17.1 supports Scheduler Fork `1.0.14-spp8` and installs a clean wrapper around the original
+Prepatcher 0.17.2 supports Scheduler Fork `1.0.14-spp9` and installs a clean wrapper around the original
 `BaseIndustry.getMaxDeficit()`. The preserved vanilla implementation remains active until a
 compatible AoTD Scheduler Fork registers the complete native capability profile `0x3ff`, including
 the explicit UI economy dispatcher. Bridge schema V9 retains V7 campaign/economy epochs and reads
@@ -245,7 +245,7 @@ the live runtime capability mask; the optional UI market-mutation bit extends th
 `0x7ff`.
 The required dispatcher capability does not depend on optional optimization switches, so the safe
 profile still negotiates `0x3ff`. Registration is current-only: a non-V9 shape, any fork identifier
-other than `1.0.14-spp8`, or a declared mask other than `0x7ff` is logged and rejected with no
+other than `1.0.14-spp9`, or a declared mask other than `0x7ff` is logged and rejected with no
 partial compatibility mode.
 Late callbacks from an older epoch are rejected; a listener fail-stop triggers one generation
 resynchronization before fallback dirtying is enabled. Do not install the obsolete modified
@@ -278,7 +278,7 @@ no setter/helper context: its exact guard derives affected IDs directly from imm
 cargo and uses the same affected-commodity commit. Administrator, stabilization, construction queue,
 custom providers, and unknown helper callers retain the original global step.
 
-The maintained Scheduler Fork `1.0.14-spp8` is required for optimal performance when AoTD Theory of
+The maintained Scheduler Fork `1.0.14-spp9` is required for optimal performance when AoTD Theory of
 Toolbox is installed. Prepatcher does not require AoTD or the fork in any other setup. The original
 AoTD build may use preserved fail-closed/raw paths, but it does not provide the complete supported
 native scheduler contract.

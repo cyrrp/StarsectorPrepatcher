@@ -86,7 +86,7 @@ fail-closed: original bytes, including `tripleStep()`, are returned unchanged.
 
 ### Explicit AoTD UI economy dispatch
 
-Scheduler Fork `1.0.14-spp8` restores the standard virtual-step contract:
+Scheduler Fork `1.0.14-spp9` restores the standard virtual-step contract:
 `AoTDEconomy.nextStep(EconWorkParams)`, `doubleStep()`, `tripleStep()` and
 `AoTDReachEconomy.nextStep(EconWorkParams)` always run the full all-market pipeline. They do not
 inspect `currentlyOpenMarket`, infer UI intent from a null payload or consume a Prepatcher context;
@@ -96,25 +96,30 @@ Prepatcher classifies only structurally proven UI call sites and invokes the for
 final `dispatchPrepatcherUiEconomyStep(int, MarketAPI, long, String[])` entry point. Market-open,
 Cargo and trade transformations are boolean guards around the existing virtual
 `nextStep`/`tripleStep`/`doubleStep` invocation; they no longer wrap the enclosing method or publish
-a fork context. The helper returns `true` only after a completed local refresh. On `false` or any
-exception the original call remains in bytecode and executes outside the helper, including when the
-exact fork/capability is unavailable or a debt barrier cannot prove the local cut safe. The exact
-fork loader is derived from the two callbacks registered by verified Scheduler Bridge V9, so the
+a fork context. Before semantic commit, every proof and diagnostic read is inside the fail-open
+boundary: `false` or an escaped failure leaves the original call in bytecode to execute once outside
+the helper, including when the exact fork/capability is unavailable or a debt barrier cannot prove
+the local cut safe. A successful dispatcher/local refresh is the boolean commit point. Fork and
+Prepatcher diagnostics after that point are contained and cannot turn the committed `true` back into
+`false` or select a duplicate global fallback. The exact fork loader is derived from the two
+callbacks registered by verified Scheduler Bridge V9, so the
 real parent-runtime/child-mod topology is accepted while an equal-name economy from another loader
 is not eligible.
 
 Non-trade market mutation keeps one internal weak, same-thread, epoch-bound context only between an
 exact vanilla setter/industry wrapper and its shared helper. Original setters and industry mutators
 execute exactly once outside instrumentation catches. Preparation, before/after snapshots, context
-publication, exact-class/membership proofs, counters and logging are fail-open. A failed read poisons
-the current setter batch monotonically, so a later successful record cannot erase uncertainty before
-the helper consumes it. The helper then executes the preserved global step. Trade instead collects
-its immutable transaction IDs directly inside its guard and uses no record/consume round trip. No
+publication, exact-class/membership proofs and pre-commit diagnostics are fail-open. A failed read
+poisons the current setter batch monotonically, so a later successful record cannot erase
+uncertainty before the helper consumes it. The helper then executes the preserved global step.
+Post-commit counters and logging are best-effort and cannot revoke successful local work. Trade
+instead collects its immutable transaction IDs directly inside its guard and uses no record/consume
+round trip. No
 static `Class`, `Method`, `ClassLoader`, campaign object or mod instance is cached for dispatch.
 
-Only exact Scheduler Fork `1.0.14-spp8` registers. The current declared mask must be exactly
-`0x7ff`; old, future and partially declared contracts are logged and rejected wholesale with mask
-`0`. For the exact current fork, the required dispatcher bit is independent of profile switches:
+Only exact Scheduler Fork `1.0.14-spp9` registers. The current declared mask must be exactly
+`0x7ff`; `spp4`–`spp8`, future and partially declared contracts are logged and rejected wholesale
+with mask `0`. For the exact current fork, the required dispatcher bit is independent of profile switches:
 safe negotiates `0x3ff`, while `patch.uiMarketMutationRefresh=true` adds the sole optional bit and
 negotiates `0x7ff`.
 

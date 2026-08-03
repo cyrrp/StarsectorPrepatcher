@@ -2,7 +2,7 @@
   "id": "starsector_prepatcher",
   "name": "StarsectorPrepatcher",
   "author": "kirpoly",
-  "version": "0.17.1",
+  "version": "0.17.2",
   "description": "Compatibility-first pre-load patches for Starsector internals, with a future API for capabilities not exposed by the game.",
   "gameVersion": "0.98a-RC8",
   "jars": [

@@ -144,13 +144,13 @@ the original call. The local path deliberately retains the last committed global
 
 ## UI market-mutation refresh
 
-Prepatcher 0.17.1 and Scheduler Fork `1.0.14-spp8` use bridge schema V9. The required production
+Prepatcher 0.17.2 and Scheduler Fork `1.0.14-spp9` use bridge schema V9. The required production
 mask `0x3ff` includes `UI_ECONOMY_DISPATCH`; the optional `UI_MARKET_MUTATION_REFRESH` bit extends
 the complete profile to `0x7ff`. The explicit dispatcher receives a classified action, detail value
 and, when needed, an immutable sorted `String[]` of affected commodity IDs.
 
 Compatibility is intentionally current-only. The transformer accepts only the exact V9 bridge
-shape; registration then requires the exact `1.0.14-spp8` identifier, the exact declared mask
+shape; registration then requires the exact `1.0.14-spp9` identifier, the exact declared mask
 `0x7ff` and both required callbacks. Any old, future or partially declared contract is logged and
 rejected as a whole with negotiated mask `0`, rather than receiving a reduced legacy profile.
 
@@ -193,7 +193,7 @@ its own exception unchanged. Preparation, before/after snapshots and context pub
 `Throwable`; failure poisons the setter batch even when the market itself could not be read. It holds
 its market weakly; consume additionally requires the same thread, market identity, campaign epoch and
 economy epoch. The shared helper consumes the context or poison before deciding between the vanilla
-local path, exact spp8 dispatch and the preserved virtual global call; the fork's standard step
+local path, exact spp9 dispatch and the preserved virtual global call; the fork's standard step
 methods never inspect it.
 
 The following policy scopes are local because they do not require a global commodity rebuild:
@@ -210,13 +210,16 @@ global. Any missing/duplicate call, altered
 branch shape, exception, cross-thread consume, epoch change or unsupported economy preserves the
 original global call.
 
-For AoTD spp8, the shared helper passes packed reason/scope and affected IDs only through
+For AoTD spp9, the shared helper passes packed reason/scope and affected IDs only through
 `dispatchPrepatcherUiEconomyStep`. The dispatcher validates the action and optional capability,
 converts supported scopes into existing `MarketRegistry` dirty masks and runs the immediate
 single-market refresh. `GLOBAL_TOPOLOGY`, a failed debt barrier, an unsupported action, missing
-capability, `false` or an exception leaves the original virtual invocation active. All optimization
-reads used to prove market/economy identity, membership, affected IDs and fork capability are inside
-the fail-open boundary; diagnostic counters and logging are best-effort and cannot cancel fallback.
+capability, `false` or a pre-commit exception leaves the original virtual invocation active. All
+optimization reads used to prove market/economy identity, membership, affected IDs and fork
+capability, including diagnostics performed before semantic commit, are inside the fail-open
+boundary. A successful dispatcher/local refresh is the commit point: subsequent fork and Prepatcher
+diagnostics are contained, so their failure cannot revoke the committed `true` or activate a second
+global call.
 Because all four standard fork step methods are global, this fallback cannot accidentally become a
 local refresh.
 AoTD `doubleStep()`/`tripleStep()` retain the original two/three global-step multiplicity.
@@ -238,7 +241,7 @@ behavior. Safe profile disables the feature group; other shipped profiles enable
 ## Read-only UI-only global-step removal
 
 The three switches above are pure inline removals: they retain no market, commodity, game object or
-mod classloader. The real-fork inventory gate proves that the maintained spp8 JAR has no descendant
+mod classloader. The real-fork inventory gate proves that the maintained spp9 JAR has no descendant
 or override on the vanilla-owned surfaces. The reviewed Nexerelin surface is transformed directly
 without linking its child loader to a runtime helper.
 
@@ -581,7 +584,7 @@ Telemetry schema `0.7.1`: старый `pooledRandom` называется `pool
 Structural proof показывает однозначность site, linkage, no-escape и verifier postconditions, но
 не доказывает величину ускорения. Runtime и performance evidence создаётся в `.build/reports/`;
 проверенные выводы и остаточные риски фиксируются в отчёте соответствующего выпуска, например
-[`releases/0.17.1.md`](releases/0.17.1.md).
+[`releases/0.17.2.md`](releases/0.17.2.md).
 
 Если несколько javaagent меняют одни и те же классы, располагайте Prepatcher после них:
 transformer увидит bytes, возвращённые ранее зарегистрированными агентами. Installer обеспечивает
@@ -610,11 +613,11 @@ inventory. Structural pass проверяет их до анализа и пос
 
 ## AoTD Scheduler Fork
 
-Scheduler Fork release `1.0.14-spp8` requires Prepatcher `0.17.1`, an active compatible javaagent
+Scheduler Fork release `1.0.14-spp9` requires Prepatcher `0.17.2`, an active compatible javaagent
 and the original game `starfarer.api.jar`. The fork is required for optimal performance when
 AoTD Theory of Toolbox is installed; it is not a dependency for configurations without AoTD.
 
-The spp8 contract uses bridge schema V9. Its required production mask remains `0x3ff`, including
+The spp9 contract uses bridge schema V9. Its required production mask remains `0x3ff`, including
 the explicit UI economy dispatcher; the atomic UI market-mutation refresh capability extends the
 complete negotiation to `0x7ff`. Exact market-open, detached Cargo/LOOT and mutation call sites send
 classified intents directly to the dispatcher. Their original virtual call remains the fallback and
@@ -623,10 +626,13 @@ ownership is tied to the exact loader that registered both Scheduler Bridge call
 the parent loader that owns `StarsectorPrepatcherRuntimeBridge`. This matches Starsector's
 parent-runtime/child-mod topology and rejects duplicate or future loaders.
 Non-trade mutation reason/scope/IDs live only in the one-shot Prepatcher setter/helper handoff.
-Missing capability, a
-changed call site, failed barrier, `GLOBAL_TOPOLOGY`, dispatcher rejection/error or replacement
-economy preserves the original global step. Local Resources tooltip snapshots
-are call-local and do not retain markets, commodities or mod classloaders. A partial required
+Missing capability, a changed call site, failed barrier, `GLOBAL_TOPOLOGY`, dispatcher rejection,
+pre-commit diagnostic failure or replacement economy preserves the original global step. After a
+successful dispatch/local refresh, fork and Prepatcher diagnostics are contained and the committed
+boolean remains `true`; no diagnostic failure can add a duplicate global fallback. Registration
+fixtures reject every exact old identifier from `spp4` through `spp8`, as well as future or partial
+contracts. Local Resources tooltip snapshots are call-local and do not retain markets, commodities
+or mod classloaders. A partial required
 production capability profile is intentionally rejected. The legacy AoTD core-JAR replacement is
 not compatible with this profile.
 

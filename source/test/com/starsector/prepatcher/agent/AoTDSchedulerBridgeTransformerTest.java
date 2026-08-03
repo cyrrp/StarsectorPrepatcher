@@ -5,19 +5,30 @@ import jdk.internal.org.objectweb.asm.ClassWriter;
 import jdk.internal.org.objectweb.asm.Opcodes;
 import jdk.internal.org.objectweb.asm.tree.AbstractInsnNode;
 import jdk.internal.org.objectweb.asm.tree.ClassNode;
+import jdk.internal.org.objectweb.asm.tree.FieldInsnNode;
 import jdk.internal.org.objectweb.asm.tree.FieldNode;
+import jdk.internal.org.objectweb.asm.tree.InsnNode;
 import jdk.internal.org.objectweb.asm.tree.MethodInsnNode;
 import jdk.internal.org.objectweb.asm.tree.MethodNode;
+import jdk.internal.org.objectweb.asm.tree.TypeInsnNode;
+import jdk.internal.org.objectweb.asm.tree.VarInsnNode;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Files;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.function.Function;
 import java.util.jar.JarFile;
+
+import sun.misc.Unsafe;
 
 public final class AoTDSchedulerBridgeTransformerTest {
     private static final String BRIDGE_ENTRY =
@@ -26,6 +37,12 @@ public final class AoTDSchedulerBridgeTransformerTest {
             "data/kaysaar/aotd/tot/compat/SchedulerBridge$State.class";
     private static final String CONTRACT_ENTRY =
             "data/kaysaar/aotd/tot/compat/PrepatcherContract.class";
+    private static final String ECONOMY_ENTRY =
+            "data/kaysaar/aotd/tot/scripts/economy/AoTDEconomy.class";
+    private static final String ECONOMY =
+            "data/kaysaar/aotd/tot/scripts/economy/AoTDEconomy";
+    private static final String UI_COORDINATOR =
+            "data/kaysaar/aotd/tot/scripts/economy/AoTDUIEconomyRefreshCoordinator";
 
     private AoTDSchedulerBridgeTransformerTest() {}
 
@@ -91,6 +108,8 @@ public final class AoTDSchedulerBridgeTransformerTest {
                 PrepatcherConfig.load(configPath), Path.of("."));
         Map<String, byte[]> patchedClasses = new HashMap<>(classes);
         patchedClasses.put(BRIDGE_ENTRY, patched);
+        patchedClasses.put(ECONOMY_ENTRY,
+                postCommitEconomyFixture(classes.get(ECONOMY_ENTRY)));
         ByteMapLoader patchedLoader = new ByteMapLoader(patchedClasses, true);
         Class<?> patchedBridge = patchedLoader.loadClass(
                 "data.kaysaar.aotd.tot.compat.SchedulerBridge");
@@ -101,6 +120,8 @@ public final class AoTDSchedulerBridgeTransformerTest {
                 "getNegotiatedCapabilities").invoke(null)).longValue();
         require(capabilities == 2047L, "unexpected negotiated capabilities: " + capabilities);
         patchedBridge.getMethod("requireProductionProfile").invoke(null);
+        verifyCommittedForkDiagnosticsCannotSelectGlobalFallback(
+                patchedLoader);
         patchedBridge.getMethod("publishRuntimeEpoch", long.class, long.class)
                 .invoke(null, 11L, 23L);
         Class<?> runtime = Class.forName(
@@ -203,6 +224,184 @@ public final class AoTDSchedulerBridgeTransformerTest {
         System.out.println("AoTD scheduler bridge transformer test passed: "
                 + registry.getMethod("statusSummary").invoke(null)
                 + "; bridge=" + patchedBridge.getMethod("statusSummary").invoke(null));
+    }
+
+    /**
+     * Uses the exact post-commit helper copied from the real fork JAR, its real
+     * coordinator/baseline classes, and the active transformed bridge. The
+     * minimal owner fixture avoids initializing Starsector's offline-invalid
+     * obfuscated Economy superclass. Both diagnostics fail after the action has
+     * committed; neither may select the preserved global economy step.
+     */
+    private static void verifyCommittedForkDiagnosticsCannotSelectGlobalFallback(
+            ClassLoader forkLoader) throws Exception {
+        Class<?> economyClass = forkLoader.loadClass(
+                "data.kaysaar.aotd.tot.scripts.economy.AoTDEconomy");
+        Object economy = economyClass.getConstructor().newInstance();
+
+        Class<?> baseline = forkLoader.loadClass(
+                "data.kaysaar.aotd.tot.scripts.economy.AoTDEconomySemanticBaseline");
+        Field initialized = accessibleField(baseline, "initialized");
+        Field enabled = accessibleField(baseline, "enabled");
+        Field phases = accessibleField(baseline, "PHASES");
+        Field operations = accessibleField(baseline, "OPERATIONS");
+        Object originalPhases = phases.get(null);
+        Object originalOperations = operations.get(null);
+        boolean originalInitialized = initialized.getBoolean(null);
+        boolean originalEnabled = enabled.getBoolean(null);
+
+        Field counter = accessibleField(
+                com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge.class,
+                "DETACHED_CARGO_AOTD_DISPATCHES");
+        Object originalCounter = counter.get(null);
+        ThrowingOperations throwingOperations = new ThrowingOperations();
+        ThrowingPhases throwingPhases = new ThrowingPhases();
+        ThrowingLongAdder throwingCounter = new ThrowingLongAdder();
+        int globalFallbacks = 0;
+        try {
+            initialized.setBoolean(null, true);
+            enabled.setBoolean(null, true);
+
+            Object scope = baseline.getMethod("begin", String.class)
+                    .invoke(null, "synthetic-close-failure");
+            putStaticObject(phases, throwingPhases);
+            scope.getClass().getMethod("close").invoke(scope);
+            require(throwingPhases.triggered.get(),
+                    "real fork Scope.close diagnostic fault was not exercised");
+
+            putStaticObject(phases, originalPhases);
+            enabled.setBoolean(null, true);
+            putStaticObject(operations, throwingOperations);
+            putStaticObject(counter, throwingCounter);
+
+            boolean handled = com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge
+                    .shouldSkipVanillaCargoEconomyStep(
+                            economy, null, true, SyntheticMode.CARGO, null, null);
+            if (!handled) globalFallbacks++;
+
+            require(throwingOperations.triggered.get(),
+                    "real fork baseline diagnostic fault was not exercised");
+            require(throwingCounter.triggered.get(),
+                    "Prepatcher post-commit counter fault was not exercised");
+            require(handled, "post-commit diagnostic fault changed handled=true to false");
+            require(globalFallbacks == 0,
+                    "post-commit diagnostic fault selected the global fallback");
+            String status = String.valueOf(economyClass.getMethod(
+                    "getUiRefreshStatusSummary").invoke(economy));
+            require(status.contains("syntheticCargoSkipped=1"),
+                    "fork semantic commit was not retained: " + status);
+            require(economy.getClass().getClassLoader() == forkLoader,
+                    "real fork instance escaped its registered loader");
+        } finally {
+            putStaticObject(counter, originalCounter);
+            putStaticObject(phases, originalPhases);
+            putStaticObject(operations, originalOperations);
+            initialized.setBoolean(null, originalInitialized);
+            enabled.setBoolean(null, originalEnabled);
+        }
+    }
+
+    private static Field accessibleField(Class<?> owner, String name)
+            throws ReflectiveOperationException {
+        Field field = owner.getDeclaredField(name);
+        field.setAccessible(true);
+        return field;
+    }
+
+    private static void putStaticObject(Field field, Object value) throws Exception {
+        Unsafe unsafe = unsafe();
+        Object base = unsafe.staticFieldBase(field);
+        long offset = unsafe.staticFieldOffset(field);
+        unsafe.putObjectVolatile(base, offset, value);
+    }
+
+    private static Unsafe unsafe() throws Exception {
+        Field field = Unsafe.class.getDeclaredField("theUnsafe");
+        field.setAccessible(true);
+        return (Unsafe) field.get(null);
+    }
+
+    private static byte[] postCommitEconomyFixture(byte[] realEconomy) {
+        require(realEconomy != null, "real AoTDEconomy class missing");
+        ClassNode real = new ClassNode();
+        new ClassReader(realEconomy).accept(real, 0);
+        String helperDesc = "(L" + UI_COORDINATOR + ";)Z";
+        MethodNode realHelper = null;
+        for (MethodNode method : real.methods) {
+            if ("recordSyntheticCargoSkipNoThrow".equals(method.name)
+                    && helperDesc.equals(method.desc)) {
+                realHelper = method;
+                break;
+            }
+        }
+        require(realHelper != null,
+                "real fork synthetic-Cargo post-commit helper missing");
+
+        ClassNode fixture = new ClassNode();
+        fixture.version = real.version;
+        fixture.access = Opcodes.ACC_PUBLIC | Opcodes.ACC_SUPER;
+        fixture.name = ECONOMY;
+        fixture.superName = "java/lang/Object";
+        fixture.fields.add(new FieldNode(
+                Opcodes.ACC_PRIVATE | Opcodes.ACC_FINAL,
+                "coordinator", "L" + UI_COORDINATOR + ";", null, null));
+
+        MethodNode constructor = new MethodNode(
+                Opcodes.ACC_PUBLIC, "<init>", "()V", null, null);
+        constructor.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        constructor.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false));
+        constructor.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        constructor.instructions.add(new TypeInsnNode(Opcodes.NEW, UI_COORDINATOR));
+        constructor.instructions.add(new InsnNode(Opcodes.DUP));
+        constructor.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKESPECIAL, UI_COORDINATOR, "<init>", "()V", false));
+        constructor.instructions.add(new FieldInsnNode(
+                Opcodes.PUTFIELD, ECONOMY, "coordinator",
+                "L" + UI_COORDINATOR + ";"));
+        constructor.instructions.add(new InsnNode(Opcodes.RETURN));
+        fixture.methods.add(constructor);
+
+        MethodNode helper = new MethodNode(
+                realHelper.access, realHelper.name, realHelper.desc,
+                realHelper.signature,
+                realHelper.exceptions == null
+                        ? null : realHelper.exceptions.toArray(new String[0]));
+        realHelper.accept(helper);
+        fixture.methods.add(helper);
+
+        MethodNode dispatcher = new MethodNode(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL,
+                "dispatchPrepatcherUiEconomyStep",
+                "(ILcom/fs/starfarer/api/campaign/econ/MarketAPI;J[Ljava/lang/String;)Z",
+                null, null);
+        dispatcher.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        dispatcher.instructions.add(new FieldInsnNode(
+                Opcodes.GETFIELD, ECONOMY, "coordinator",
+                "L" + UI_COORDINATOR + ";"));
+        dispatcher.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKESTATIC, ECONOMY,
+                "recordSyntheticCargoSkipNoThrow", helperDesc, false));
+        dispatcher.instructions.add(new InsnNode(Opcodes.IRETURN));
+        fixture.methods.add(dispatcher);
+
+        MethodNode status = new MethodNode(
+                Opcodes.ACC_PUBLIC, "getUiRefreshStatusSummary",
+                "()Ljava/lang/String;", null, null);
+        status.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        status.instructions.add(new FieldInsnNode(
+                Opcodes.GETFIELD, ECONOMY, "coordinator",
+                "L" + UI_COORDINATOR + ";"));
+        status.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL, UI_COORDINATOR,
+                "statusSummary", "()Ljava/lang/String;", false));
+        status.instructions.add(new InsnNode(Opcodes.ARETURN));
+        fixture.methods.add(status);
+
+        ClassWriter writer = new ClassWriter(
+                ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
+        fixture.accept(writer);
+        return writer.toByteArray();
     }
 
     private static void inspectPatched(byte[] bytes) {
@@ -331,6 +530,39 @@ public final class AoTDSchedulerBridgeTransformerTest {
 
     private static void require(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
+    }
+
+    private enum SyntheticMode { CARGO }
+
+    private static final class ThrowingOperations extends LinkedHashMap<String, Long> {
+        private final AtomicBoolean triggered = new AtomicBoolean();
+
+        @Override
+        public Long getOrDefault(Object key, Long defaultValue) {
+            triggered.set(true);
+            throw new LinkageError("synthetic fork baseline failure");
+        }
+    }
+
+    private static final class ThrowingPhases extends LinkedHashMap<String, Object> {
+        private final AtomicBoolean triggered = new AtomicBoolean();
+
+        @Override
+        public Object computeIfAbsent(
+                String key, Function<? super String, ? extends Object> mappingFunction) {
+            triggered.set(true);
+            throw new LinkageError("synthetic fork scope-close failure");
+        }
+    }
+
+    private static final class ThrowingLongAdder extends LongAdder {
+        private final AtomicBoolean triggered = new AtomicBoolean();
+
+        @Override
+        public void increment() {
+            triggered.set(true);
+            throw new LinkageError("synthetic Prepatcher counter failure");
+        }
     }
 
     private static final class ByteMapLoader extends ClassLoader {

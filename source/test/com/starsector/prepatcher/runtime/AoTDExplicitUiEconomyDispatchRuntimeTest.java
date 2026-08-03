@@ -13,7 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 
-/** Runtime contract coverage for the same-loader spp8 explicit UI dispatcher. */
+/** Runtime contract coverage for the same-loader spp9 explicit UI dispatcher. */
 public final class AoTDExplicitUiEconomyDispatchRuntimeTest {
     private enum Mode { CARGO }
 
@@ -39,7 +39,7 @@ public final class AoTDExplicitUiEconomyDispatchRuntimeTest {
                     ignored -> { }, (industry, ids) -> null);
             require(negotiated == StarsectorPrepatcherRuntimeBridge
                             .AOTD_CURRENT_DECLARED_CAPABILITIES,
-                    "spp8 explicit dispatcher capabilities were not negotiated");
+                    "spp9 explicit dispatcher capabilities were not negotiated");
 
             MarketAPI market = marketFixture();
             AoTDEconomy economy = new AoTDEconomy();
@@ -117,7 +117,7 @@ public final class AoTDExplicitUiEconomyDispatchRuntimeTest {
             require(take.invoke(null, market) == null,
                     "future AoTD subclass retained a stale mutation payload");
 
-            System.out.println("OK AoTD spp8 explicit market/cargo/mutation dispatch + "
+            System.out.println("OK AoTD spp9 explicit market/cargo/mutation dispatch + "
                     + "global/reject/exception/subclass fallback");
         } finally {
             Files.deleteIfExists(configFile);

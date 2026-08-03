@@ -6,12 +6,17 @@ import jdk.internal.org.objectweb.asm.tree.AbstractInsnNode;
 import jdk.internal.org.objectweb.asm.tree.ClassNode;
 import jdk.internal.org.objectweb.asm.tree.FieldInsnNode;
 import jdk.internal.org.objectweb.asm.tree.FieldNode;
+import jdk.internal.org.objectweb.asm.tree.InvokeDynamicInsnNode;
+import jdk.internal.org.objectweb.asm.tree.LdcInsnNode;
 import jdk.internal.org.objectweb.asm.tree.MethodInsnNode;
 import jdk.internal.org.objectweb.asm.tree.MethodNode;
+import jdk.internal.org.objectweb.asm.tree.TryCatchBlockNode;
+import jdk.internal.org.objectweb.asm.tree.TypeInsnNode;
 
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.jar.JarFile;
@@ -32,6 +37,17 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
     private static final String MAIN = ROOT + "scripts/economy/AoTdMainWorkTask2";
     private static final String COORDINATOR =
             ROOT + "scripts/economy/AoTDUIEconomyRefreshCoordinator";
+    private static final String BASELINE =
+            ROOT + "scripts/economy/AoTDEconomySemanticBaseline";
+    private static final String BASELINE_SCOPE = BASELINE + "$Scope";
+    private static final String UPDATE =
+            ROOT + "scripts/economy/AoTDUpdateMarketAgainTask";
+    private static final String REACH_STEPPER =
+            ROOT + "scripts/economy/AoTDEconomyReachStepper";
+    private static final String COMMODITY_MARKET_DATA =
+            ROOT + "scripts/commoditydata/AoTDCommodityMarketData";
+    private static final String TRADE_MANAGER =
+            ROOT + "scripts/trade/manager/AoTDTradeManager";
     private static final String FINISH =
             ROOT + "scripts/economy/AoTDFinishEconomyUpdateTask";
     private static final String POST =
@@ -53,6 +69,12 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
         ClassNode reach = read(jar, REACH);
         ClassNode main = read(jar, MAIN);
         ClassNode coordinator = read(jar, COORDINATOR);
+        ClassNode baseline = read(jar, BASELINE);
+        ClassNode baselineScope = read(jar, BASELINE_SCOPE);
+        ClassNode update = read(jar, UPDATE);
+        ClassNode reachStepper = read(jar, REACH_STEPPER);
+        ClassNode commodityMarketData = read(jar, COMMODITY_MARKET_DATA);
+        ClassNode tradeManager = read(jar, TRADE_MANAGER);
         ClassNode finish = read(jar, FINISH);
         ClassNode post = read(jar, POST);
         ClassNode contract = read(jar, CONTRACT);
@@ -61,6 +83,11 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
         verifyNoForkOwnedReadOnlyUiOverrides(jar);
         verifyExplicitDispatcherContract(contract, bridge, economy);
         verifyOwnerLocalCoordinator(economy, coordinator);
+        verifyPostCommitNoThrowBoundaries(economy);
+        verifySemanticBaselineFailOpen(baseline, baselineScope);
+        verifyNoDiagnosticIndustryMarketReads(update);
+        verifyDiagnosticArgumentBoundaries(
+                commodityMarketData, reachStepper, finish, main, tradeManager);
         verifyEconomyRouting(economy);
         verifySingleMarketPipeline(reach);
         verifyNoGlobalCommodityBuildInUiMode(main);
@@ -68,8 +95,10 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
         verifySubsetRegistryAudit(post);
 
         System.out.println("OK aotd-ui-economy-behavior"
-                + " spp8-explicit-dispatch standard-steps-global"
+                + " spp9-explicit-dispatch standard-steps-global"
                 + " owner-local-transient-revision-gate"
+                + " post-commit-no-throw baseline-fail-open"
+                + " diagnostic-arguments-no-throw"
                 + " single-market-main/update/immigration/snapshot"
                 + " no-ui-global-commodity-build no-ui-global-trade-cut"
                 + " explicit-cargo-skip ui-market-mutation-refresh"
@@ -80,7 +109,7 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
     private static void verifyExplicitDispatcherContract(
             ClassNode contract, ClassNode bridge, ClassNode economy) {
         requireConstant(contract, "FORK_VERSION", "Ljava/lang/String;",
-                "1.0.14-spp8");
+                "1.0.14-spp9");
         requireConstant(contract, "PRODUCTION_CAPABILITIES", "J",
                 Long.valueOf(0x3ffL));
         requireConstant(contract, "DECLARED_CAPABILITIES", "J",
@@ -125,14 +154,17 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
                 economy, "isConditionOnlyOpeningMarket", "(" + MARKET + ")Z");
         require(countCallsNamed(conditionOnly, "lookupMarket") == 1,
                 "condition-only classifier no longer rejects a registered live market");
-        require(countCalls(dispatcher, COORDINATOR,
-                        "recordConditionOnlySkip", "()V") == 1,
+        String coordinatorOnlyDesc = "(L" + COORDINATOR + ";)Z";
+        require(countCalls(dispatcher, ECONOMY,
+                        "recordConditionOnlySkipNoThrow", coordinatorOnlyDesc) == 1,
                 "explicit market-open route lost its observable condition-only skip");
-        require(countCalls(dispatcher, COORDINATOR,
-                        "recordSyntheticCargoSkip", "()V") == 1,
+        require(countCalls(dispatcher, ECONOMY,
+                        "recordSyntheticCargoSkipNoThrow", coordinatorOnlyDesc) == 1,
                 "explicit Cargo route lost its observable synthetic skip");
+        String runUiDesc = "(" + MARKET + PARAMS
+                + "Ljava/lang/String;ZLjava/lang/String;J)Z";
         require(countCalls(dispatcher, ECONOMY, "runUiMarketRefresh",
-                        "(" + MARKET + PARAMS + "Ljava/lang/String;Z)V") == 3,
+                        runUiDesc) == 3,
                 "explicit UI dispatcher no longer owns all three local refresh routes");
         require(countCalls(dispatcher, REACH, "nextStepForUiMarketMutation",
                         "(" + PARAMS + MARKET
@@ -195,7 +227,212 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
                             + field.name + " " + field.desc);
         }
         requireMethod(coordinator, "isCurrent", "(" + MARKET + ")Z");
-        requireMethod(coordinator, "recordCompleted", "(" + MARKET + ")V");
+        MethodNode completed = requireMethod(
+                coordinator, "recordCompleted", "(" + MARKET + ")V");
+        require(hasThrowableCatch(completed),
+                "coordinator recordCompleted lost its Throwable fail-open boundary");
+        requireThrowableCoveredCall(completed,
+                "com/fs/starfarer/api/campaign/econ/MarketAPI",
+                "getId", "()Ljava/lang/String;");
+        requireThrowableCoveredCall(completed,
+                ROOT + "compat/MarketRegistry", "needsDerivedRefresh",
+                "(Ljava/lang/Object;)Z");
+        requireCompletedMarkerPublishedLast(completed);
+
+        MethodNode invalidate = requireMethod(
+                coordinator, "invalidate", "(Ljava/lang/String;)V");
+        require(hasThrowableCatch(invalidate),
+                "coordinator invalidate lost its Throwable fail-open boundary");
+        requireThrowableCoveredCall(invalidate, BASELINE, "operation",
+                "(Ljava/lang/String;J)V");
+    }
+
+    private static void verifyPostCommitNoThrowBoundaries(ClassNode economy) {
+        String coordinatorDesc = "L" + COORDINATOR + ";";
+        String completedDesc = "(" + coordinatorDesc + MARKET
+                + "Ljava/lang/String;J)Z";
+        String coordinatorOnlyDesc = "(" + coordinatorDesc + ")Z";
+        String runUiDesc = "(" + MARKET + PARAMS
+                + "Ljava/lang/String;ZLjava/lang/String;J)Z";
+
+        MethodNode runUi = requireMethod(economy, "runUiMarketRefresh", runUiDesc);
+        int semanticRefresh = instructionIndex(runUi, REACH, "nextStepForUiMarket",
+                "(" + PARAMS + MARKET + "Ljava/lang/String;)V");
+        int safeCompletion = instructionIndex(runUi, ECONOMY,
+                "recordUiRefreshCompletedNoThrow", completedDesc);
+        require(semanticRefresh >= 0 && safeCompletion > semanticRefresh,
+                "UI semantic Reach refresh no longer precedes safe completion publication");
+        require(countCallsOwnedBy(runUi, BASELINE) == 0,
+                "runUiMarketRefresh invokes baseline directly after commit");
+        require(countCalls(runUi, COORDINATOR, "recordCompleted",
+                        "(" + MARKET + ")V") == 0,
+                "runUiMarketRefresh bypasses the safe completion helper");
+
+        MethodNode dispatcher = requireMethod(economy,
+                "dispatchPrepatcherUiEconomyStep",
+                "(I" + MARKET + "J[Ljava/lang/String;)Z");
+        int semanticMutation = instructionIndex(dispatcher, REACH,
+                "nextStepForUiMarketMutation",
+                "(" + PARAMS + MARKET
+                        + "[Ljava/lang/String;ILjava/lang/String;)V");
+        int safeMutationCompletion = instructionIndex(dispatcher, ECONOMY,
+                "recordUiRefreshCompletedNoThrow", completedDesc);
+        require(semanticMutation >= 0 && safeMutationCompletion > semanticMutation,
+                "targeted mutation commit no longer precedes safe completion publication");
+        require(countCallsOwnedBy(dispatcher, BASELINE) == 0,
+                "explicit dispatcher invokes baseline directly after commit");
+        require(countCalls(dispatcher, COORDINATOR, "recordCompleted",
+                        "(" + MARKET + ")V") == 0,
+                "explicit dispatcher bypasses the safe completion helper");
+
+        MethodNode completed = requireMethod(economy,
+                "recordUiRefreshCompletedNoThrow", completedDesc);
+        MethodNode coalesced = requireMethod(economy,
+                "recordUiRefreshSkipNoThrow", coordinatorOnlyDesc);
+        MethodNode conditionOnly = requireMethod(economy,
+                "recordConditionOnlySkipNoThrow", coordinatorOnlyDesc);
+        MethodNode syntheticCargo = requireMethod(economy,
+                "recordSyntheticCargoSkipNoThrow", coordinatorOnlyDesc);
+        for (MethodNode helper : new MethodNode[] {
+                completed, coalesced, conditionOnly, syntheticCargo}) {
+            require(hasThrowableCatch(helper),
+                    "safe UI helper lacks catch(Throwable): " + helper.name + helper.desc);
+            requireCallsOwnedByThrowableCovered(helper,
+                    Set.of(COORDINATOR, BASELINE));
+        }
+    }
+
+    private static void verifySemanticBaselineFailOpen(
+            ClassNode baseline, ClassNode scope) {
+        MethodNode clinit = requireMethod(baseline, "<clinit>", "()V");
+        require(!reachesCall(baseline, clinit,
+                        "com/fs/starfarer/api/Global", "getLogger", new HashSet<>()),
+                "semantic baseline eagerly resolves Global.getLogger from <clinit>");
+        for (FieldNode field : baseline.fields) {
+            require((field.access & Opcodes.ACC_STATIC) == 0
+                            || !"Lorg/apache/log4j/Logger;".equals(field.desc),
+                    "semantic baseline retained a static Logger field: " + field.name);
+        }
+
+        for (String[] guarded : new String[][] {
+                {"initialize", "()V"},
+                {"isEnabled", "()Z"},
+                {"beginEconomyRevision", "(Ljava/lang/String;)J"},
+                {"endEconomyRevision", "(JLjava/lang/String;)V"},
+                {"operation", "(Ljava/lang/String;" + MARKET + ")V"},
+                {"operation", "(Ljava/lang/String;J)V"},
+                {"captureTradeSnapshot", "(Ljava/lang/String;" + MARKET + ")V"},
+                {"flush", "(Ljava/lang/String;)V"}
+        }) {
+            MethodNode method = requireMethod(baseline, guarded[0], guarded[1]);
+            require(hasThrowableCatch(method),
+                    "baseline entrypoint lacks catch(Throwable): "
+                            + method.name + method.desc);
+        }
+
+        String scopeDesc = "L" + BASELINE_SCOPE + ";";
+        String coreBeginDesc = "(Ljava/lang/String;" + MARKET
+                + "Ljava/lang/String;Z)" + scopeDesc;
+        MethodNode coreBegin = requireMethod(baseline, "begin", coreBeginDesc);
+        require(hasThrowableCatch(coreBegin),
+                "baseline begin core lost its Throwable fail-open boundary");
+        for (String[] delegator : new String[][] {
+                {"begin", "(Ljava/lang/String;)" + scopeDesc},
+                {"begin", "(Ljava/lang/String;" + MARKET + ")" + scopeDesc},
+                {"begin", "(Ljava/lang/String;" + MARKET
+                        + "Ljava/lang/String;)" + scopeDesc},
+                {"beginMarketMutation", "(Ljava/lang/String;" + MARKET
+                        + "Ljava/lang/String;)" + scopeDesc}
+        }) {
+            MethodNode method = requireMethod(baseline, delegator[0], delegator[1]);
+            require(countCalls(method, BASELINE, "begin", coreBeginDesc) == 1,
+                    "public baseline scope entrypoint no longer delegates to guarded core: "
+                            + method.name + method.desc);
+        }
+
+        MethodNode close = requireMethod(scope, "close", "()V");
+        require(hasThrowableCatch(close),
+                "semantic baseline Scope.close lost catch(Throwable)");
+        requireThrowableCoveredCall(close, BASELINE, "finish",
+                "(" + scopeDesc + ")V");
+    }
+
+    private static void verifyNoDiagnosticIndustryMarketReads(ClassNode update) {
+        String industry = "Lcom/fs/starfarer/api/campaign/econ/Industry;";
+        String marketGetterOwner = "com/fs/starfarer/api/campaign/econ/Industry";
+        String marketGetterDesc = "()" + MARKET;
+        String counterDesc = "(Ljava/lang/String;J)V";
+        int marketReads = 0;
+        for (MethodNode method : update.methods) {
+            marketReads += countCalls(
+                    method, marketGetterOwner, "getMarket", marketGetterDesc);
+        }
+        require(marketReads == 0,
+                "AoTDUpdateMarketAgainTask retained diagnostic Industry.getMarket reads");
+        for (String name : new String[] {
+                "applyPendingIndustrySuppression", "restoreIndustry"}) {
+            MethodNode method = requireMethod(update, name, "(" + industry + ")V");
+            require(countCalls(method, BASELINE, "operation", counterDesc) == 2,
+                    "industry apply/unapply diagnostics are not getter-free counters in " + name);
+        }
+    }
+
+    private static void verifyDiagnosticArgumentBoundaries(
+            ClassNode commodityMarketData, ClassNode reachStepper,
+            ClassNode finish, ClassNode main, ClassNode tradeManager) {
+        String scopeDesc = "L" + BASELINE_SCOPE + ";";
+        String beginDesc = "(Ljava/lang/String;" + MARKET
+                + "Ljava/lang/String;)" + scopeDesc;
+
+        requireSimpleBaselineArgumentRegion(
+                requireMethod(commodityMarketData, "<init>",
+                        "(Ljava/lang/String;Ljava/lang/String;)V"),
+                "commodity-market-data.constructor", "begin", beginDesc, Set.of());
+
+        requireSimpleBaselineArgumentRegion(
+                requireMethod(reachStepper, "performBeforeMonthEnds", "(I)V"),
+                "economy.month-end-preparation", "begin", beginDesc, Set.of());
+        requireSimpleBaselineArgumentRegion(
+                requireMethod(reachStepper, "nextFrame", "(F)V"),
+                "iteration-complete", "endEconomyRevision",
+                "(JLjava/lang/String;)V", Set.of());
+        requireSimpleBaselineArgumentRegion(
+                requireMethod(reachStepper, "createTasks", "()V"),
+                "reach-stepper-iteration", "beginEconomyRevision",
+                "(Ljava/lang/String;)J", Set.of());
+
+        MethodNode openCut = requireMethod(finish, "openCut", "()V");
+        require(countLdc(openCut, "internal-trade.factions") == 0,
+                "removed internal-trade.factions diagnostic metric returned");
+        require(countCalls(openCut,
+                        ROOT + "scripts/trade/models/AoTDInternalTradeBatch",
+                        "size", "()I") == 0,
+                "openCut still reads batch.size solely for diagnostics");
+
+        requireSimpleBaselineArgumentRegion(
+                requireMethod(main, "waitForMarketPriceWorkers", "()V"),
+                "main-work.wait-for-price-workers", "begin", beginDesc,
+                Set.of("size"));
+        requireSimpleBaselineArgumentRegion(
+                requireMethod(main, "notifyCommoditiesUpdated",
+                        "(Ljava/util/Collection;)V"),
+                "main-work.notify-all-commodity-listeners", "begin", beginDesc,
+                Set.of("size"));
+        requireSimpleBaselineArgumentRegion(
+                requireMethod(main, "materializeMarketSupplyDemand",
+                        "(Lcom/fs/starfarer/campaign/econ/Market;)V"),
+                "supply-demand.market-commodities", "operation",
+                "(Ljava/lang/String;J)V", Set.of("size"));
+
+        requireSimpleBaselineArgumentRegion(
+                requireMethod(tradeManager, "preparePostImmigrationSnapshot",
+                        "(" + MARKET + ")L" + TRADE_MANAGER + "$PreparedSnapshot;"),
+                "trade-manager.capture-post-immigration", "begin", beginDesc,
+                Set.of("getFactionId"));
+        requireSimpleBaselineArgumentRegion(
+                requireMethod(tradeManager, "addMarket", "(" + MARKET + ")V"),
+                "trade-manager.build-market-snapshot", "begin", beginDesc,
+                Set.of("getFactionId"));
     }
 
     private static void verifyEconomyRouting(ClassNode economy) {
@@ -370,6 +607,80 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
                 "subset-safe registry audit path missing");
     }
 
+    private static void requireSimpleBaselineArgumentRegion(
+            MethodNode method, String diagnosticKey,
+            String baselineMethod, String baselineDesc,
+            Set<String> forbiddenCallNames) {
+        LdcInsnNode regionStart = null;
+        MethodInsnNode regionEnd = null;
+        int matches = 0;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (!(instruction instanceof LdcInsnNode constant)
+                    || !diagnosticKey.equals(constant.cst)) continue;
+            MethodInsnNode nextBaselineCall = null;
+            for (AbstractInsnNode cursor = constant.getNext();
+                 cursor != null; cursor = cursor.getNext()) {
+                if (cursor instanceof MethodInsnNode call
+                        && BASELINE.equals(call.owner)) {
+                    nextBaselineCall = call;
+                    break;
+                }
+            }
+            if (nextBaselineCall == null
+                    || !baselineMethod.equals(nextBaselineCall.name)
+                    || !baselineDesc.equals(nextBaselineCall.desc)) continue;
+            matches++;
+            regionStart = constant;
+            regionEnd = nextBaselineCall;
+        }
+        require(matches == 1,
+                "expected one exact diagnostic argument region for " + diagnosticKey
+                        + " in " + method.name + method.desc + ", found " + matches);
+
+        boolean reachedCall = false;
+        for (AbstractInsnNode instruction = regionStart;
+             instruction != null; instruction = instruction.getNext()) {
+            require(!(instruction instanceof InvokeDynamicInsnNode),
+                    "diagnostic argument region uses invokedynamic/string concat for "
+                            + diagnosticKey);
+            if (instruction instanceof TypeInsnNode type
+                    && type.getOpcode() == Opcodes.NEW) {
+                require(!"java/lang/StringBuilder".equals(type.desc)
+                                && !"java/lang/StringBuffer".equals(type.desc),
+                        "diagnostic argument region allocates a string builder for "
+                                + diagnosticKey);
+            }
+            if (instruction instanceof MethodInsnNode call) {
+                boolean stringConcat = "java/lang/StringBuilder".equals(call.owner)
+                        || "java/lang/StringBuffer".equals(call.owner)
+                        || ("java/lang/String".equals(call.owner)
+                                && "concat".equals(call.name));
+                require(!stringConcat,
+                        "diagnostic argument region concatenates a string for "
+                                + diagnosticKey);
+                require(!forbiddenCallNames.contains(call.name),
+                        "diagnostic argument region invokes " + call.owner + '.'
+                                + call.name + call.desc + " for " + diagnosticKey);
+            }
+            if (instruction == regionEnd) {
+                reachedCall = true;
+                break;
+            }
+        }
+        require(reachedCall,
+                "diagnostic argument region does not reach baseline call for "
+                        + diagnosticKey);
+    }
+
+    private static int countLdc(MethodNode method, Object value) {
+        int count = 0;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof LdcInsnNode constant
+                    && value.equals(constant.cst)) count++;
+        }
+        return count;
+    }
+
     private static boolean hasFieldCopy(
             MethodNode method, String owner, String source, String target) {
         for (AbstractInsnNode instruction = method.instructions.getFirst();
@@ -385,6 +696,113 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
                         && write.getOpcode() == Opcodes.PUTFIELD
                         && owner.equals(write.owner) && target.equals(write.name)
                         && "Z".equals(write.desc)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static void requireCompletedMarkerPublishedLast(MethodNode method) {
+        Set<String> tokenFields = Set.of(
+                "completedCampaignEpoch",
+                "completedEconomyEpoch",
+                "completedRegistryGeneration",
+                "completedDirtyGeneration",
+                "completedMarketDirtyGeneration",
+                "completedMarketIdentityHash",
+                "completedMarketId");
+        Set<String> written = new HashSet<>();
+        String lastTokenWrite = null;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof FieldInsnNode field
+                    && field.getOpcode() == Opcodes.PUTFIELD
+                    && COORDINATOR.equals(field.owner)
+                    && tokenFields.contains(field.name)) {
+                written.add(field.name);
+                lastTokenWrite = field.name;
+            }
+        }
+        require(written.equals(tokenFields),
+                "coordinator recordCompleted no longer publishes the complete token: "
+                        + written);
+        require("completedMarketId".equals(lastTokenWrite),
+                "completedMarketId is not the final coalescing-token publication");
+    }
+
+    private static boolean hasThrowableCatch(MethodNode method) {
+        for (TryCatchBlockNode block : method.tryCatchBlocks) {
+            if ("java/lang/Throwable".equals(block.type)) return true;
+        }
+        return false;
+    }
+
+    private static void requireThrowableCoveredCall(
+            MethodNode method, String owner, String name, String desc) {
+        int found = 0;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (!(instruction instanceof MethodInsnNode call)
+                    || !owner.equals(call.owner) || !name.equals(call.name)
+                    || !desc.equals(call.desc)) continue;
+            found++;
+            require(isThrowableCovered(method, call),
+                    owner + '.' + name + " is outside catch(Throwable) in "
+                            + method.name + method.desc);
+        }
+        require(found > 0, "missing proof call " + owner + '.' + name
+                + desc + " in " + method.name + method.desc);
+    }
+
+    private static void requireCallsOwnedByThrowableCovered(
+            MethodNode method, Set<String> owners) {
+        int found = 0;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (!(instruction instanceof MethodInsnNode call)
+                    || !owners.contains(call.owner)) continue;
+            found++;
+            require(isThrowableCovered(method, call),
+                    "safe helper call is outside catch(Throwable): "
+                            + call.owner + '.' + call.name + call.desc);
+        }
+        require(found > 0,
+                "safe helper lost all coordinator/baseline calls: "
+                        + method.name + method.desc);
+    }
+
+    private static boolean isThrowableCovered(
+            MethodNode method, AbstractInsnNode instruction) {
+        int instructionIndex = indexOf(method, instruction);
+        for (TryCatchBlockNode block : method.tryCatchBlocks) {
+            if ("java/lang/Throwable".equals(block.type)
+                    && indexOf(method, block.start) <= instructionIndex
+                    && instructionIndex < indexOf(method, block.end)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int indexOf(MethodNode method, AbstractInsnNode target) {
+        int index = 0;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction == target) return index;
+            index++;
+        }
+        return -1;
+    }
+
+    private static boolean reachesCall(
+            ClassNode node, MethodNode method,
+            String targetOwner, String targetName, Set<String> visited) {
+        if (!visited.add(method.name + method.desc)) return false;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (!(instruction instanceof MethodInsnNode call)) continue;
+            if (targetOwner.equals(call.owner) && targetName.equals(call.name)) {
+                return true;
+            }
+            if (!node.name.equals(call.owner)) continue;
+            MethodNode local = findMethod(node, call.name, call.desc);
+            if (local != null
+                    && reachesCall(node, local, targetOwner, targetName, visited)) {
+                return true;
             }
         }
         return false;
@@ -462,6 +880,15 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
         return count;
     }
 
+    private static int countCallsOwnedBy(MethodNode method, String owner) {
+        int count = 0;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof MethodInsnNode call
+                    && owner.equals(call.owner)) count++;
+        }
+        return count;
+    }
+
     private static FieldNode requireField(ClassNode node, String name) {
         for (FieldNode field : node.fields) if (name.equals(field.name)) return field;
         throw new AssertionError("Missing field " + node.name + '.' + name);
@@ -495,10 +922,16 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
     }
 
     private static MethodNode requireMethod(ClassNode node, String name, String desc) {
+        MethodNode method = findMethod(node, name, desc);
+        if (method != null) return method;
+        throw new AssertionError("Missing method " + node.name + '.' + name + desc);
+    }
+
+    private static MethodNode findMethod(ClassNode node, String name, String desc) {
         for (MethodNode method : node.methods) {
             if (name.equals(method.name) && desc.equals(method.desc)) return method;
         }
-        throw new AssertionError("Missing method " + node.name + '.' + name + desc);
+        return null;
     }
 
     private static ClassNode read(Path jarPath, String internalName) throws Exception {

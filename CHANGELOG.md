@@ -16,6 +16,20 @@
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-08-04
+
+### Исправлено
+
+- Fail-open граница UI market-mutation guards теперь включает все pre-commit proof/diagnostic reads:
+  любой такой сбой сохраняет исходный virtual global call ровно один раз.
+- После semantic commit диагностические сбои в Scheduler Fork и Prepatcher изолируются и больше не
+  могут отменить уже подтверждённый `true` или вызвать дублирующий global fallback.
+- Точный контракт поддерживаемого AoTD Scheduler Fork обновлён до `1.0.14-spp9`; bridge schema V9,
+  capability masks `0x3ff`/`0x7ff` и descriptors не изменились. Версии `spp4`–`spp8`, будущие и
+  частичные контракты отклоняются целиком.
+
+Подробности и состав проверок: [отчёт о выпуске 0.17.2](docs/releases/0.17.2.md).
+
 ## [0.17.1] - 2026-08-03
 
 ### Исправлено
