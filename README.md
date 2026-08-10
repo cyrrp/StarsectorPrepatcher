@@ -2,7 +2,7 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Current version: **0.18.0**. Supported game build: **Starsector 0.98a-RC8**.
+Current version: **0.18.1**. Supported game build: **Starsector 0.98a-RC8**.
 
 [![Unplayable without Prepatcher versus smooth with Prepatcher](media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
@@ -20,7 +20,7 @@ The project has a broader direction than map optimization alone:
 - keep version-specific bytecode knowledge inside the prepatcher instead of duplicating it across
   gameplay mods.
 
-The public API is a roadmap item, not a published compatibility surface in `0.18.0`. Its intended
+The public API is a roadmap item, not a published compatibility surface in `0.18.1`. Its intended
 namespace is `com.starsector.prepatcher.api`; API types will only become supported once they are
 documented and covered by compatibility tests.
 
@@ -62,7 +62,7 @@ log and warns when the mod is enabled without the startup agent.
 
 If you use **AoTD — Theory of Toolbox**, install the maintained
 [Scheduler Fork](https://github.com/cyrrp/AoTD-Theory-Of-Toolbox-Scheduler-Fork), release
-`1.0.14-spp10`. The fork is required for optimal AoTD performance and for the supported native
+`1.0.14-spp11`. The fork is required for optimal AoTD performance and for the supported native
 scheduler/capability path. Future fork revisions remain fail-closed until their contracts are
 reviewed. The fork is not required when AoTD is absent.
 
@@ -231,20 +231,20 @@ classloader smoke. Build details are in [`BUILDING.md`](BUILDING.md).
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — structural discovery, architecture, tooling, and platform plan;
 - [`docs/architecture/MARKET_SCHEDULER.md`](docs/architecture/MARKET_SCHEDULER.md) — durable
   scheduler design and invariants;
-- [`docs/releases/0.18.0.md`](docs/releases/0.18.0.md) — current detailed release report.
+- [`docs/releases/0.18.1.md`](docs/releases/0.18.1.md) — current detailed release report.
 
 StarsectorPrepatcher is distributed under the terms in [`LICENSE`](LICENSE).
 
 ## AoTD Scheduler Fork integration
 
-Prepatcher 0.18.0 supports Scheduler Fork `1.0.14-spp10` and installs a clean wrapper around the
+Prepatcher 0.18.1 supports Scheduler Fork `1.0.14-spp11` and installs a clean wrapper around the
 original `BaseIndustry.getMaxDeficit()`. The preserved vanilla implementation remains active until
 a compatible AoTD Scheduler Fork registers the complete native capability profile `0xbff`.
 Bridge schema V10 retains the V9 UI payload and adds required economy-restore coordination bit 11;
 the optional UI market-mutation bit 10 extends the full profile to `0xfff`.
 The required capabilities do not depend on optional optimization switches, so the safe profile
 still negotiates `0xbff`. Registration is current-only: a non-V10 shape, any fork identifier other
-than `1.0.14-spp10`, or a declared mask other than `0xfff` is logged and rejected with no partial
+than `1.0.14-spp11`, or a declared mask other than `0xfff` is logged and rejected with no partial
 compatibility mode.
 Late callbacks from an older epoch are rejected; a listener fail-stop triggers one generation
 resynchronization before fallback dirtying is enabled. Do not install the obsolete modified
@@ -282,12 +282,15 @@ Schema V10 adds one exact completion signal at the successful tail of
 reapply calls. It is controlled by the single `patch.aotdEconomyRestoreCoordination=true` switch in
 every shipped profile. The game-loader hook performs O(1) work: it invokes one loader-local
 `Runnable` and never scans markets. The fork performs structural-only commodity restoration,
-coalesces each affected market into one dirty scheduler refresh, and preserves the last committed
-revision when the industry snapshot is temporarily unavailable. Only the snapshot stage may return `NOT_READY`;
+coalesces each affected market into one materialized scheduler refresh, and preserves the last
+committed revision when the industry snapshot is temporarily unavailable. Authoritative aggregates
+use a dedicated materialized-input generation that trade/accessibility/faction-only work does not
+advance; a post-immigration proof mismatch queues one coalesced repair even when trade values are
+unchanged. Only the snapshot stage may return `NOT_READY`;
 calculation-script failures remain visible errors. Newly written saves omit derived per-industry
 supply/demand cache contents and references, and rebuild them after the complete restore barrier.
 
-The maintained Scheduler Fork `1.0.14-spp10` is required for optimal performance when AoTD Theory of
+The maintained Scheduler Fork `1.0.14-spp11` is required for optimal performance when AoTD Theory of
 Toolbox is installed. Prepatcher does not require AoTD or the fork in any other setup. The original
 AoTD build may use preserved fail-closed/raw paths, but it does not provide the complete supported
 native scheduler contract.

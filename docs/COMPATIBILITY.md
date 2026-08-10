@@ -144,14 +144,14 @@ the original call. The local path deliberately retains the last committed global
 
 ## UI market-mutation refresh
 
-Prepatcher 0.18.0 and Scheduler Fork `1.0.14-spp10` use bridge schema V10. The required production
+Prepatcher 0.18.1 and Scheduler Fork `1.0.14-spp11` use bridge schema V10. The required production
 mask `0xbff` includes `UI_ECONOMY_DISPATCH` and `ECONOMY_RESTORE_COORDINATION`; the optional
 `UI_MARKET_MUTATION_REFRESH` bit 10 extends the complete profile to `0xfff`. The explicit dispatcher
 receives a classified action, detail value and, when needed, an immutable sorted `String[]` of
 affected commodity IDs.
 
 Compatibility is intentionally current-only. The transformer accepts only the exact V10 bridge
-shape; registration then requires the exact `1.0.14-spp10` identifier, the exact declared mask
+shape; registration then requires the exact `1.0.14-spp11` identifier, the exact declared mask
 `0xfff` and all three required callbacks. Any old, future or partially declared contract is logged and
 rejected as a whole with negotiated mask `0`, rather than receiving a reduced legacy profile.
 
@@ -159,6 +159,12 @@ The required dispatcher and economy-restore bits describe the current bridge con
 therefore independent of optional optimization switches. Every shipped profile, including safe,
 negotiates the required mask `0xbff` for an exact current fork. Only
 `patch.uiMarketMutationRefresh` controls optional bit 10, producing `0xfff` when enabled.
+
+Early filesystem discovery is diagnostic only. Before opening candidate JARs, the scanner excludes
+every subtree whose path segment starts with `.` (including `.build`) and `releases`, because those
+trees commonly contain compiler, audit or packaging copies rather than installed mod code. The
+official `jars/` candidate remains visible, and the loaded fork's runtime handshake remains the only
+authority that can activate capabilities.
 
 The vanilla path is enabled only when the final stock `CommodityMarketData(String,String)` bytecode
 matches its constructor, market enumeration, max-supply/demand update, market-data publication and
@@ -194,7 +200,7 @@ its own exception unchanged. Preparation, before/after snapshots and context pub
 `Throwable`; failure poisons the setter batch even when the market itself could not be read. It holds
 its market weakly; consume additionally requires the same thread, market identity, campaign epoch and
 economy epoch. The shared helper consumes the context or poison before deciding between the vanilla
-local path, exact spp10 dispatch and the preserved virtual global call; the fork's standard step
+local path, exact spp11 dispatch and the preserved virtual global call; the fork's standard step
 methods never inspect it.
 
 The following policy scopes are local because they do not require a global commodity rebuild:
@@ -211,7 +217,7 @@ global. Any missing/duplicate call, altered
 branch shape, exception, cross-thread consume, epoch change or unsupported economy preserves the
 original global call.
 
-For AoTD spp10, the shared helper passes packed reason/scope and affected IDs only through
+For AoTD spp11, the shared helper passes packed reason/scope and affected IDs only through
 `dispatchPrepatcherUiEconomyStep`. The dispatcher validates the action and optional capability,
 converts supported scopes into existing `MarketRegistry` dirty masks and runs the immediate
 single-market refresh. `GLOBAL_TOPOLOGY`, a failed debt barrier, an unsupported action, missing
@@ -244,10 +250,19 @@ object for this feature.
 
 The fork uses the signal as a barrier, not as a request for synchronous calculation. Restore-time
 commodity conversion is structural-only. Once all vanilla maps have been recreated and reapplied,
-the fork coalesces affected markets into ordinary scheduler work and publishes one atomic revision
-per market. Snapshot-stage unavailability is `NOT_READY`: the previous committed revision and dirty
-generation remain intact, with no ERROR, failure count or quarantine. Calculation-script exceptions
-occur after a complete snapshot and remain visible. Derived per-industry cache contents and their
+the fork coalesces affected markets into scheduler materialization and publishes one atomic revision
+per market. Authoritative aggregates are stamped with a dedicated materialized-input generation;
+trade/accessibility/faction-only work does not advance it. A post-immigration proof or exact-size
+mismatch uses one whole-market live cut and queues one coalesced materialized repair even if the
+trade vector is unchanged. Multi-frame prepared snapshots carry registry identity/token and exact
+market scalars; stale entries are selectively recaptured, and the full proof set is validated under
+the registry lock before an all-or-nothing manager publication. `STALE_INPUT` preserves work, a
+publication exception rolls back the complete cut and finishes the task, and later registry
+bookkeeping failure conservatively requeues unfinished markets. Pure non-materialized debt never
+reaches the update task's industry traversal; month-end explicitly invalidates the materialized
+domain before that required pass. Snapshot-stage unavailability is `NOT_READY`: the previous committed
+revision and materialized-input generation remain intact, with no ERROR, failure count or quarantine.
+Calculation-script exceptions occur after a complete snapshot and remain visible. Derived per-industry cache contents and their
 `MutableStat` references are not serialized in new saves; compatibility loading must normalize
 older fields and rebuild them after the barrier.
 
@@ -267,7 +282,7 @@ behavior. Safe profile disables the feature group; other shipped profiles enable
 ## Read-only UI-only global-step removal
 
 The three switches above are pure inline removals: they retain no market, commodity, game object or
-mod classloader. The real-fork inventory gate proves that the maintained spp10 JAR has no descendant
+mod classloader. The real-fork inventory gate proves that the maintained spp11 JAR has no descendant
 or override on the vanilla-owned surfaces. The reviewed Nexerelin surface is transformed directly
 without linking its child loader to a runtime helper.
 
@@ -610,7 +625,7 @@ Telemetry schema `0.7.1`: старый `pooledRandom` называется `pool
 Structural proof показывает однозначность site, linkage, no-escape и verifier postconditions, но
 не доказывает величину ускорения. Runtime и performance evidence создаётся в `.build/reports/`;
 проверенные выводы и остаточные риски фиксируются в отчёте соответствующего выпуска, например
-[`releases/0.18.0.md`](releases/0.18.0.md).
+[`releases/0.18.1.md`](releases/0.18.1.md).
 
 Если несколько javaagent меняют одни и те же классы, располагайте Prepatcher после них:
 transformer увидит bytes, возвращённые ранее зарегистрированными агентами. Installer обеспечивает
@@ -639,11 +654,11 @@ inventory. Structural pass проверяет их до анализа и пос
 
 ## AoTD Scheduler Fork
 
-Scheduler Fork release `1.0.14-spp10` requires Prepatcher `0.18.0`, an active compatible javaagent
+Scheduler Fork release `1.0.14-spp11` requires Prepatcher `0.18.1`, an active compatible javaagent
 and the original game `starfarer.api.jar`. The fork is required for optimal performance when
 AoTD Theory of Toolbox is installed; it is not a dependency for configurations without AoTD.
 
-The spp10 contract uses bridge schema V10. Its required production mask is `0xbff`, including the
+The spp11 contract uses bridge schema V10. Its required production mask is `0xbff`, including the
 explicit UI economy dispatcher and economy-restore coordination; the atomic UI market-mutation
 refresh capability extends the complete negotiation to `0xfff`. Exact market-open, detached
 Cargo/LOOT and mutation call sites send
@@ -657,7 +672,7 @@ Missing capability, a changed call site, failed barrier, `GLOBAL_TOPOLOGY`, disp
 pre-commit diagnostic failure or replacement economy preserves the original global step. After a
 successful dispatch/local refresh, fork and Prepatcher diagnostics are contained and the committed
 boolean remains `true`; no diagnostic failure can add a duplicate global fallback. Registration
-fixtures reject every exact old identifier from `spp4` through `spp9`, as well as future or partial
+fixtures reject every exact old identifier from `spp4` through `spp10`, as well as future or partial
 contracts. Local Resources tooltip snapshots are call-local and do not retain markets, commodities
 or mod classloaders. A partial required
 production capability profile is intentionally rejected. The legacy AoTD core-JAR replacement is

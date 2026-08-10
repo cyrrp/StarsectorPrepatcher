@@ -22,17 +22,27 @@ public final class AoTDForkMarkerScannerTest {
             Files.copy(sourceMod.resolve("jars/AoTDToolboxTheory.jar"),
                     aotd.resolve("jars/AoTDToolboxTheory.jar"),
                     StandardCopyOption.REPLACE_EXISTING);
+            Path ignoredBuildJar = aotd.resolve(".build/audit/AoTDToolboxTheory-test.jar");
+            Path ignoredReleaseJar = aotd.resolve("releases/staging/AoTDToolboxTheory.jar");
+            Files.createDirectories(ignoredBuildJar.getParent());
+            Files.createDirectories(ignoredReleaseJar.getParent());
+            Files.copy(sourceMod.resolve("jars/AoTDToolboxTheory.jar"), ignoredBuildJar,
+                    StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(sourceMod.resolve("jars/AoTDToolboxTheory.jar"), ignoredReleaseJar,
+                    StandardCopyOption.REPLACE_EXISTING);
 
             AoTDForkMarkerScanner.Result result = AoTDForkMarkerScanner.scan(prepatcher);
             require(result.status() == AoTDForkMarkerScanner.Status.CANDIDATE_FOUND,
                     "expected candidate, got " + result);
-            require(result.markerJar() != null, "marker JAR missing");
+            require(aotd.resolve("jars/AoTDToolboxTheory.jar").equals(result.markerJar()),
+                    "diagnostic/release duplicate displaced the installed marker: " + result);
 
             Files.delete(aotd.resolve("jars/AoTDToolboxTheory.jar"));
             result = AoTDForkMarkerScanner.scan(prepatcher);
             require(result.status() == AoTDForkMarkerScanner.Status.NOT_FOUND,
-                    "expected not found, got " + result);
-            System.out.println("AoTD marker scanner test passed.");
+                    "ignored build/release marker became a candidate: " + result);
+            System.out.println("AoTD marker scanner test passed: installed candidate only; "
+                    + ".build/releases ignored.");
         } finally {
             deleteRecursively(temp);
         }

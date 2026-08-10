@@ -19,7 +19,7 @@ bash "$MOD_ROOT/build-agent.sh"
 rm -rf "$TEST_CLASSES" "$FR_SMOKE_CLASSES"
 mkdir -p "$TEST_CLASSES" "$FR_SMOKE_CLASSES" "$REPORT_DIR"
 
-TEST_CP="$AGENT_CLASSES:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
+TEST_CP="$AGENT_CLASSES:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/log4j-1.2.9.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
 FR_SMOKE_SOURCE="$MOD_ROOT/source/test/com/starsector/prepatcher/fr/FasterRenderingLoaderSmokeTest.java"
 find "$MOD_ROOT/source/test" -name '*.java' ! -path "$FR_SMOKE_SOURCE" -print0 | \
   xargs -0 javac -encoding UTF-8 -source 17 -target 17 \
@@ -333,6 +333,23 @@ if [[ -f "$AOTD_JAR" ]]; then
 else
   echo "SKIPPED AoTD supply/demand XStream migration: $AOTD_JAR not found" | \
     tee "$REPORT_DIR/aotd-supply-demand-xstream-migration.txt"
+fi
+
+if [[ -f "$AOTD_JAR" ]]; then
+  java \
+    --add-opens=java.base/java.util=ALL-UNNAMED \
+    --add-opens=java.base/java.lang.reflect=ALL-UNNAMED \
+    --add-opens=java.base/java.text=ALL-UNNAMED \
+    --add-opens=java.desktop/java.awt.font=ALL-UNNAMED \
+    --add-opens=java.desktop/java.awt=ALL-UNNAMED \
+    -Dstarsector.prepatcher.sessionOrigin=aotd-runtime-task-xstream \
+    "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MOD_ROOT/profiles/aggressive.properties" \
+    -cp "$RUNTIME_CP:$AOTD_JAR" \
+    com.starsector.prepatcher.runtime.AoTDRuntimeTaskXStreamSanitizationTest \
+    2>&1 | tee "$REPORT_DIR/aotd-runtime-task-xstream-sanitization.txt"
+else
+  echo "SKIPPED AoTD runtime-task XStream sanitization: $AOTD_JAR not found" | \
+    tee "$REPORT_DIR/aotd-runtime-task-xstream-sanitization.txt"
 fi
 
 UI_ECONOMY_AGENT_ARGS=()

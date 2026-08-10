@@ -87,7 +87,7 @@ fail-closed: original bytes, including `tripleStep()`, are returned unchanged.
 
 ### Explicit AoTD UI economy dispatch
 
-Scheduler Fork `1.0.14-spp10` restores the standard virtual-step contract:
+Scheduler Fork `1.0.14-spp11` restores the standard virtual-step contract:
 `AoTDEconomy.nextStep(EconWorkParams)`, `doubleStep()`, `tripleStep()` and
 `AoTDReachEconomy.nextStep(EconWorkParams)` always run the full all-market pipeline. They do not
 inspect `currentlyOpenMarket`, infer UI intent from a null payload or consume a Prepatcher context;
@@ -118,8 +118,8 @@ instead collects its immutable transaction IDs directly inside its guard and use
 round trip. No
 static `Class`, `Method`, `ClassLoader`, campaign object or mod instance is cached for dispatch.
 
-Only exact Scheduler Fork `1.0.14-spp10` registers. The current declared mask must be exactly
-`0xfff`; `spp4`–`spp9`, future and partially declared contracts are logged and rejected wholesale
+Only exact Scheduler Fork `1.0.14-spp11` registers. The current declared mask must be exactly
+`0xfff`; `spp4`–`spp10`, future and partially declared contracts are logged and rejected wholesale
 with mask `0`. For the exact current fork, required economy-restore bit 11 is independent of optional
 optimization switches: every shipped profile negotiates `0xbff`, while
 `patch.uiMarketMutationRefresh=true` adds optional bit 10 and negotiates `0xfff`.
@@ -135,13 +135,31 @@ market scan or calculation; it reads one negotiated loader-local `Runnable` and 
 
 The fork's population-industry restore path is structural-only: it may create or convert commodity
 objects but never snapshots another industry's partially restored supply/demand maps. After the
-completion signal, affected markets receive one coalesced dirty generation and the normal scheduler
-publishes one atomic market-wide revision. A temporarily unavailable
+completion signal, affected markets receive one coalesced materialized-input invalidation and the
+normal scheduler publishes one atomic market-wide revision. This dedicated generation is unchanged
+by trade/accessibility/faction-only work. A post-immigration proof or exact market-size mismatch uses
+one coherent live capture and queues one coalesced materialized repair even when trade values did not
+change. A multi-frame capture carries exact registry identity/token plus size, faction,
+accessibility and spaceport scalars. Stale entries are selectively recaptured before the complete
+proof set is validated under the registry lock; publication is all-or-nothing, residual
+`STALE_INPUT` retains dirty work, and a manager exception rolls back the previous complete cut and
+cannot leave the post task live. Pure non-materialized debt returns before the update task scans
+industries; month-end explicitly invalidates VALUE/DERIVED/PRICE/STOCK before its required pass. A temporarily unavailable
 `industry.getDemand()/getSupply()/getQuantity()` snapshot returns `NOT_READY`, preserves the previous
 committed revision and does not log, commit, fail or quarantine. Calculation scripts run only after
 the complete snapshot and their exceptions remain visible failures. Derived per-industry
 supply/demand cache contents and references are absent from newly written saves and are rebuilt
 behind this barrier.
+
+Fork-owned multi-frame task objects are process-local too. A save detaches their list under the
+existing worker barrier, records a compact phase/progress checkpoint, and after either save outcome
+releases the detached futures, tickets, prepared cuts and global boundary instead of restoring the
+same objects. Nested save calls release resources only at the outer resume. Fresh tasks are created
+lazily from current data: MAIN uses `FULL`, exact ordered `PRICE_REMAINING`, `LISTENERS_ONLY` or
+legacy `DROP`; a partial MAIN rebuilds transient global commodity data from every market but
+publishes price/stockpile/month work only for the unattempted IDs. UPDATE/IMMIGRATION retain exact
+remaining stable IDs, POST recaptures a whole atomic cut, and FINISH is fresh. `WAITING` or a missing
+checkpoint discards the graph without inventing a continuation.
 
 Structural mismatch or disabled config prevents restore-capability admission, while a missing V10
 listener rejects the whole required handshake with mask `0`; Starsector's save/load restoration

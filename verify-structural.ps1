@@ -46,6 +46,7 @@ $testCp = @(
     (Join-Path $core 'fs.sound_obf.jar'),
     (Join-Path $core 'lwjgl.jar'),
     (Join-Path $core 'lwjgl_util.jar'),
+    (Join-Path $core 'log4j-1.2.9.jar'),
     (Join-Path $core 'xstream-1.4.10.jar'),
     (Join-Path $core 'jaxb-api-2.4.0-b180830.0359.jar'),
     (Join-Path $core 'json.jar')
@@ -859,6 +860,46 @@ if ($aotdAvailable) {
     [IO.File]::WriteAllLines(
         $aotdSupplyDemandXStreamReport,
         [string[]] $aotdSupplyDemandXStreamLines,
+        $utf8)
+}
+
+$aotdRuntimeTaskXStreamReport =
+    Join-Path $reportDir 'aotd-runtime-task-xstream-sanitization.txt'
+if ($aotdAvailable) {
+    $ErrorActionPreference = 'Continue'
+    try {
+        $aotdRuntimeTaskXStreamOutput = @(& java `
+            '--add-opens=java.base/java.util=ALL-UNNAMED' `
+            '--add-opens=java.base/java.lang.reflect=ALL-UNNAMED' `
+            '--add-opens=java.base/java.text=ALL-UNNAMED' `
+            '--add-opens=java.desktop/java.awt.font=ALL-UNNAMED' `
+            '--add-opens=java.desktop/java.awt=ALL-UNNAMED' `
+            '-Dstarsector.prepatcher.sessionOrigin=aotd-runtime-task-xstream' `
+            "-javaagent:$mainAgentJar=config=$(Join-Path $modRoot 'profiles\aggressive.properties')" `
+            -cp $aotdEconomyRestoreActualAgentCp `
+            com.starsector.prepatcher.runtime.AoTDRuntimeTaskXStreamSanitizationTest `
+            2>&1)
+        $aotdRuntimeTaskXStreamExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    $aotdRuntimeTaskXStreamLines = @(
+        $aotdRuntimeTaskXStreamOutput | ForEach-Object { $_.ToString() })
+    $aotdRuntimeTaskXStreamLines
+    [IO.File]::WriteAllLines(
+        $aotdRuntimeTaskXStreamReport,
+        [string[]] $aotdRuntimeTaskXStreamLines,
+        $utf8)
+    if ($aotdRuntimeTaskXStreamExitCode -ne 0) {
+        throw 'AoTD runtime-task XStream sanitization verification failed.'
+    }
+} else {
+    $aotdRuntimeTaskXStreamLines = @(
+        "SKIPPED AoTD runtime-task XStream sanitization: $aotdJar not found")
+    $aotdRuntimeTaskXStreamLines
+    [IO.File]::WriteAllLines(
+        $aotdRuntimeTaskXStreamReport,
+        [string[]] $aotdRuntimeTaskXStreamLines,
         $utf8)
 }
 

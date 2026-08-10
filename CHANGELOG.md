@@ -16,6 +16,46 @@
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-08-10
+
+### Исправлено
+
+- Поддерживаемая пара обновлена до Prepatcher `0.18.1` и AoTD Scheduler Fork
+  `1.0.14-spp11`. Bridge остаётся V10 с прежними масками `0xbff`/`0xfff`, но старый
+  `spp10` теперь строго отклоняется, чтобы не запускать несовместимую схему восстановления задач.
+- Форк больше не продолжает process-local граф незавершённых economy tasks ни после загрузки, ни
+  после успешного или неуспешного сохранения в том же процессе. Граф освобождается, а компактный
+  semantic checkpoint лениво создаёт безопасный суффикс в актуальном epoch; nested save очищает
+  ресурсы только на внешнем resume, а `WAITING`-граф отбрасывается без выдуманного продолжения.
+- `MAIN_WORK` восстанавливается по подтверждённому прогрессу: до первой попытки market commit —
+  полностью, после неё — только для точного списка ещё не предпринятых price/stockpile/month
+  commits с повторным построением transient global commodity data по всем рынкам, а после всех
+  commits — только listener boundary. Уже предпринятые market commits не повторяются; неизвестный
+  legacy progress отбрасывает MAIN. `UPDATE_MARKETS`/`IMMIGRATION` продолжаются по оставшимся market
+  IDs без повторного population, `POST_IMMIGRATION` переснимается атомарно, календарный ритм
+  сохраняется.
+- Во время ранних штатных economy steps загрузки заведомо бесполезные `UNKNOWN_MARKET` commits при
+  пустом registry пропускаются одним bulk-решением; trade snapshot использует готовую атомарную
+  supply/demand revision только по dedicated materialized-input generation и точному market-size
+  checkpoint. Trade/accessibility/faction-only work не меняет этот token; proof mismatch выполняет
+  один live read и ставит один coalesced materialized repair даже при неизменившемся trade vector.
+- Multi-frame post-immigration capture теперь связывает каждый рынок с точным scalar/token proof,
+  выборочно переснимает stale entries и публикует только целый registry-locked batch. Ошибка
+  публикации откатывает предыдущий cut и завершает task, а residual `STALE_INPUT` не теряет dirty
+  work.
+- `AoTDUpdateMarketAgainTask` не обходит industries для чистого price/stockpile/accessibility/trade
+  debt; обязательный month-end path заранее invalidates materialized `VALUE + DERIVED + PRICE +
+  STOCK`, поэтому ускоренный skip не пропускает месячный пересчёт.
+- Diagnostic discovery больше не считает JAR-копии из `.build` и `releases` отдельными
+  установленными AoTD fork-кандидатами; runtime handshake остаётся единственным источником
+  capability state.
+
+Новый hook в `CampaignGameManager` не добавлялся: существующий exact
+`CoreLifecyclePluginImpl.econPostSaveRestore()` signal и штатный `onGameLoad(false)` уже покрывают
+безопасную границу, не меняя оригинальную последовательность Starsector `3 + 3 + 2` economy steps.
+
+Подробности и состав проверок: [отчёт о выпуске 0.18.1](docs/releases/0.18.1.md).
+
 ## [0.18.0] - 2026-08-10
 
 ### Добавлено

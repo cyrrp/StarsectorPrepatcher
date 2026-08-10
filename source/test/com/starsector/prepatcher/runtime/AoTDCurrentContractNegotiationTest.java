@@ -11,7 +11,7 @@ import java.nio.file.Path;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
-/** Strict-current spp10 negotiation, structural gate, safe profile, and diagnostics. */
+/** Strict-current spp11 negotiation, structural gate, safe profile, and diagnostics. */
 public final class AoTDCurrentContractNegotiationTest {
     private AoTDCurrentContractNegotiationTest() {}
 
@@ -57,8 +57,8 @@ public final class AoTDCurrentContractNegotiationTest {
 
             for (String unsupported : new String[] {
                     "1.0.14-spp4", "1.0.14-spp5", "1.0.14-spp6",
-                    "1.0.14-spp7", "1.0.14-spp8", "1.0.14-spp9",
-                    "1.0.14-spp10-unreviewed-future"}) {
+                    "1.0.14-spp7", "1.0.14-spp8", "1.0.14-spp9", "1.0.14-spp10",
+                    "1.0.14-spp11-unreviewed-future"}) {
                 long rejected = register(unsupported,
                         StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES,
                         ignored -> { }, (industry, ids) -> null, () -> { });
@@ -122,7 +122,7 @@ public final class AoTDCurrentContractNegotiationTest {
         } finally {
             Files.deleteIfExists(configFile);
         }
-        System.out.println("OK AoTD strict spp10 contract required=0xbff optional=0xfff "
+        System.out.println("OK AoTD strict spp11 contract required=0xbff optional=0xfff "
                 + "structural-gate/loader-gc/safe/current/obsolete/future/mask/"
                 + "callback diagnostics");
     }

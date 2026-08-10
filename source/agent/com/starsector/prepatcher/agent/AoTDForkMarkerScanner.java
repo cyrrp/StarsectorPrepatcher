@@ -2,10 +2,15 @@ package com.starsector.prepatcher.agent;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitOption;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.jar.JarFile;
 
@@ -71,22 +76,65 @@ final class AoTDForkMarkerScanner {
         }
         if (!containsModId(json, MOD_ID)) return;
 
-        try (var files = Files.walk(directory, 3)) {
-            files.filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().endsWith(".jar"))
-                    .sorted()
-                    .forEach(jar -> {
-                        try (JarFile file = new JarFile(jar.toFile())) {
-                            if (file.getJarEntry(MARKER_ENTRY) != null) {
-                                result.add(new Candidate(directory, jar));
+        List<Path> jars = new ArrayList<>();
+        try {
+            Files.walkFileTree(
+                    directory,
+                    EnumSet.noneOf(FileVisitOption.class),
+                    3,
+                    new SimpleFileVisitor<>() {
+                        @Override
+                        public FileVisitResult preVisitDirectory(
+                                Path candidate, BasicFileAttributes attributes) {
+                            if (!candidate.equals(directory)
+                                    && isDiagnosticArtifactPath(directory, candidate)) {
+                                return FileVisitResult.SKIP_SUBTREE;
                             }
-                        } catch (IOException ignored) {
-                            // A malformed unrelated JAR cannot make startup fail.
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public FileVisitResult visitFile(
+                                Path candidate, BasicFileAttributes attributes) {
+                            if (attributes.isRegularFile()
+                                    && candidate.getFileName().toString().endsWith(".jar")) {
+                                jars.add(candidate);
+                            }
+                            return FileVisitResult.CONTINUE;
                         }
                     });
         } catch (IOException ignored) {
             // Runtime handshake remains authoritative if early discovery fails.
+            return;
         }
+        jars.sort(Comparator.naturalOrder());
+        for (Path jar : jars) {
+            try (JarFile file = new JarFile(jar.toFile())) {
+                if (file.getJarEntry(MARKER_ENTRY) != null) {
+                    result.add(new Candidate(directory, jar));
+                }
+            } catch (IOException ignored) {
+                // A malformed unrelated JAR cannot make startup fail.
+            }
+        }
+    }
+
+    /**
+     * Build caches and release-staging trees can contain byte-for-byte copies of the installed
+     * fork JAR. They are not loadable mod candidates and must be rejected before opening a JAR.
+     */
+    private static boolean isDiagnosticArtifactPath(Path modDirectory, Path path) {
+        Path relative;
+        try {
+            relative = modDirectory.relativize(path);
+        } catch (IllegalArgumentException ignored) {
+            return true;
+        }
+        for (Path segment : relative) {
+            String name = segment.toString();
+            if (name.startsWith(".") || "releases".equalsIgnoreCase(name)) return true;
+        }
+        return false;
     }
 
     private static boolean containsModId(String json, String expected) {
