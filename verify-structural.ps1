@@ -20,7 +20,17 @@ if (-not $verifyMutexTaken) {
     throw 'Timed out waiting for another StarsectorPrepatcher verification process.'
 }
 
-$gameRoot = (Resolve-Path (Join-Path $modRoot '..\..')).Path
+function Find-GameRoot([string] $startPath) {
+    $candidate = [IO.DirectoryInfo]::new($startPath)
+    while ($null -ne $candidate) {
+        if (Test-Path -LiteralPath (Join-Path $candidate.FullName 'starsector-core') -PathType Container) {
+            return $candidate.FullName
+        }
+        $candidate = $candidate.Parent
+    }
+    throw "Could not find a Starsector root above $startPath."
+}
+$gameRoot = Find-GameRoot $modRoot
 $core = Join-Path $gameRoot 'starsector-core'
 $build = Join-Path $modRoot '.build'
 $agentClasses = Join-Path $build 'agent-classes'

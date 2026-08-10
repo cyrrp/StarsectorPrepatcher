@@ -1,7 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 MOD_ROOT="$(cd "$(dirname "$0")" && pwd)"
-GAME_ROOT="$(cd "$MOD_ROOT/../.." && pwd)"
+find_game_root() {
+  local candidate="$1"
+  while [[ "$candidate" != "/" ]]; do
+    if [[ -d "$candidate/starsector-core" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+    candidate="$(dirname "$candidate")"
+  done
+  return 1
+}
+GAME_ROOT="$(find_game_root "$MOD_ROOT")" || {
+  echo "Could not find a Starsector root above $MOD_ROOT." >&2
+  exit 1
+}
 CORE="$GAME_ROOT/starsector-core"
 BUILD="$MOD_ROOT/.build"
 rm -rf "$BUILD"
@@ -18,14 +32,14 @@ find "$MOD_ROOT/source/bootstrap" -name '*.java' -print0 | xargs -0 javac -encod
 printf '%s\n' \
   'Manifest-Version: 1.0' \
   'Implementation-Title: StarsectorPrepatcher Agent' \
-  'Implementation-Version: 0.18.0' \
+  'Implementation-Version: 0.18.2' \
   'Premain-Class: com.starsector.prepatcher.agent.PrepatcherAgent' \
   'Can-Redefine-Classes: false' \
   'Can-Retransform-Classes: false' '' > "$BUILD/agent.mf"
 printf '%s\n' \
   'Manifest-Version: 1.0' \
   'Implementation-Title: StarsectorPrepatcher Bootstrap' \
-  'Implementation-Version: 0.18.0' '' > "$BUILD/bootstrap.mf"
+  'Implementation-Version: 0.18.2' '' > "$BUILD/bootstrap.mf"
 jar cfm "$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" "$BUILD/agent.mf" -C "$BUILD/agent-classes" .
 jar cfm "$MOD_ROOT/jars/StarsectorPrepatcherBootstrap.jar" "$BUILD/bootstrap.mf" -C "$BUILD/bootstrap-classes" .
 

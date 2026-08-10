@@ -628,6 +628,7 @@ public final class DocumentationConsistencyTest {
         try (Stream<Path> files = Files.list(root)) {
             files.filter(Files::isRegularFile)
                     .filter(path -> !path.getFileName().toString().equals("SHA256SUMS.txt"))
+                    .filter(path -> !path.getFileName().toString().equals(".git"))
                     .map(path -> display(root, path))
                     .sorted()
                     .forEach(inputs::add);

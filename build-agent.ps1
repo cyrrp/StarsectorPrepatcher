@@ -1,6 +1,16 @@
 $ErrorActionPreference = 'Stop'
 $modRoot = (Resolve-Path $PSScriptRoot).Path
-$gameRoot = (Resolve-Path (Join-Path $modRoot '..\..')).Path
+function Find-GameRoot([string] $startPath) {
+    $candidate = [IO.DirectoryInfo]::new($startPath)
+    while ($null -ne $candidate) {
+        if (Test-Path -LiteralPath (Join-Path $candidate.FullName 'starsector-core') -PathType Container) {
+            return $candidate.FullName
+        }
+        $candidate = $candidate.Parent
+    }
+    throw "Could not find a Starsector root above $startPath."
+}
+$gameRoot = Find-GameRoot $modRoot
 $core = Join-Path $gameRoot 'starsector-core'
 $build = Join-Path $modRoot '.build'
 $agentClasses = Join-Path $build 'agent-classes'
@@ -19,8 +29,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Bootstrap compilation failed.' }
 $utf8 = New-Object Text.UTF8Encoding($false)
 $agentManifest = Join-Path $build 'agent.mf'
 $bootstrapManifest = Join-Path $build 'bootstrap.mf'
-[IO.File]::WriteAllText($agentManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Agent`nImplementation-Version: 0.18.0`nPremain-Class: com.starsector.prepatcher.agent.PrepatcherAgent`nCan-Redefine-Classes: false`nCan-Retransform-Classes: false`n`n", $utf8)
-[IO.File]::WriteAllText($bootstrapManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Bootstrap`nImplementation-Version: 0.18.0`n`n", $utf8)
+[IO.File]::WriteAllText($agentManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Agent`nImplementation-Version: 0.18.2`nPremain-Class: com.starsector.prepatcher.agent.PrepatcherAgent`nCan-Redefine-Classes: false`nCan-Retransform-Classes: false`n`n", $utf8)
+[IO.File]::WriteAllText($bootstrapManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Bootstrap`nImplementation-Version: 0.18.2`n`n", $utf8)
 $agentJar = Join-Path $modRoot 'agent\StarsectorPrepatcherAgent.jar'
 & jar cfm $agentJar $agentManifest -C $agentClasses .
 if ($LASTEXITCODE -ne 0) { throw 'Agent JAR creation failed.' }
@@ -60,7 +70,7 @@ if ($runtimePayloadEntries.Count -ne $expectedRuntimePayloadCount) {
 # Runtime logs, build intermediates and SHA256SUMS.txt itself are intentionally excluded.
 $checksumFiles = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
 Get-ChildItem -LiteralPath $modRoot -File -Force | Where-Object {
-    $_.Name -ne 'SHA256SUMS.txt'
+    $_.Name -notin @('SHA256SUMS.txt', '.git')
 } | ForEach-Object { $checksumFiles.Add($_) }
 foreach ($directory in @('agent', 'baseline', 'docs', 'jars', 'media', 'profiles', 'source')) {
     Get-ChildItem -LiteralPath (Join-Path $modRoot $directory) -File -Force -Recurse |
