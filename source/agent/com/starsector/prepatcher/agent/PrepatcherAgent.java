@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.Set;
 
 public final class PrepatcherAgent {
-    public static final String VERSION = "0.17.2";
+    public static final String VERSION = "0.18.0";
     private PrepatcherAgent() {}
 
     public static void premain(String agentArgs, Instrumentation instrumentation) {
@@ -96,7 +96,8 @@ public final class PrepatcherAgent {
                     marketOverviewMutationPlan, tradeMutationPlan, industryMutationPlan,
                     config.uiMarketMutationRefresh, syntheticCargoEconomySkipEnabled,
                     marketOpenContextEnabled, syntheticCargoUiEnabled,
-                    config.vanillaMarketOpenLocalization, config.marketScheduler, false);
+                    config.vanillaMarketOpenLocalization, config.marketScheduler,
+                    config.aotdEconomyRestoreCoordination, false);
             FastForwardPresentationTransformer presentationPlan =
                     new FastForwardPresentationTransformer(config);
             Class<?> loadedTarget = findLoadedTarget(
@@ -128,6 +129,15 @@ public final class PrepatcherAgent {
             boolean presentationMarkerLoaded = recordLoadedPresentationTargets(
                     instrumentation, presentationPlan, runtimeLoader);
 
+            // Install and prove the successful tail of vanilla economy restoration before the
+            // fork bridge can negotiate the corresponding required capability.
+            instrumentation.addTransformer(
+                    new AoTDEconomyRestoreCompletionTransformer(
+                            config.aotdEconomyRestoreCoordination, runtimeLoader), false);
+            System.setProperty(
+                    AoTDEconomyRestoreCompletionTransformer.statusProperty(),
+                    config.aotdEconomyRestoreCoordination
+                            ? "transformer-installed" : "disabled");
             // AoTD owns an inert bridge class. Patch only that verified class at
             // load time so the mod never uses reflection or loader probing.
             instrumentation.addTransformer(
@@ -282,6 +292,7 @@ public final class PrepatcherAgent {
             boolean detachedCargoContextEnabled,
             boolean marketOpenContractEnabled,
             boolean aotdForkCompatibilityEnabled,
+            boolean aotdEconomyRestoreCoordinationEnabled,
             boolean includeDisabled) {
         Set<String> targets = new LinkedHashSet<>();
         for (String target : PrepatcherTransformer.TARGET_CLASSES) {
@@ -321,6 +332,9 @@ public final class PrepatcherAgent {
         }
         if (includeDisabled || marketOpenContractEnabled) {
             targets.addAll(VanillaMarketOpenLocalizationContractTransformer.TARGET_CLASSES);
+        }
+        if (includeDisabled || aotdEconomyRestoreCoordinationEnabled) {
+            targets.add(AoTDEconomyRestoreCompletionTransformer.TARGET);
         }
         // The bridge transformer is always registered. The fork-owned mutation
         // boundary follows the scheduler feature switch.

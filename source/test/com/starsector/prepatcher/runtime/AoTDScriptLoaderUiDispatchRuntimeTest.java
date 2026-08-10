@@ -36,6 +36,8 @@ public final class AoTDScriptLoaderUiDispatchRuntimeTest {
                     StandardCharsets.UTF_8);
             StarsectorPrepatcherRuntimeBridge.configure(
                     PrepatcherConfig.load(configFile), configFile.getParent());
+            StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(
+                    true, "runtime-test");
 
             URL testClasses = AoTDScriptLoaderUiDispatchRuntimeTest.class
                     .getProtectionDomain().getCodeSource().getLocation();
@@ -49,6 +51,7 @@ public final class AoTDScriptLoaderUiDispatchRuntimeTest {
                         forkLoader, Consumer.class, "accept");
                 BiFunction<Object, Object, Object> resolver = callback(
                         forkLoader, BiFunction.class, "apply");
+                Runnable economyRestore = callback(forkLoader, Runnable.class, "run");
                 long negotiated = StarsectorPrepatcherRuntimeBridge
                         .registerAoTDForkContract(
                                 "aotd_theory_of_toolbox",
@@ -56,7 +59,7 @@ public final class AoTDScriptLoaderUiDispatchRuntimeTest {
                                         .AOTD_CURRENT_FORK_VERSION,
                                 StarsectorPrepatcherRuntimeBridge
                                         .AOTD_CURRENT_DECLARED_CAPABILITIES,
-                                delivery, resolver);
+                                delivery, resolver, economyRestore);
                 require(negotiated == StarsectorPrepatcherRuntimeBridge
                                 .AOTD_CURRENT_DECLARED_CAPABILITIES,
                         "child-loader fork contract was not negotiated");

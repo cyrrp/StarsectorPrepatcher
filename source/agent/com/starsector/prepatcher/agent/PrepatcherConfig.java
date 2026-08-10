@@ -63,6 +63,7 @@ public final class PrepatcherConfig {
     public final boolean commodityTemporalFastPath;
     public final boolean marketNoOpCallbacks;
     public final boolean aotdCleanDeficitPath;
+    public final boolean aotdEconomyRestoreCoordination;
     public final boolean marketShareLinearAggregation;
     public final boolean marketShareDataPutElision;
     public final boolean punitivePlayerShareLocalCache;
@@ -236,6 +237,8 @@ public final class PrepatcherConfig {
         commodityTemporalFastPath = bool("patch.commodityTemporalFastPath", false);
         marketNoOpCallbacks = bool("patch.marketNoOpCallbacks", false);
         aotdCleanDeficitPath = bool("patch.aotdCleanDeficitPath", true);
+        aotdEconomyRestoreCoordination = bool(
+                "patch.aotdEconomyRestoreCoordination", true);
         marketShareLinearAggregation = bool("patch.marketShareLinearAggregation", true);
         marketShareDataPutElision = bool("patch.marketShareDataPutElision", true);
         punitivePlayerShareLocalCache = bool("patch.punitivePlayerShareLocalCache", true);

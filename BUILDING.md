@@ -118,7 +118,7 @@ profile и только там включает known-disabled loading/startup p
 Краткие пользовательские изменения фиксируются в [`CHANGELOG.md`](CHANGELOG.md), обязательные
 regression gates — в [`docs/VALIDATION.md`](docs/VALIDATION.md), а итоговые решения, evidence и
 остаточные риски конкретного выпуска — в единственном каноническом
-[`docs/releases/<version>.md`](docs/releases/0.17.2.md).
+[`docs/releases/<version>.md`](docs/releases/0.18.0.md).
 
 ## Java 17 compatibility
 

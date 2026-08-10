@@ -76,19 +76,24 @@ public final class AoTDSchedulerBridgeTransformerTest {
                 "repeated transformation was not idempotent");
         require(transformer.transform(modLoader,
                 AoTDSchedulerBridgeTransformer.TARGET, null, null,
-                withBridgeContract(original, 8, "AOTD_SCHEDULER_BRIDGE_V8")) == null,
-                "obsolete V8 bridge was transformed");
+                withBridgeContract(original, 9, "AOTD_SCHEDULER_BRIDGE_V9")) == null,
+                "obsolete V9 bridge was transformed");
         require("UNSUPPORTED_CONTRACT".equals(System.getProperty(
                         "starsector.prepatcher.aotdBridgePatch")),
                 "obsolete bridge did not publish unsupported-contract status");
         require(transformer.transform(modLoader,
                 AoTDSchedulerBridgeTransformer.TARGET, null, null,
-                withBridgeContract(original, 10, "AOTD_SCHEDULER_BRIDGE_V10")) == null,
-                "future V10 bridge was transformed");
+                withBridgeContract(original, 11, "AOTD_SCHEDULER_BRIDGE_V11")) == null,
+                "future V11 bridge was transformed");
         require(transformer.transform(modLoader,
                 AoTDSchedulerBridgeTransformer.TARGET, null, null,
                 withoutMethod(original, "publishRuntimeEpoch", "(JJ)V")) == null,
                 "partial current bridge was transformed");
+        require(transformer.transform(modLoader,
+                AoTDSchedulerBridgeTransformer.TARGET, null, null,
+                withoutMethod(original, "economyRestoreCompleteSignal",
+                        "()Ljava/lang/Runnable;")) == null,
+                "current bridge without restore callback factory was transformed");
 
         Class<?> unpatchedBridge = new ByteMapLoader(classes, false).loadClass(
                 "data.kaysaar.aotd.tot.compat.SchedulerBridge");
@@ -106,6 +111,8 @@ public final class AoTDSchedulerBridgeTransformerTest {
                         + "patch.campaignCargoNoGlobalEconomyStep=true\n");
         com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge.configure(
                 PrepatcherConfig.load(configPath), Path.of("."));
+        com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge
+                .setAoTDEconomyRestoreCompletionContract(true, "bridge-test");
         Map<String, byte[]> patchedClasses = new HashMap<>(classes);
         patchedClasses.put(BRIDGE_ENTRY, patched);
         patchedClasses.put(ECONOMY_ENTRY,
@@ -118,14 +125,21 @@ public final class AoTDSchedulerBridgeTransformerTest {
                 "patched bridge did not activate: " + active);
         long capabilities = ((Long) patchedBridge.getMethod(
                 "getNegotiatedCapabilities").invoke(null)).longValue();
-        require(capabilities == 2047L, "unexpected negotiated capabilities: " + capabilities);
+        require(capabilities == 4095L, "unexpected negotiated capabilities: " + capabilities);
         patchedBridge.getMethod("requireProductionProfile").invoke(null);
+        Class<?> runtime = Class.forName(
+                "com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge");
+        long restoreSignalsBefore = ((Long) patchedBridge.getMethod(
+                "getEconomyRestoreCompleteSignalCount").invoke(null)).longValue();
+        runtime.getMethod("publishAoTDEconomyRestoreComplete").invoke(null);
+        long restoreSignalsAfter = ((Long) patchedBridge.getMethod(
+                "getEconomyRestoreCompleteSignalCount").invoke(null)).longValue();
+        require(restoreSignalsAfter == restoreSignalsBefore + 1L,
+                "loader-local restore callback was not delivered exactly once");
         verifyCommittedForkDiagnosticsCannotSelectGlobalFallback(
                 patchedLoader);
         patchedBridge.getMethod("publishRuntimeEpoch", long.class, long.class)
                 .invoke(null, 11L, 23L);
-        Class<?> runtime = Class.forName(
-                "com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge");
         long campaignEpoch = ((Long) runtime.getMethod(
                 "getAoTDCampaignEpoch").invoke(null)).longValue();
         long economyEpoch = ((Long) runtime.getMethod(
@@ -420,16 +434,24 @@ public final class AoTDSchedulerBridgeTransformerTest {
         require(initialize != null, "initialize method missing");
         boolean registrationCall = false;
         boolean activationCall = false;
+        boolean restoreFactoryCall = false;
         for (AbstractInsnNode insn = initialize.instructions.getFirst();
              insn != null; insn = insn.getNext()) {
             if (!(insn instanceof MethodInsnNode call)
                     || call.getOpcode() != Opcodes.INVOKESTATIC) continue;
             if ("com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge".equals(call.owner)
-                    && "registerAoTDForkContract".equals(call.name)) registrationCall = true;
+                    && "registerAoTDForkContract".equals(call.name)
+                    && ("(Ljava/lang/String;Ljava/lang/String;JLjava/util/function/Consumer;"
+                            + "Ljava/util/function/BiFunction;Ljava/lang/Runnable;)J")
+                            .equals(call.desc)) registrationCall = true;
+            if (AoTDSchedulerBridgeTransformer.TARGET.equals(call.owner)
+                    && "economyRestoreCompleteSignal".equals(call.name)
+                    && "()Ljava/lang/Runnable;".equals(call.desc)) restoreFactoryCall = true;
             if (AoTDSchedulerBridgeTransformer.TARGET.equals(call.owner)
                     && "activateFromPrepatcher".equals(call.name)) activationCall = true;
         }
         require(registrationCall, "direct runtime registration call missing");
+        require(restoreFactoryCall, "loader-local restore callback factory call missing");
         require(activationCall, "activation call missing");
 
         MethodNode afterMutation = null;

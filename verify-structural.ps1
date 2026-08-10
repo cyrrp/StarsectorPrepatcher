@@ -303,6 +303,10 @@ $aotdDetachedCargoContextReport =
     Join-Path $reportDir 'aotd-detached-cargo-context.txt'
 $uiEconomyScenarioReport = Join-Path $reportDir 'ui-economy-scenario-contract.txt'
 $readOnlyUiEconomyReport = Join-Path $reportDir 'read-only-ui-economy-step.txt'
+$aotdEconomyRestoreReport =
+    Join-Path $reportDir 'aotd-economy-restore-completion.txt'
+$aotdEconomyRestoreRuntimeReport =
+    Join-Path $reportDir 'aotd-economy-restore-runtime.txt'
 $aotdUiEconomyBehaviorReport = Join-Path $reportDir 'aotd-ui-economy-behavior.txt'
 $aotdMarkerScannerReport = Join-Path $reportDir 'aotd-marker-scanner.txt'
 
@@ -480,6 +484,24 @@ if ($readOnlyUiEconomyExitCode -ne 0) {
     throw 'Read-only UI economy-step verification failed.'
 }
 
+$ErrorActionPreference = 'Continue'
+try {
+    $aotdEconomyRestoreOutput = @(& java @exports -cp $classPath `
+        com.starsector.prepatcher.agent.AoTDEconomyRestoreCompletionTransformerTest `
+        (Join-Path $core 'starfarer.api.jar') 2>&1)
+    $aotdEconomyRestoreExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$aotdEconomyRestoreLines = @(
+    $aotdEconomyRestoreOutput | ForEach-Object { $_.ToString() })
+$aotdEconomyRestoreLines
+[IO.File]::WriteAllLines(
+    $aotdEconomyRestoreReport, [string[]] $aotdEconomyRestoreLines, $utf8)
+if ($aotdEconomyRestoreExitCode -ne 0) {
+    throw 'AoTD economy-restore completion verification failed.'
+}
+
 if ($aotdAvailable) {
     $aotdTestCp = @($testClasses, $testCp) -join [IO.Path]::PathSeparator
     foreach ($case in @(
@@ -639,6 +661,25 @@ $runtimeCp = @(
     (Join-Path $core 'json.jar')
 ) -join [IO.Path]::PathSeparator
 $runtimeReport = Join-Path $reportDir 'runtime-regression.txt'
+$ErrorActionPreference = 'Continue'
+try {
+    $aotdEconomyRestoreRuntimeOutput = @(& java -cp $runtimeCp `
+        com.starsector.prepatcher.runtime.AoTDEconomyRestoreRuntimeTest 2>&1)
+    $aotdEconomyRestoreRuntimeExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$aotdEconomyRestoreRuntimeLines = @(
+    $aotdEconomyRestoreRuntimeOutput | ForEach-Object { $_.ToString() })
+$aotdEconomyRestoreRuntimeLines
+[IO.File]::WriteAllLines(
+    $aotdEconomyRestoreRuntimeReport,
+    [string[]] $aotdEconomyRestoreRuntimeLines,
+    $utf8)
+if ($aotdEconomyRestoreRuntimeExitCode -ne 0) {
+    throw 'AoTD economy-restore callback runtime verification failed.'
+}
+
 $runtimeLines = [System.Collections.Generic.List[string]]::new()
 foreach ($test in @(
     'com.starsector.prepatcher.runtime.LifecycleGcRegressionTest',
@@ -737,6 +778,90 @@ $startupAuditLines
 if ($startupAuditExitCode -ne 0) { throw 'Startup audit coverage test failed.' }
 
 $mainAgentJar = Join-Path $modRoot 'agent\StarsectorPrepatcherAgent.jar'
+$aotdEconomyRestoreActualAgentCases = @(
+    @('core-first',
+      (Join-Path $reportDir 'aotd-economy-restore-actual-agent-core-first.txt')),
+    @('fork-first',
+      (Join-Path $reportDir 'aotd-economy-restore-actual-agent-fork-first.txt')))
+if ($aotdAvailable) {
+    $aotdEconomyRestoreActualAgentCp =
+        @($runtimeCp, $aotdJar) -join [IO.Path]::PathSeparator
+    foreach ($restoreCase in $aotdEconomyRestoreActualAgentCases) {
+        $ErrorActionPreference = 'Continue'
+        try {
+            $aotdEconomyRestoreActualAgentOutput = @(& java `
+                "-javaagent:$mainAgentJar=config=$(Join-Path $modRoot 'profiles\aggressive.properties')" `
+                -cp $aotdEconomyRestoreActualAgentCp `
+                com.starsector.prepatcher.runtime.AoTDEconomyRestoreActualAgentSmokeTest `
+                $restoreCase[0] 2>&1)
+            $aotdEconomyRestoreActualAgentExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $savedErrorActionPreference
+        }
+        $aotdEconomyRestoreActualAgentLines = @(
+            $aotdEconomyRestoreActualAgentOutput | ForEach-Object { $_.ToString() })
+        $aotdEconomyRestoreActualAgentLines
+        [IO.File]::WriteAllLines(
+            $restoreCase[1],
+            [string[]] $aotdEconomyRestoreActualAgentLines,
+            $utf8)
+        if ($aotdEconomyRestoreActualAgentExitCode -ne 0) {
+            throw "AoTD economy-restore actual-agent smoke failed: $($restoreCase[0])"
+        }
+    }
+} else {
+    foreach ($restoreCase in $aotdEconomyRestoreActualAgentCases) {
+        $aotdEconomyRestoreActualAgentLines = @(
+            "SKIPPED AoTD economy-restore $($restoreCase[0]) actual-agent smoke: "
+                    + "$aotdJar not found")
+        $aotdEconomyRestoreActualAgentLines
+        [IO.File]::WriteAllLines(
+            $restoreCase[1],
+            [string[]] $aotdEconomyRestoreActualAgentLines,
+            $utf8)
+    }
+}
+
+$aotdSupplyDemandXStreamReport =
+    Join-Path $reportDir 'aotd-supply-demand-xstream-migration.txt'
+if ($aotdAvailable) {
+    $ErrorActionPreference = 'Continue'
+    try {
+        $aotdSupplyDemandXStreamOutput = @(& java `
+            '--add-opens=java.base/java.util=ALL-UNNAMED' `
+            '--add-opens=java.base/java.lang.reflect=ALL-UNNAMED' `
+            '--add-opens=java.base/java.text=ALL-UNNAMED' `
+            '--add-opens=java.desktop/java.awt.font=ALL-UNNAMED' `
+            '--add-opens=java.desktop/java.awt=ALL-UNNAMED' `
+            '-Dstarsector.prepatcher.sessionOrigin=aotd-supply-demand-xstream' `
+            "-javaagent:$mainAgentJar=config=$(Join-Path $modRoot 'profiles\aggressive.properties')" `
+            -cp $aotdEconomyRestoreActualAgentCp `
+            com.starsector.prepatcher.runtime.AoTDSupplyDemandXStreamMigrationTest `
+            2>&1)
+        $aotdSupplyDemandXStreamExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    $aotdSupplyDemandXStreamLines = @(
+        $aotdSupplyDemandXStreamOutput | ForEach-Object { $_.ToString() })
+    $aotdSupplyDemandXStreamLines
+    [IO.File]::WriteAllLines(
+        $aotdSupplyDemandXStreamReport,
+        [string[]] $aotdSupplyDemandXStreamLines,
+        $utf8)
+    if ($aotdSupplyDemandXStreamExitCode -ne 0) {
+        throw 'AoTD supply/demand XStream migration verification failed.'
+    }
+} else {
+    $aotdSupplyDemandXStreamLines = @(
+        "SKIPPED AoTD supply/demand XStream migration: $aotdJar not found")
+    $aotdSupplyDemandXStreamLines
+    [IO.File]::WriteAllLines(
+        $aotdSupplyDemandXStreamReport,
+        [string[]] $aotdSupplyDemandXStreamLines,
+        $utf8)
+}
+
 $coreWorldsAgentReport = Join-Path $reportDir 'core-worlds-actual-agent.txt'
 $ErrorActionPreference = 'Continue'
 try {

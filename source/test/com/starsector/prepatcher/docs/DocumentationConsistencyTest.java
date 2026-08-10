@@ -562,6 +562,7 @@ public final class DocumentationConsistencyTest {
                 "commodity-temporal-agent-smoke.txt",
                 "market-noop-actual-agent-smoke.txt",
                 "temp-mod-xstream-save-smoke.txt",
+                "aotd-supply-demand-xstream-migration.txt",
                 "hyperspace-verification.txt",
                 "startup-smoke.txt",
                 "faster-rendering-loader-smoke.txt");

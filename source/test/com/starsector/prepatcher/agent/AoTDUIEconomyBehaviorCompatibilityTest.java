@@ -46,6 +46,8 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
             ROOT + "scripts/economy/AoTDEconomyReachStepper";
     private static final String COMMODITY_MARKET_DATA =
             ROOT + "scripts/commoditydata/AoTDCommodityMarketData";
+    private static final String SUPPLY_DEMAND_DATA =
+            ROOT + "scripts/commoditydata/AoTDSupplyDemandData";
     private static final String TRADE_MANAGER =
             ROOT + "scripts/trade/manager/AoTDTradeManager";
     private static final String FINISH =
@@ -74,6 +76,7 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
         ClassNode update = read(jar, UPDATE);
         ClassNode reachStepper = read(jar, REACH_STEPPER);
         ClassNode commodityMarketData = read(jar, COMMODITY_MARKET_DATA);
+        ClassNode supplyDemandData = read(jar, SUPPLY_DEMAND_DATA);
         ClassNode tradeManager = read(jar, TRADE_MANAGER);
         ClassNode finish = read(jar, FINISH);
         ClassNode post = read(jar, POST);
@@ -88,6 +91,7 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
         verifyNoDiagnosticIndustryMarketReads(update);
         verifyDiagnosticArgumentBoundaries(
                 commodityMarketData, reachStepper, finish, main, tradeManager);
+        verifyLinearSupplyDemandSnapshot(supplyDemandData);
         verifyEconomyRouting(economy);
         verifySingleMarketPipeline(reach);
         verifyNoGlobalCommodityBuildInUiMode(main);
@@ -95,10 +99,11 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
         verifySubsetRegistryAudit(post);
 
         System.out.println("OK aotd-ui-economy-behavior"
-                + " spp9-explicit-dispatch standard-steps-global"
+                + " spp10-explicit-dispatch standard-steps-global"
                 + " owner-local-transient-revision-gate"
                 + " post-commit-no-throw baseline-fail-open"
                 + " diagnostic-arguments-no-throw"
+                + " transient-linear-supply-demand-snapshot"
                 + " single-market-main/update/immigration/snapshot"
                 + " no-ui-global-commodity-build no-ui-global-trade-cut"
                 + " explicit-cargo-skip ui-market-mutation-refresh"
@@ -106,16 +111,58 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
                 + " listener-boundary subset-registry-audit");
     }
 
+    private static void verifyLinearSupplyDemandSnapshot(ClassNode supplyDemandData) {
+        FieldNode industries = requireField(supplyDemandData, "stagingIndustries");
+        require("Ljava/util/ArrayList;".equals(industries.desc),
+                "supply/demand staging lost its ordered ArrayList industry snapshot");
+        require((industries.access & Opcodes.ACC_TRANSIENT) != 0,
+                "supply/demand staging industry snapshot became serialized state");
+
+        MethodNode prepare = requireMethod(
+                supplyDemandData,
+                "prepareSupplyDemandData",
+                "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;Z)L"
+                        + SUPPLY_DEMAND_DATA + "$PreparedRefresh;");
+        require(countCalls(
+                        prepare,
+                        "com/fs/starfarer/api/campaign/econ/MarketAPI",
+                        "getIndustries",
+                        "()Ljava/util/List;") == 1,
+                "supply/demand preparation no longer takes one ordered industry pass");
+        require(countCalls(
+                        prepare,
+                        "com/fs/starfarer/api/campaign/econ/MarketAPI",
+                        "getIndustry",
+                        "(Ljava/lang/String;)Lcom/fs/starfarer/api/campaign/econ/Industry;") == 0,
+                "supply/demand preparation reintroduced repeated market.getIndustry(id) lookups");
+        require(countCalls(
+                        prepare,
+                        "com/fs/starfarer/api/campaign/econ/Industry",
+                        "getDemand",
+                        "(Ljava/lang/String;)Lcom/fs/starfarer/api/campaign/econ/"
+                                + "MutableCommodityQuantity;") == 1,
+                "supply/demand preparation lost its single direct demand read site");
+        require(countCalls(
+                        prepare,
+                        "com/fs/starfarer/api/campaign/econ/Industry",
+                        "getSupply",
+                        "(Ljava/lang/String;)Lcom/fs/starfarer/api/campaign/econ/"
+                                + "MutableCommodityQuantity;") == 1,
+                "supply/demand preparation lost its single direct supply read site");
+    }
+
     private static void verifyExplicitDispatcherContract(
             ClassNode contract, ClassNode bridge, ClassNode economy) {
         requireConstant(contract, "FORK_VERSION", "Ljava/lang/String;",
-                "1.0.14-spp9");
+                "1.0.14-spp10");
         requireConstant(contract, "PRODUCTION_CAPABILITIES", "J",
-                Long.valueOf(0x3ffL));
+                Long.valueOf(0xbffL));
         requireConstant(contract, "DECLARED_CAPABILITIES", "J",
-                Long.valueOf(0x7ffL));
+                Long.valueOf(0xfffL));
         requireConstant(contract, "CAPABILITY_UI_ECONOMY_DISPATCH", "J",
                 Long.valueOf(1L << 9));
+        requireConstant(contract, "CAPABILITY_ECONOMY_RESTORE_COORDINATION", "J",
+                Long.valueOf(1L << 11));
         requireConstant(contract, "UI_ECONOMY_ACTION_MARKET_OPEN", "I",
                 Integer.valueOf(1));
         requireConstant(contract, "UI_ECONOMY_ACTION_CARGO", "I",
@@ -126,9 +173,9 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
                 "current fork contract retained obsolete ABI_VERSION");
         require(!hasField(contract, "CAPABILITY_UI_CALL_CONTEXTS"),
                 "current fork contract retained obsolete UI capability alias");
-        requireConstant(bridge, "BRIDGE_SCHEMA", "I", Integer.valueOf(9));
+        requireConstant(bridge, "BRIDGE_SCHEMA", "I", Integer.valueOf(10));
         requireConstant(bridge, "BRIDGE_MARKER", "Ljava/lang/String;",
-                "AOTD_SCHEDULER_BRIDGE_V9");
+                "AOTD_SCHEDULER_BRIDGE_V10");
         for (String legacy : new String[] {
                 "consumeOpeningMarket", "consumeDetachedCargoOpen",
                 "consumeUiMarketMutation", "consumeUiMarketMutationPayload"}) {
@@ -420,7 +467,7 @@ public final class AoTDUIEconomyBehaviorCompatibilityTest {
                 Set.of("size"));
         requireSimpleBaselineArgumentRegion(
                 requireMethod(main, "materializeMarketSupplyDemand",
-                        "(Lcom/fs/starfarer/campaign/econ/Market;)V"),
+                        "(Lcom/fs/starfarer/campaign/econ/Market;)Z"),
                 "supply-demand.market-commodities", "operation",
                 "(Ljava/lang/String;J)V", Set.of("size"));
 

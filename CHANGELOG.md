@@ -16,6 +16,31 @@
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-10
+
+### Добавлено
+
+- Exact fail-open hook в успешном хвосте
+  `CoreLifecyclePluginImpl.econPostSaveRestore()V`: после всех industry restore и market reapply он
+  публикует один O(1) loader-neutral `Runnable` signal, не обходя рынки в игровом core.
+- Единый переключатель `patch.aotdEconomyRestoreCoordination` во всех поставляемых профилях и
+  capability `ECONOMY_RESTORE_COORDINATION` в bit 11.
+
+### Исправлено
+
+- Поддерживаемая пара обновлена до Prepatcher `0.18.0` и AoTD Scheduler Fork `1.0.14-spp10`:
+  bridge schema V10, required mask `0xbff`, declared/full mask `0xfff`; optional bit 10 остаётся
+  владельцем UI market-mutation refresh.
+- AoTD больше не рассчитывает supply/demand посреди поочерёдного восстановления industries.
+  Commodity-структура восстанавливается отдельно, рынки получают один coalesced scheduler refresh,
+  а transient `NOT_READY` допускается только при чтении industry snapshot. Ошибки calculation
+  scripts по-прежнему видимы.
+- Содержимое и ссылки derived per-industry supply/demand caches исключены из новых сохранений и
+  перестраиваются после полного restore barrier, не сохраняя detached `MutableStat` из очищенных
+  industry maps.
+
+Подробности и состав проверок: [отчёт о выпуске 0.18.0](docs/releases/0.18.0.md).
+
 ## [0.17.2] - 2026-08-04
 
 ### Исправлено

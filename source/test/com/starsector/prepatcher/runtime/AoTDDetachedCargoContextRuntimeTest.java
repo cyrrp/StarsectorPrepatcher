@@ -31,6 +31,8 @@ public final class AoTDDetachedCargoContextRuntimeTest {
                 "vanilla economy contract started enabled before structural proof");
         StarsectorPrepatcherRuntimeBridge.setVanillaDetachedCargoEconomyContract(
                 true, "runtime-test");
+        StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(
+                true, "runtime-test");
         require(StarsectorPrepatcherRuntimeBridge
                         .isVanillaDetachedCargoEconomyContractOperational(),
                 "vanilla economy contract did not activate");
@@ -40,7 +42,7 @@ public final class AoTDDetachedCargoContextRuntimeTest {
                 "aotd_theory_of_toolbox",
                 StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
                 StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES,
-                ignored -> { }, (industry, ids) -> null);
+                ignored -> { }, (industry, ids) -> null, () -> { });
         require((negotiated
                         & StarsectorPrepatcherRuntimeBridge
                         .AOTD_CAPABILITY_UI_ECONOMY_DISPATCH) != 0L,

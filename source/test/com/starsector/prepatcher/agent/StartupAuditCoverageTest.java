@@ -61,7 +61,7 @@ public final class StartupAuditCoverageTest {
                 new MarketOverviewMutationTransformer(false, null),
                 new TradeMarketMutationTransformer(false, null),
                 new IndustryMarketMutationTransformer(false, null),
-                false, false, false, false, false, false, true);
+                false, false, false, false, false, false, false, true);
 
         require(auditedUniverse.equals(registeredExactTargets),
                 "startup audit and registered exact-target transformers diverged; missing="

@@ -21,11 +21,13 @@ public final class UiMarketMutationContextRuntimeTest {
                     StandardCharsets.UTF_8);
             StarsectorPrepatcherRuntimeBridge.configure(
                     PrepatcherConfig.load(configFile), configFile.getParent());
+            StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(
+                    true, "runtime-test");
             long negotiated = StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract(
                     "aotd_theory_of_toolbox",
                     StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
                     StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES,
-                    ignored -> { }, (industry, ids) -> null);
+                    ignored -> { }, (industry, ids) -> null, () -> { });
             require((negotiated
                     & StarsectorPrepatcherRuntimeBridge
                     .AOTD_CAPABILITY_UI_MARKET_MUTATION_REFRESH) != 0L,

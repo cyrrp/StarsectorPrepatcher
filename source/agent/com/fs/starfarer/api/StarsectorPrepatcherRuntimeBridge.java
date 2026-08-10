@@ -55,6 +55,7 @@ public final class StarsectorPrepatcherRuntimeBridge {
     public static final long AOTD_CAPABILITY_RUNTIME_EPOCH_COORDINATION = 1L << 8;
     public static final long AOTD_CAPABILITY_UI_ECONOMY_DISPATCH = 1L << 9;
     public static final long AOTD_CAPABILITY_UI_MARKET_MUTATION_REFRESH = 1L << 10;
+    public static final long AOTD_CAPABILITY_ECONOMY_RESTORE_COORDINATION = 1L << 11;
 
     public static final int MUTATION_REASON_IMMIGRATION_POLICY = 1 << 4;
     public static final int MUTATION_REASON_STOCKPILE_POLICY = 1 << 5;
@@ -86,9 +87,11 @@ public final class StarsectorPrepatcherRuntimeBridge {
             "dispatchPrepatcherUiEconomyStep";
 
     private static final String AOTD_MOD_ID = "aotd_theory_of_toolbox";
-    public static final String AOTD_CURRENT_FORK_VERSION = "1.0.14-spp9";
+    public static final String AOTD_CURRENT_FORK_VERSION = "1.0.14-spp10";
     private static final String AOTD_ECONOMY_CLASS =
             "data.kaysaar.aotd.tot.scripts.economy.AoTDEconomy";
+    private static final String CORE_LIFECYCLE_CLASS =
+            "com.fs.starfarer.api.impl.campaign.CoreLifecyclePluginImpl";
     private static final String VANILLA_ECONOMY_CLASS =
             "com.fs.starfarer.campaign.econ.Economy";
     private static final String VANILLA_REACH_ECONOMY_CLASS =
@@ -103,7 +106,8 @@ public final class StarsectorPrepatcherRuntimeBridge {
                     | AOTD_CAPABILITY_PURE_PRICE_OFFLOAD
                     | AOTD_CAPABILITY_GLOBAL_PHASE_COORDINATION
                     | AOTD_CAPABILITY_RUNTIME_EPOCH_COORDINATION
-                    | AOTD_CAPABILITY_UI_ECONOMY_DISPATCH;
+                    | AOTD_CAPABILITY_UI_ECONOMY_DISPATCH
+                    | AOTD_CAPABILITY_ECONOMY_RESTORE_COORDINATION;
     public static final long AOTD_CURRENT_DECLARED_CAPABILITIES =
             AOTD_REQUIRED_CAPABILITIES | AOTD_CAPABILITY_UI_MARKET_MUTATION_REFRESH;
     private static final Object AOTD_CONTRACT_LOCK = new Object();
@@ -128,6 +132,9 @@ public final class StarsectorPrepatcherRuntimeBridge {
             new LinkedHashSet<>();
     private static final int AOTD_STALE_GLOBAL_TOKEN_LIMIT = 64;
     private static final AtomicLong AOTD_DELIVERY_LISTENER_FAILURES = new AtomicLong();
+    private static final AtomicLong AOTD_ECONOMY_RESTORE_SIGNALS = new AtomicLong();
+    private static final AtomicLong AOTD_ECONOMY_RESTORE_COMPLETIONS = new AtomicLong();
+    private static final AtomicLong AOTD_ECONOMY_RESTORE_FAILURES = new AtomicLong();
     private static final LongAdder AOTD_CONDITION_ONLY_DELIVERIES_IGNORED = new LongAdder();
     private static final LongAdder AOTD_OTHER_NON_ECONOMY_DELIVERIES_IGNORED = new LongAdder();
     private static final AtomicLong AOTD_STALE_MARKET_BOUNDARY_CLOSES = new AtomicLong();
@@ -207,7 +214,11 @@ public final class StarsectorPrepatcherRuntimeBridge {
     private static volatile Consumer<Object> aotdDeliveryListener;
     private static volatile String aotdDeliveryListenerStatus = "unregistered";
     private static volatile BiFunction<Object, Object, Object> aotdDeficitResolver;
+    private static volatile Runnable aotdEconomyRestoreListener;
+    private static volatile String aotdEconomyRestoreListenerStatus = "unregistered";
     private static volatile boolean aotdCleanDeficitConfigured;
+    private static volatile boolean aotdEconomyRestoreConfigured;
+    private static volatile boolean aotdEconomyRestoreContractOperational;
     private static volatile boolean aotdUiEconomyDispatchConfigured;
     private static volatile boolean aotdUiEconomyDispatchOperational;
     private static volatile boolean detachedCargoSkipConfigured;
@@ -228,6 +239,16 @@ public final class StarsectorPrepatcherRuntimeBridge {
             throw new IllegalArgumentException("Unexpected prepatcher configuration type: " + actual);
         }
         aotdCleanDeficitConfigured = config.aotdCleanDeficitPath;
+        aotdEconomyRestoreConfigured = config.aotdEconomyRestoreCoordination;
+        aotdEconomyRestoreContractOperational = false;
+        synchronized (AOTD_CONTRACT_LOCK) {
+            aotdNegotiatedCapabilities &=
+                    ~AOTD_CAPABILITY_ECONOMY_RESTORE_COORDINATION;
+            aotdEconomyRestoreListener = null;
+            aotdEconomyRestoreListenerStatus = aotdEconomyRestoreConfigured
+                    ? "awaiting-structural-proof" : "disabled-by-config";
+            publishAoTDNegotiatedCapabilitiesProperty();
+        }
         detachedCargoSkipConfigured = config.campaignCargoNoGlobalEconomyStep;
         lootTransferSkipConfigured = config.lootTransferNoGlobalEconomyStep;
         conditionOnlyMarketOpenSkipConfigured =
@@ -256,7 +277,11 @@ public final class StarsectorPrepatcherRuntimeBridge {
     }
 
     private static long supportedAoTDCapabilities() {
-        long supported = AOTD_REQUIRED_CAPABILITIES;
+        long supported = AOTD_REQUIRED_CAPABILITIES
+                & ~AOTD_CAPABILITY_ECONOMY_RESTORE_COORDINATION;
+        if (aotdEconomyRestoreConfigured && aotdEconomyRestoreContractOperational) {
+            supported |= AOTD_CAPABILITY_ECONOMY_RESTORE_COORDINATION;
+        }
         if (uiMarketMutationRefreshConfigured && aotdUiEconomyDispatchOperational) {
             supported |= AOTD_CAPABILITY_UI_MARKET_MUTATION_REFRESH;
         }
@@ -267,7 +292,8 @@ public final class StarsectorPrepatcherRuntimeBridge {
     public static long registerAoTDForkContract(
             String modId, String forkVersion, long declaredCapabilities,
             Consumer<Object> deliveryListener,
-            BiFunction<Object, Object, Object> deficitResolver) {
+            BiFunction<Object, Object, Object> deficitResolver,
+            Runnable economyRestoreListener) {
         String rejection = null;
         if (!AOTD_MOD_ID.equals(modId)) rejection = "mod-id-mismatch";
         else if (!AOTD_CURRENT_FORK_VERSION.equals(forkVersion)) {
@@ -277,8 +303,13 @@ public final class StarsectorPrepatcherRuntimeBridge {
         } else if (deliveryListener == null) rejection = "delivery-listener-missing";
         else if (!aotdCleanDeficitConfigured) rejection = "clean-deficit-disabled";
         else if (deficitResolver == null) rejection = "deficit-resolver-missing";
+        else if (economyRestoreListener == null) {
+            rejection = "economy-restore-listener-missing";
+        }
         else if (deliveryListener.getClass().getClassLoader()
-                != deficitResolver.getClass().getClassLoader()) {
+                != deficitResolver.getClass().getClassLoader()
+                || deliveryListener.getClass().getClassLoader()
+                != economyRestoreListener.getClass().getClassLoader()) {
             rejection = "callback-loader-mismatch";
         } else if (deliveryListener.getClass().getClassLoader() == null) {
             rejection = "callback-loader-bootstrap";
@@ -287,6 +318,7 @@ public final class StarsectorPrepatcherRuntimeBridge {
             return rejectAoTDForkContract(
                     rejection, modId, forkVersion, declaredCapabilities);
         }
+        ensureAoTDEconomyRestoreCompletionProof();
         long negotiated = supportedAoTDCapabilities();
         if ((negotiated & AOTD_REQUIRED_CAPABILITIES) != AOTD_REQUIRED_CAPABILITIES) {
             return rejectAoTDForkContract("required-runtime-capability-unavailable",
@@ -325,6 +357,8 @@ public final class StarsectorPrepatcherRuntimeBridge {
             aotdDeliveryListenerStatus = deliveryListener == null
                     ? "not-negotiated" : "active";
             aotdDeficitResolver = deficitResolver;
+            aotdEconomyRestoreListener = economyRestoreListener;
+            aotdEconomyRestoreListenerStatus = "active";
         }
         System.setProperty("starsector.prepatcher.aotdContract", "active");
         System.setProperty("starsector.prepatcher.aotdForkVersion", forkVersion);
@@ -336,6 +370,25 @@ public final class StarsectorPrepatcherRuntimeBridge {
                 + ", declared=0x" + Long.toHexString(declaredCapabilities)
                 + ", negotiated=0x" + Long.toHexString(negotiated));
         return negotiated;
+    }
+
+    /**
+     * Resolves the only ordering race in the required spp10 handshake. Loading without
+     * initialization is enough to run the already-installed exact transformer; it neither
+     * executes CoreLifecycle code nor retains a fork loader. The structural transformer publishes
+     * the operational gate synchronously before Class.forName returns.
+     */
+    private static void ensureAoTDEconomyRestoreCompletionProof() {
+        if (!aotdEconomyRestoreConfigured || aotdEconomyRestoreContractOperational) return;
+        try {
+            ClassLoader loader = StarsectorPrepatcherRuntimeBridge.class.getClassLoader();
+            Class.forName(CORE_LIFECYCLE_CLASS, false, loader);
+        } catch (Throwable failure) {
+            // Registration below observes the still-closed gate and fails closed. The exact
+            // transformer owns detailed structural diagnostics when class definition succeeds.
+            PrepatcherLog.warn("Could not establish AoTD economy-restore structural proof: "
+                    + failure.getClass().getName());
+        }
     }
 
     private static long rejectAoTDForkContract(
@@ -375,6 +428,10 @@ public final class StarsectorPrepatcherRuntimeBridge {
                 + "; deficitResolver=" + (aotdDeficitResolver != null)
                 + "; deliveryListener=" + aotdDeliveryListenerStatus
                 + "; callbackFailures=" + AOTD_DELIVERY_LISTENER_FAILURES.get()
+                + "; economyRestoreListener=" + aotdEconomyRestoreListenerStatus
+                + "; economyRestoreSignals=" + AOTD_ECONOMY_RESTORE_SIGNALS.get()
+                + "; economyRestoreCompletions=" + AOTD_ECONOMY_RESTORE_COMPLETIONS.get()
+                + "; economyRestoreFailures=" + AOTD_ECONOMY_RESTORE_FAILURES.get()
                 + "; conditionOnlyDeliveriesIgnored="
                 + AOTD_CONDITION_ONLY_DELIVERIES_IGNORED.sum()
                 + "; otherNonEconomyDeliveriesIgnored="
@@ -398,6 +455,129 @@ public final class StarsectorPrepatcherRuntimeBridge {
                 + DETACHED_CARGO_VANILLA_STEPS_SKIPPED.sum()
                 + "; detachedCargoUnknownEconomyFallbacks="
                 + DETACHED_CARGO_UNKNOWN_ECONOMY_FALLBACKS.sum();
+    }
+
+    /**
+     * Publishes whether the exact current-game CoreLifecycle completion hook was proven and
+     * installed. A failed structural contract can only remove the restore capability.
+     */
+    public static void setAoTDEconomyRestoreCompletionContract(
+            boolean operational, String reason) {
+        boolean ready = aotdEconomyRestoreConfigured && operational;
+        aotdEconomyRestoreContractOperational = ready;
+        if (ready) {
+            synchronized (AOTD_CONTRACT_LOCK) {
+                if (aotdEconomyRestoreListener == null) {
+                    aotdEconomyRestoreListenerStatus = "awaiting-registration";
+                }
+            }
+        } else {
+            synchronized (AOTD_CONTRACT_LOCK) {
+                aotdNegotiatedCapabilities &=
+                        ~AOTD_CAPABILITY_ECONOMY_RESTORE_COORDINATION;
+                aotdEconomyRestoreListener = null;
+                aotdEconomyRestoreListenerStatus = operational
+                        ? "disabled-by-config" : "disabled-structural";
+                publishAoTDNegotiatedCapabilitiesProperty();
+            }
+        }
+        System.setProperty(
+                "starsector.prepatcher.aotdEconomyRestoreCompletion",
+                ready ? "ready" : "disabled");
+        if (!ready && reason != null && !reason.isBlank()) {
+            PrepatcherLog.warn("AoTD economy-restore coordination disabled: " + reason);
+        }
+    }
+
+    /**
+     * Called once at the successful tail of CoreLifecyclePluginImpl.econPostSaveRestore().
+     * This method intentionally performs no market scan and never lets a fork callback escape
+     * into Starsector's save/load lifecycle.
+     */
+    public static void publishAoTDEconomyRestoreComplete() {
+        try {
+            publishAoTDEconomyRestoreCompleteImpl();
+        } catch (Throwable ignored) {
+            // This hook runs inside Starsector's save/load lifecycle. Even a secondary
+            // diagnostics failure must not turn a completed restore into a failed save.
+        }
+    }
+
+    private static void publishAoTDEconomyRestoreCompleteImpl() {
+        Runnable listener;
+        synchronized (AOTD_CONTRACT_LOCK) {
+            if (!aotdContractRegistered
+                    || !aotdEconomyRestoreContractOperational
+                    || (aotdNegotiatedCapabilities
+                            & AOTD_CAPABILITY_ECONOMY_RESTORE_COORDINATION) == 0L) {
+                return;
+            }
+            listener = aotdEconomyRestoreListener;
+        }
+        AOTD_ECONOMY_RESTORE_SIGNALS.incrementAndGet();
+        if (listener == null) {
+            long failures = AOTD_ECONOMY_RESTORE_FAILURES.incrementAndGet();
+            disableAoTDEconomyRestoreListener(
+                    null, "missing-listener", failures, null);
+            return;
+        }
+        try {
+            listener.run();
+            AOTD_ECONOMY_RESTORE_COMPLETIONS.incrementAndGet();
+        } catch (LinkageError failure) {
+            long failures = AOTD_ECONOMY_RESTORE_FAILURES.incrementAndGet();
+            disableAoTDEconomyRestoreListener(
+                    listener, "linkage:" + failure.getClass().getName(), failures, failure);
+        } catch (Throwable failure) {
+            long failures = AOTD_ECONOMY_RESTORE_FAILURES.incrementAndGet();
+            if (failures <= 4L || (failures & (failures - 1L)) == 0L) {
+                PrepatcherLog.warn("AoTD economy-restore callback failed open (#"
+                        + failures + "): " + failure);
+            }
+        }
+    }
+
+    private static void disableAoTDEconomyRestoreListener(
+            Runnable expected, String reason, long failures, LinkageError failure) {
+        boolean disabled = false;
+        synchronized (AOTD_CONTRACT_LOCK) {
+            if (expected == null || aotdEconomyRestoreListener == expected) {
+                aotdEconomyRestoreListener = null;
+                aotdEconomyRestoreListenerStatus = "disabled-" + reason;
+                aotdNegotiatedCapabilities &=
+                        ~AOTD_CAPABILITY_ECONOMY_RESTORE_COORDINATION;
+                publishAoTDNegotiatedCapabilitiesProperty();
+                disabled = true;
+            }
+        }
+        if (!disabled) return;
+        System.setProperty("starsector.prepatcher.aotdContract",
+                "economy-restore-listener-disabled");
+        if (failure == null) {
+            PrepatcherLog.warn("AoTD economy-restore listener disabled (#" + failures
+                    + "): " + reason);
+        } else {
+            PrepatcherLog.error("AoTD economy-restore listener disabled after linkage failure (#"
+                    + failures + "); only economy-restore coordination was removed for this "
+                    + "session.", failure);
+        }
+    }
+
+    private static void publishAoTDNegotiatedCapabilitiesProperty() {
+        System.setProperty("starsector.prepatcher.aotdNegotiatedCapabilities",
+                "0x" + Long.toHexString(aotdNegotiatedCapabilities));
+    }
+
+    public static long getAoTDEconomyRestoreSignalCount() {
+        return AOTD_ECONOMY_RESTORE_SIGNALS.get();
+    }
+
+    public static long getAoTDEconomyRestoreCompletionCount() {
+        return AOTD_ECONOMY_RESTORE_COMPLETIONS.get();
+    }
+
+    public static long getAoTDEconomyRestoreFailureCount() {
+        return AOTD_ECONOMY_RESTORE_FAILURES.get();
     }
 
     /** Called by the clean BaseIndustry wrapper. Null means use preserved vanilla code. */

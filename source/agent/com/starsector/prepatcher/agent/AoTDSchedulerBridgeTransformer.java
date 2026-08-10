@@ -26,9 +26,9 @@ final class AoTDSchedulerBridgeTransformer implements ClassFileTransformer {
     private static final String RUNTIME_BRIDGE =
             "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
     private static final String PATCH_FIELD = "smo$patched$aotdSchedulerBridge";
-    private static final String PATCH_VALUE = "StarsectorPrepatcher:aotd-bridge-v9";
-    private static final int CURRENT_BRIDGE_SCHEMA = 9;
-    private static final String CURRENT_BRIDGE_MARKER = "AOTD_SCHEDULER_BRIDGE_V9";
+    private static final String PATCH_VALUE = "StarsectorPrepatcher:aotd-bridge-v10";
+    private static final int CURRENT_BRIDGE_SCHEMA = 10;
+    private static final String CURRENT_BRIDGE_MARKER = "AOTD_SCHEDULER_BRIDGE_V10";
 
     private final ClassLoader runtimeLoader;
 
@@ -71,7 +71,10 @@ final class AoTDSchedulerBridgeTransformer implements ClassFileTransformer {
             }
             MethodNode initialize = require(node, "initialize", INITIALIZE_DESC);
             require(node, "activateFromPrepatcher", ACTIVATE_DESC);
-            rewrite(initialize, buildInitializeBody(), 6, 0);
+            require(node, "deliverySignalConsumer", "()Ljava/util/function/Consumer;");
+            require(node, "deficitResolverFunction", "()Ljava/util/function/BiFunction;");
+            require(node, "economyRestoreCompleteSignal", "()Ljava/lang/Runnable;");
+            rewrite(initialize, buildInitializeBody(), 7, 0);
             rewrite(require(node, "getDeliveredMarketGeneration",
                     "(Ljava/lang/Object;)J"), directObjectLong(
                     "getAoTDMarketDeliveredGeneration"), 1, 1);
@@ -123,10 +126,12 @@ final class AoTDSchedulerBridgeTransformer implements ClassFileTransformer {
                 "deliverySignalConsumer", "()Ljava/util/function/Consumer;", false));
         code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, TARGET,
                 "deficitResolverFunction", "()Ljava/util/function/BiFunction;", false));
+        code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, TARGET,
+                "economyRestoreCompleteSignal", "()Ljava/lang/Runnable;", false));
         code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE,
                 "registerAoTDForkContract",
                 "(Ljava/lang/String;Ljava/lang/String;JLjava/util/function/Consumer;"
-                        + "Ljava/util/function/BiFunction;)J", false));
+                        + "Ljava/util/function/BiFunction;Ljava/lang/Runnable;)J", false));
         code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, TARGET,
                 "activateFromPrepatcher", ACTIVATE_DESC, false));
         code.add(new InsnNode(Opcodes.ARETURN));

@@ -16,6 +16,8 @@ public final class AoTDDeliveryListenerFailStopTest {
         Files.writeString(configFile, "patch.aotdCleanDeficitPath=true\n");
         StarsectorPrepatcherRuntimeBridge.configure(
                 PrepatcherConfig.load(configFile), configFile.getParent());
+        StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(
+                true, "runtime-test");
         AtomicInteger calls = new AtomicInteger();
         Consumer<Object> broken = ignored -> {
             calls.incrementAndGet();
@@ -26,7 +28,7 @@ public final class AoTDDeliveryListenerFailStopTest {
                 "aotd_theory_of_toolbox",
                 StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
                 StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES,
-                broken, (industry, ids) -> null);
+                broken, (industry, ids) -> null, () -> { });
         require((negotiated & StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_NATIVE_DELIVERY_EVENTS) != 0L,
                 "delivery capability was not initially negotiated");
 

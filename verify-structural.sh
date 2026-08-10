@@ -172,6 +172,11 @@ java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
   "${READ_ONLY_UI_ARGS[@]}" \
   2>&1 | tee "$REPORT_DIR/read-only-ui-economy-step.txt"
 
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.AoTDEconomyRestoreCompletionTransformerTest \
+  "$CORE/starfarer.api.jar" \
+  2>&1 | tee "$REPORT_DIR/aotd-economy-restore-completion.txt"
+
 if [[ -f "$AOTD_JAR" ]]; then
   AOTD_MOD_ROOT="$(cd "$(dirname "$AOTD_JAR")/.." && pwd)"
   java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
@@ -231,6 +236,10 @@ java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
   2>&1 | tee "$REPORT_DIR/direct-market-transformer.txt"
 
 RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
+java -cp "$RUNTIME_CP" \
+  com.starsector.prepatcher.runtime.AoTDEconomyRestoreRuntimeTest \
+  2>&1 | tee "$REPORT_DIR/aotd-economy-restore-runtime.txt"
+
 {
   echo '== LifecycleGcRegressionTest =='
   java -cp "$RUNTIME_CP" com.starsector.prepatcher.runtime.LifecycleGcRegressionTest
@@ -292,6 +301,39 @@ RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$CORE/st
 java "${EXPORTS[@]}" -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.agent.StartupAuditCoverageTest \
   2>&1 | tee "$REPORT_DIR/startup-audit-coverage.txt"
+
+if [[ -f "$AOTD_JAR" ]]; then
+  for restore_order in core-first fork-first; do
+    java \
+      "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MOD_ROOT/profiles/aggressive.properties" \
+      -cp "$RUNTIME_CP:$AOTD_JAR" \
+      com.starsector.prepatcher.runtime.AoTDEconomyRestoreActualAgentSmokeTest \
+      "$restore_order" \
+      2>&1 | tee "$REPORT_DIR/aotd-economy-restore-actual-agent-$restore_order.txt"
+  done
+else
+  for restore_order in core-first fork-first; do
+    echo "SKIPPED AoTD economy-restore $restore_order actual-agent smoke: $AOTD_JAR not found" | \
+      tee "$REPORT_DIR/aotd-economy-restore-actual-agent-$restore_order.txt"
+  done
+fi
+
+if [[ -f "$AOTD_JAR" ]]; then
+  java \
+    --add-opens=java.base/java.util=ALL-UNNAMED \
+    --add-opens=java.base/java.lang.reflect=ALL-UNNAMED \
+    --add-opens=java.base/java.text=ALL-UNNAMED \
+    --add-opens=java.desktop/java.awt.font=ALL-UNNAMED \
+    --add-opens=java.desktop/java.awt=ALL-UNNAMED \
+    -Dstarsector.prepatcher.sessionOrigin=aotd-supply-demand-xstream \
+    "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MOD_ROOT/profiles/aggressive.properties" \
+    -cp "$RUNTIME_CP:$AOTD_JAR" \
+    com.starsector.prepatcher.runtime.AoTDSupplyDemandXStreamMigrationTest \
+    2>&1 | tee "$REPORT_DIR/aotd-supply-demand-xstream-migration.txt"
+else
+  echo "SKIPPED AoTD supply/demand XStream migration: $AOTD_JAR not found" | \
+    tee "$REPORT_DIR/aotd-supply-demand-xstream-migration.txt"
+fi
 
 UI_ECONOMY_AGENT_ARGS=()
 if [[ -f "$NEX_JAR" ]]; then

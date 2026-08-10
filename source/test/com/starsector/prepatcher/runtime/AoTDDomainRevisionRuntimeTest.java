@@ -19,11 +19,13 @@ public final class AoTDDomainRevisionRuntimeTest {
         Files.writeString(configFile, "patch.aotdCleanDeficitPath=true\n");
         StarsectorPrepatcherRuntimeBridge.configure(
                 PrepatcherConfig.load(configFile), configFile.getParent());
+        StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(
+                true, "runtime-test");
         StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract(
                 "aotd_theory_of_toolbox",
                 StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
                 StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES,
-                ignored -> { }, (industry, ids) -> null);
+                ignored -> { }, (industry, ids) -> null, () -> { });
 
         Object market = new Object();
         require(StarsectorPrepatcherRuntimeBridge.getAoTDMarketStructuralGeneration(market) == 0L,

@@ -144,20 +144,21 @@ the original call. The local path deliberately retains the last committed global
 
 ## UI market-mutation refresh
 
-Prepatcher 0.17.2 and Scheduler Fork `1.0.14-spp9` use bridge schema V9. The required production
-mask `0x3ff` includes `UI_ECONOMY_DISPATCH`; the optional `UI_MARKET_MUTATION_REFRESH` bit extends
-the complete profile to `0x7ff`. The explicit dispatcher receives a classified action, detail value
-and, when needed, an immutable sorted `String[]` of affected commodity IDs.
+Prepatcher 0.18.0 and Scheduler Fork `1.0.14-spp10` use bridge schema V10. The required production
+mask `0xbff` includes `UI_ECONOMY_DISPATCH` and `ECONOMY_RESTORE_COORDINATION`; the optional
+`UI_MARKET_MUTATION_REFRESH` bit 10 extends the complete profile to `0xfff`. The explicit dispatcher
+receives a classified action, detail value and, when needed, an immutable sorted `String[]` of
+affected commodity IDs.
 
-Compatibility is intentionally current-only. The transformer accepts only the exact V9 bridge
-shape; registration then requires the exact `1.0.14-spp9` identifier, the exact declared mask
-`0x7ff` and both required callbacks. Any old, future or partially declared contract is logged and
+Compatibility is intentionally current-only. The transformer accepts only the exact V10 bridge
+shape; registration then requires the exact `1.0.14-spp10` identifier, the exact declared mask
+`0xfff` and all three required callbacks. Any old, future or partially declared contract is logged and
 rejected as a whole with negotiated mask `0`, rather than receiving a reduced legacy profile.
 
-The required `UI_ECONOMY_DISPATCH` bit describes the current bridge contract and is therefore
-independent of optional optimization switches. Every shipped profile, including safe, negotiates
-the required mask `0x3ff` for an exact current fork. Only
-`patch.uiMarketMutationRefresh` controls optional bit 10, producing `0x7ff` when enabled.
+The required dispatcher and economy-restore bits describe the current bridge contract and are
+therefore independent of optional optimization switches. Every shipped profile, including safe,
+negotiates the required mask `0xbff` for an exact current fork. Only
+`patch.uiMarketMutationRefresh` controls optional bit 10, producing `0xfff` when enabled.
 
 The vanilla path is enabled only when the final stock `CommodityMarketData(String,String)` bytecode
 matches its constructor, market enumeration, max-supply/demand update, market-data publication and
@@ -193,7 +194,7 @@ its own exception unchanged. Preparation, before/after snapshots and context pub
 `Throwable`; failure poisons the setter batch even when the market itself could not be read. It holds
 its market weakly; consume additionally requires the same thread, market identity, campaign epoch and
 economy epoch. The shared helper consumes the context or poison before deciding between the vanilla
-local path, exact spp9 dispatch and the preserved virtual global call; the fork's standard step
+local path, exact spp10 dispatch and the preserved virtual global call; the fork's standard step
 methods never inspect it.
 
 The following policy scopes are local because they do not require a global commodity rebuild:
@@ -210,7 +211,7 @@ global. Any missing/duplicate call, altered
 branch shape, exception, cross-thread consume, epoch change or unsupported economy preserves the
 original global call.
 
-For AoTD spp9, the shared helper passes packed reason/scope and affected IDs only through
+For AoTD spp10, the shared helper passes packed reason/scope and affected IDs only through
 `dispatchPrepatcherUiEconomyStep`. The dispatcher validates the action and optional capability,
 converts supported scopes into existing `MarketRegistry` dirty masks and runs the immediate
 single-market refresh. `GLOBAL_TOPOLOGY`, a failed debt barrier, an unsupported action, missing
@@ -224,6 +225,31 @@ Because all four standard fork step methods are global, this fallback cannot acc
 local refresh.
 AoTD `doubleStep()`/`tripleStep()` retain the original two/three global-step multiplicity.
 No second scheduler or per-commodity revision vector is introduced.
+
+## AoTD economy-restore boundary
+
+`patch.aotdEconomyRestoreCoordination` owns one exact transformation surface:
+`CoreLifecyclePluginImpl.econPostSaveRestore()V`. Admission requires a concrete public static method,
+one `Industry.doPostSaveRestore()`, one `MarketAPI.reapplyConditions()`, one
+`MarketAPI.reapplyIndustries()`, their original order, the proven final iterator branch and exactly
+one successful `RETURN`. The hook is inserted immediately before that return, after both complete
+game passes. Any changed call count, ordering, exception region, tail or loader relationship leaves
+the method unchanged and keeps capability bit 11 unavailable.
+
+The injected call itself is O(1): `StarsectorPrepatcherRuntimeBridge` invokes one `Runnable`
+registered by the exact V10 fork and never enumerates the economy. A missing callback or
+`LinkageError` clears only `ECONOMY_RESTORE_COORDINATION`; all failures are contained so no fork
+exception can escape into Starsector's save/load lifecycle. The bridge stores no market or campaign
+object for this feature.
+
+The fork uses the signal as a barrier, not as a request for synchronous calculation. Restore-time
+commodity conversion is structural-only. Once all vanilla maps have been recreated and reapplied,
+the fork coalesces affected markets into ordinary scheduler work and publishes one atomic revision
+per market. Snapshot-stage unavailability is `NOT_READY`: the previous committed revision and dirty
+generation remain intact, with no ERROR, failure count or quarantine. Calculation-script exceptions
+occur after a complete snapshot and remain visible. Derived per-industry cache contents and their
+`MutableStat` references are not serialized in new saves; compatibility loading must normalize
+older fields and rebuild them after the barrier.
 
 The three switches `patch.commandTabNoGlobalEconomyStep`,
 `patch.commodityDetailNoGlobalEconomyStep`, and `patch.marketDefensesNoGlobalEconomyStep` are pure
@@ -241,7 +267,7 @@ behavior. Safe profile disables the feature group; other shipped profiles enable
 ## Read-only UI-only global-step removal
 
 The three switches above are pure inline removals: they retain no market, commodity, game object or
-mod classloader. The real-fork inventory gate proves that the maintained spp9 JAR has no descendant
+mod classloader. The real-fork inventory gate proves that the maintained spp10 JAR has no descendant
 or override on the vanilla-owned surfaces. The reviewed Nexerelin surface is transformed directly
 without linking its child loader to a runtime helper.
 
@@ -584,7 +610,7 @@ Telemetry schema `0.7.1`: старый `pooledRandom` называется `pool
 Structural proof показывает однозначность site, linkage, no-escape и verifier postconditions, но
 не доказывает величину ускорения. Runtime и performance evidence создаётся в `.build/reports/`;
 проверенные выводы и остаточные риски фиксируются в отчёте соответствующего выпуска, например
-[`releases/0.17.2.md`](releases/0.17.2.md).
+[`releases/0.18.0.md`](releases/0.18.0.md).
 
 Если несколько javaagent меняют одни и те же классы, располагайте Prepatcher после них:
 transformer увидит bytes, возвращённые ранее зарегистрированными агентами. Installer обеспечивает
@@ -613,16 +639,17 @@ inventory. Structural pass проверяет их до анализа и пос
 
 ## AoTD Scheduler Fork
 
-Scheduler Fork release `1.0.14-spp9` requires Prepatcher `0.17.2`, an active compatible javaagent
+Scheduler Fork release `1.0.14-spp10` requires Prepatcher `0.18.0`, an active compatible javaagent
 and the original game `starfarer.api.jar`. The fork is required for optimal performance when
 AoTD Theory of Toolbox is installed; it is not a dependency for configurations without AoTD.
 
-The spp9 contract uses bridge schema V9. Its required production mask remains `0x3ff`, including
-the explicit UI economy dispatcher; the atomic UI market-mutation refresh capability extends the
-complete negotiation to `0x7ff`. Exact market-open, detached Cargo/LOOT and mutation call sites send
+The spp10 contract uses bridge schema V10. Its required production mask is `0xbff`, including the
+explicit UI economy dispatcher and economy-restore coordination; the atomic UI market-mutation
+refresh capability extends the complete negotiation to `0xfff`. Exact market-open, detached
+Cargo/LOOT and mutation call sites send
 classified intents directly to the dispatcher. Their original virtual call remains the fallback and
 is globally scoped by construction. Market-open/Cargo/trade guards publish no fork context. Fork
-ownership is tied to the exact loader that registered both Scheduler Bridge callbacks, not to
+ownership is tied to the exact loader that registered all three Scheduler Bridge callbacks, not to
 the parent loader that owns `StarsectorPrepatcherRuntimeBridge`. This matches Starsector's
 parent-runtime/child-mod topology and rejects duplicate or future loaders.
 Non-trade mutation reason/scope/IDs live only in the one-shot Prepatcher setter/helper handoff.
@@ -630,7 +657,7 @@ Missing capability, a changed call site, failed barrier, `GLOBAL_TOPOLOGY`, disp
 pre-commit diagnostic failure or replacement economy preserves the original global step. After a
 successful dispatch/local refresh, fork and Prepatcher diagnostics are contained and the committed
 boolean remains `true`; no diagnostic failure can add a duplicate global fallback. Registration
-fixtures reject every exact old identifier from `spp4` through `spp8`, as well as future or partial
+fixtures reject every exact old identifier from `spp4` through `spp9`, as well as future or partial
 contracts. Local Resources tooltip snapshots are call-local and do not retain markets, commodities
 or mod classloaders. A partial required
 production capability profile is intentionally rejected. The legacy AoTD core-JAR replacement is

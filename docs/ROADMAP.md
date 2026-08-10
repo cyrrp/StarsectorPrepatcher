@@ -1,6 +1,6 @@
 # Технический roadmap
 
-Статус: план работ после выпуска `0.17.2`. Атомарный UI market-mutation refresh для policy/trade/free-port и exact vanilla industry branches добавлен; Persistent economy snapshots, ordered commodity active
+Статус: план работ после выпуска `0.18.0`. Economy-restore coordination с AoTD и атомарный UI market-mutation refresh для policy/trade/free-port и exact vanilla industry branches добавлены; Persistent economy snapshots, ordered commodity active
 set, direct expiry-aware temp-mod scheduler, dormant `BaseIndustry` fast path, production-интеграция
 AoTD, incremental core-worlds и StrategicModule indexes и линейный market-share path выпущены в
 одном unified agent. Следующий архитектурный milestone сосредоточен на structural discovery; срок

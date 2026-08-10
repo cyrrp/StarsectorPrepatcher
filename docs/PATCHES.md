@@ -43,11 +43,12 @@ classfile или JAR не участвует в решении.
 | `patch.strategicJumpDestinationIndex` | `StrategicModule.findNearestSafeJumpPoint`, expired `JumpPlan`, jump/location topology mutators | budgeted ordered index keyed by destination `LocationAPI` identity | requires destination-first; no location type/size admission rule; cold/dirty work is deferred under one global frame budget |
 | `patch.economyLocationCache` | `Economy.advance` | omit only redundant automatic dirty write | explicit mod dirty state authoritative |
 | `patch.marketScheduler` | `Economy.advance`, `BaseCampaignEntity.advance`, pre-save boundary | one stable-phase scheduler for all transformed engine-owned market updates with exact accumulated amount | one identity state and policy; direct mod calls immediate; hot markets full-rate; callback cadence intentionally changes |
+| `patch.aotdEconomyRestoreCoordination` | exact `CoreLifecyclePluginImpl.econPostSaveRestore()V` successful tail | publishes one O(1) loader-neutral completion signal after all industry restore and market reapply work | exact public-static method, unique calls/order, sole successful `RETURN`, loader visibility and verified V10 callback; structural mismatch keeps bit 11 unavailable, ordinary callback failures are contained and retryable with sampled logging, and only `LinkageError` removes bit 11 after negotiation |
 | `patch.campaignCargoNoGlobalEconomyStep` | exact detached campaign-Cargo `fake_market` constructor branch | exact vanilla `Economy + ReachEconomy` skips the unrelated three-step refresh; owned AoTD receives an explicit synthetic-Cargo dispatch | structural anchors, `CARGO` mode, null outpost/other-cargo and final `Economy.tripleStep/getEconomy` contract; rejected/failed dispatch, subclasses and replacement economies execute the original global call |
 | `patch.lootTransferNoGlobalEconomyStep` | exact generated-loot `fake_market` constructor branch | exact vanilla skips the unrelated three-step refresh; owned AoTD receives the same explicit synthetic-Cargo dispatch after loot generation | structural anchors, `LOOT` mode, null outpost and real `CargoData`; unknown modes/economies preserve the original global call |
 | `patch.planetConditionMarketOpenNoGlobalEconomyStep` | `CampaignEngine.reportPlayerOpenedMarket` for non-economy condition-only markets | skip only the initial all-market `Economy.nextStep`; keep ability/listener callbacks and `currentlyOpenMarket` publication | exact vanilla `Economy + ReachEconomy` identity scan or accepted owned-AoTD market-open dispatch; live/unknown markets fall back |
 | `patch.vanillaMarketOpenLocalization` | `CampaignEngine.reportPlayerOpenedMarket` plus the immediate live-market Cargo constructor | exact vanilla uses a synchronous one-market refresh and consumes the following duplicate `tripleStep`; owned AoTD receives explicit market-open/Cargo intents | final vanilla `Economy`/`ReachEconomy` contracts, exact class/loader/economy membership, scheduler debt barrier and one-shot vanilla coalescing token; any failed guard or dispatcher executes the original global call |
-| `patch.uiMarketMutationRefresh` | exact vanilla market-overview policy mutations and shared helper; trade `confirmTransaction()V`; five industry-dialog branches plus `IndustryListPanel`; final vanilla `CommodityMarketData`; AoTD Scheduler Bridge V9 | one atomic mutation feature: setter/helper paths use an internal one-shot context, while trade uses a boolean guard around the preserved original `doubleStep()`; vanilla refreshes locally and owned AoTD receives one explicit dispatch; affected IDs rebuild only their global/econ-group records | each independent bytecode surface fails closed locally; every preparation, snapshot, proof and publication read is best-effort; the industry dialog/panel pair activates only after both postconditions hold; changed inventory, non-stock economy, poisoned/stale context, `GLOBAL_TOPOLOGY`, missing barrier/capability, admin, construction queue, custom providers and unknown helpers execute the original global step |
+| `patch.uiMarketMutationRefresh` | exact vanilla market-overview policy mutations and shared helper; trade `confirmTransaction()V`; five industry-dialog branches plus `IndustryListPanel`; final vanilla `CommodityMarketData`; AoTD Scheduler Bridge V10 | one atomic mutation feature: setter/helper paths use an internal one-shot context, while trade uses a boolean guard around the preserved original `doubleStep()`; vanilla refreshes locally and owned AoTD receives one explicit dispatch; affected IDs rebuild only their global/econ-group records | each independent bytecode surface fails closed locally; every preparation, snapshot, proof and publication read is best-effort; the industry dialog/panel pair activates only after both postconditions hold; changed inventory, non-stock economy, poisoned/stale context, `GLOBAL_TOPOLOGY`, missing barrier/capability, admin, construction queue, custom providers and unknown helpers execute the original global step |
 | `patch.commandTabNoGlobalEconomyStep` | `com.fs.starfarer.campaign.command.F.<init>` | opening Command/Colonies consumes the last committed economy state without a terminal sector-wide `tripleStep()` | exact public constructor descriptor, one class-local `tripleStep`, exact `Global.getSector → getEconomy` chain and terminal `RETURN`; any changed shape remains vanilla |
 | `patch.commodityDetailNoGlobalEconomyStep` | current `CommodityDetailDialogV2` and dormant legacy `CommodityDetailDialog` constructors | commodity producer/consumer/import/export details use already-published `CommodityMarketData` without three synchronous global passes | each class is matched independently by exact constructor descriptor, unique call chain and post-step `CommodityOnMarket.getMarket()` anchor; one mismatch does not disable the other |
 | `patch.marketDefensesNoGlobalEconomyStep` | vanilla `MarketCMD.showDefenses(boolean)` and optional Nexerelin `Nex_MarketCMD.showDefenses(boolean)` | removes each owner-local guarded global `tripleStep()` after interaction fleet, station fleet and station state have already been captured | exact protected method, owner/superclass, market-null guard/join and ordering proof; changed military/UI flow preserves that class's original call |
@@ -86,7 +87,7 @@ fail-closed: original bytes, including `tripleStep()`, are returned unchanged.
 
 ### Explicit AoTD UI economy dispatch
 
-Scheduler Fork `1.0.14-spp9` restores the standard virtual-step contract:
+Scheduler Fork `1.0.14-spp10` restores the standard virtual-step contract:
 `AoTDEconomy.nextStep(EconWorkParams)`, `doubleStep()`, `tripleStep()` and
 `AoTDReachEconomy.nextStep(EconWorkParams)` always run the full all-market pipeline. They do not
 inspect `currentlyOpenMarket`, infer UI intent from a null payload or consume a Prepatcher context;
@@ -101,8 +102,8 @@ boundary: `false` or an escaped failure leaves the original call in bytecode to 
 the helper, including when the exact fork/capability is unavailable or a debt barrier cannot prove
 the local cut safe. A successful dispatcher/local refresh is the boolean commit point. Fork and
 Prepatcher diagnostics after that point are contained and cannot turn the committed `true` back into
-`false` or select a duplicate global fallback. The exact fork loader is derived from the two
-callbacks registered by verified Scheduler Bridge V9, so the
+`false` or select a duplicate global fallback. The exact fork loader is derived from the three
+callbacks registered by verified Scheduler Bridge V10, so the
 real parent-runtime/child-mod topology is accepted while an equal-name economy from another loader
 is not eligible.
 
@@ -117,11 +118,37 @@ instead collects its immutable transaction IDs directly inside its guard and use
 round trip. No
 static `Class`, `Method`, `ClassLoader`, campaign object or mod instance is cached for dispatch.
 
-Only exact Scheduler Fork `1.0.14-spp9` registers. The current declared mask must be exactly
-`0x7ff`; `spp4`–`spp8`, future and partially declared contracts are logged and rejected wholesale
-with mask `0`. For the exact current fork, the required dispatcher bit is independent of profile switches:
-safe negotiates `0x3ff`, while `patch.uiMarketMutationRefresh=true` adds the sole optional bit and
-negotiates `0x7ff`.
+Only exact Scheduler Fork `1.0.14-spp10` registers. The current declared mask must be exactly
+`0xfff`; `spp4`–`spp9`, future and partially declared contracts are logged and rejected wholesale
+with mask `0`. For the exact current fork, required economy-restore bit 11 is independent of optional
+optimization switches: every shipped profile negotiates `0xbff`, while
+`patch.uiMarketMutationRefresh=true` adds optional bit 10 and negotiates `0xfff`.
+
+### AoTD economy-restore coordination
+
+The exact current-game `CoreLifecyclePluginImpl.econPostSaveRestore()V` first invokes
+`Industry.doPostSaveRestore()` for every industry and only then performs the separate market pass
+containing `reapplyConditions()` and `reapplyIndustries()`. The transformer requires those unique
+calls in that order, the proven final iterator tail and one successful `RETURN`. It inserts
+`publishAoTDEconomyRestoreComplete()` immediately before that return. The runtime bridge performs no
+market scan or calculation; it reads one negotiated loader-local `Runnable` and invokes it in O(1).
+
+The fork's population-industry restore path is structural-only: it may create or convert commodity
+objects but never snapshots another industry's partially restored supply/demand maps. After the
+completion signal, affected markets receive one coalesced dirty generation and the normal scheduler
+publishes one atomic market-wide revision. A temporarily unavailable
+`industry.getDemand()/getSupply()/getQuantity()` snapshot returns `NOT_READY`, preserves the previous
+committed revision and does not log, commit, fail or quarantine. Calculation scripts run only after
+the complete snapshot and their exceptions remain visible failures. Derived per-industry
+supply/demand cache contents and references are absent from newly written saves and are rebuilt
+behind this barrier.
+
+Structural mismatch or disabled config prevents restore-capability admission, while a missing V10
+listener rejects the whole required handshake with mask `0`; Starsector's save/load restoration
+continues in both cases. After a successful negotiation only callback `LinkageError` removes
+`ECONOMY_RESTORE_COORDINATION`. Other callback exceptions remain retryable, are contained and are
+sampled in diagnostics. The hook retains no market or campaign object and owns no serialization
+state; listener lifetime follows the negotiated contract and a linkage downgrade clears it.
 
 `Economy.advance(F)V` и связанное owner-local состояние имеют одного structural-владельца
 `economyAdvancePlan`. Публичные переключатели `patch.economyPersistentSnapshots`,
@@ -839,7 +866,8 @@ Optional Nex class не добавляется в обязательный core 
 - fleet-pair broadphase без runtime parity harness;
 - GL batching/FBO/VBO;
 - inter-frame terrain geometry cache;
-- save-format или serialized-object changes.
+- изменения формата сохранений Starsector со стороны Prepatcher; owned fork отдельно исключает
+  содержимое и ссылки только собственных derived caches из новых saves по schema V10 contract.
 
 ## `aotdCleanDeficitPath`
 
@@ -848,4 +876,5 @@ Target: clean game `BaseIndustry.getMaxDeficit(String...)`.
 The patch preserves the original method under a private synthetic name and installs a thin
 resolver wrapper. Without the complete active AoTD native contract, the original vanilla code is
 called.
-With the complete `0xff` contract, the source-level AoTD priority-deficit resolver is used.
+With the complete current `0xbff` required contract, the source-level AoTD priority-deficit
+resolver is used.

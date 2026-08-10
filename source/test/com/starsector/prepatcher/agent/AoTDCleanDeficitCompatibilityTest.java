@@ -26,6 +26,8 @@ public final class AoTDCleanDeficitCompatibilityTest {
     require(((Pair<?,?>)vanilla).two.equals(7),"raw vanilla fallback changed");
 
     StarsectorPrepatcherRuntimeBridge.configure(config,Path.of("."));
+    StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(
+      true,"compatibility-test");
     long caps=StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract(
       "aotd_theory_of_toolbox",
       StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
@@ -35,7 +37,8 @@ public final class AoTDCleanDeficitCompatibilityTest {
         public Object apply(Object industry,Object ids) {
           Pair<String,Integer> p=new Pair<>(); p.one="aotd"; p.two=39; return p;
         }
-      });
+      },
+      new Runnable() { public void run() {} });
     require((caps & StarsectorPrepatcherRuntimeBridge.AOTD_REQUIRED_CAPABILITIES)
         == StarsectorPrepatcherRuntimeBridge.AOTD_REQUIRED_CAPABILITIES,
       "production capabilities not negotiated: 0x"+Long.toHexString(caps));
