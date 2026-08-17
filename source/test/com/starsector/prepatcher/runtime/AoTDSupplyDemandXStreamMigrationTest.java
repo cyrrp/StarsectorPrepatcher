@@ -155,13 +155,13 @@ public final class AoTDSupplyDemandXStreamMigrationTest {
                         field(dataType, "additionalProduction").get(roundTripped),
                 "legacy-temp",
                 8f,
-                "spp12 round trip");
+                "spp13 round trip");
         require(field(dataType, "additionalDemand").get(roundTripped)
                         == field(dataType, "additionalImport").get(roundTripped),
                 "writeReplace/readResolve broke a shared persistent-stat alias");
 
         System.out.println("OK actual-fork AoTDSupplyDemandData XStream " + xstreamVersion
-                + " spp9-migration/spp12-round-trip xmlBytes="
+                + " spp9-migration/spp13-round-trip xmlBytes="
                 + newXml.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
     }
 

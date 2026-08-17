@@ -63,6 +63,8 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             "com/fs/starfarer/api/StarsectorPrepatcherCoreWorldsRuntime";
     private static final String CORE_WORLDS_PATCH_ID =
             "coreWorldsExtentCache";
+    private static final String ENTITY_LOOKUP_INDEX_REPAIR_FIELD =
+            "spp$entityLookupIndexReady";
     private static final int MARKET_SCHEDULER_COMPONENT_ENGINE = 1;
     private static final int MARKET_SCHEDULER_COMPONENT_ECONOMY = 2;
     private static final int MARKET_SCHEDULER_COMPONENT_ENTITY = 4;
@@ -404,6 +406,11 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
                         this::patchCampaignCacheLifecycle);
                 apply(state, "marketScheduler", config.marketScheduler,
                         this::patchMarketSchedulerEngineTick);
+                // Explicit overlapping-surface order: the entity-index repair owns the
+                // post-listener boundary first; the throttle then replaces that boundary and
+                // the generic composition gate revalidates the repair against the new call.
+                apply(state, "entityLookupIndexRepair",
+                        config.entityLookupIndexRepair, this::patchEntityLookupIndexRepair);
                 apply(state, "campaignListenerThrottle",
                         config.campaignListenerThrottle, this::patchCampaignListenerThrottle);
             }
@@ -845,7 +852,8 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             case EVENTS -> config.intelCallbackCache || config.intelReconciliation;
             case CAMPAIGN_STATE -> config.marketScheduler;
             case CAMPAIGN_ENGINE -> config.coreWorldsExtentCache
-                    || campaignCacheLifecycleEnabled() || config.campaignListenerThrottle;
+                    || campaignCacheLifecycleEnabled() || config.campaignListenerThrottle
+                    || config.entityLookupIndexRepair;
             case COURSE_WIDGET -> config.routeJumpPointIndex;
             case STRATEGIC_MODULE -> config.strategicJumpDestinationFirst
                     || config.strategicJumpDestinationIndex;
@@ -2938,6 +2946,193 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
             throw mismatch("market scheduler requires the complete CampaignEngine lifecycle boundary");
         }
     }
+
+    /**
+     * CampaignEngine's id-to-entity map is transient. During XStream restore a mod
+     * may call getEntityById() before the star-system graph has been attached. The
+     * vanilla lookup then materializes a non-null but incomplete map; the first
+     * campaign tick only rebuilds null maps, so the incomplete map survives and
+     * every miss scans hyperspace plus all star systems.
+     *
+     * Add one transient per-engine readiness bit and rebuild the exact vanilla map
+     * once, immediately after the first repository-listener restoration. The bit
+     * is deliberately transient so every loaded CampaignEngine receives the same
+     * repair, while steady-state ticks pay one private boolean read and branch.
+     */
+    private PatchReport patchEntityLookupIndexRepair(ClassNode node) {
+        final int stateAccess = Opcodes.ACC_PRIVATE | Opcodes.ACC_TRANSIENT
+                | Opcodes.ACC_SYNTHETIC;
+        EntityLookupIndexSurface surface = requireEntityLookupIndexSurface(node);
+        FieldNode state = uniqueField(node, ENTITY_LOOKUP_INDEX_REPAIR_FIELD);
+        if (state != null) {
+            if (!state.desc.equals("Z") || state.access != stateAccess
+                    || state.signature != null || state.value != null) {
+                throw mismatch("CampaignEngine entity-index readiness field is foreign");
+            }
+            requireEntityLookupIndexRepairBlock(node, surface);
+            throw already("CampaignEngine post-load entity-index repair postcondition matches");
+        }
+
+        requireCount("CampaignEngine original advance entity-index rebuilds",
+                countCalls(surface.advance(), Opcodes.INVOKEVIRTUAL, node.name,
+                        surface.rebuild().name, surface.rebuild().desc), 1);
+        node.fields.add(new FieldNode(Opcodes.ASM8, stateAccess,
+                ENTITY_LOOKUP_INDEX_REPAIR_FIELD, "Z", null, null));
+
+        LabelNode ready = new LabelNode();
+        InsnList repair = new InsnList();
+        repair.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        repair.add(new FieldInsnNode(Opcodes.GETFIELD, node.name,
+                ENTITY_LOOKUP_INDEX_REPAIR_FIELD, "Z"));
+        repair.add(new JumpInsnNode(Opcodes.IFNE, ready));
+        repair.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        repair.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, node.name,
+                surface.rebuild().name, surface.rebuild().desc, false));
+        repair.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        repair.add(new InsnNode(Opcodes.ICONST_1));
+        repair.add(new FieldInsnNode(Opcodes.PUTFIELD, node.name,
+                ENTITY_LOOKUP_INDEX_REPAIR_FIELD, "Z"));
+        repair.add(ready);
+        surface.advance().instructions.insert(surface.listenerBoundary(), repair);
+
+        requireEntityLookupIndexRepairBlock(node,
+                requireEntityLookupIndexSurface(node));
+        PatchReport report = new PatchReport();
+        report.add("transient CampaignEngine entity-index readiness flag", 1);
+        report.add("one post-load vanilla entity-index rebuild", 1);
+        return report;
+    }
+
+    private static EntityLookupIndexSurface requireEntityLookupIndexSurface(ClassNode node) {
+        MethodNode rebuild = requireMethod(node, "rebuildIDToEntityMap", "()V");
+        if ((rebuild.access & Opcodes.ACC_PRIVATE) == 0
+                || (rebuild.access & (Opcodes.ACC_STATIC | Opcodes.ACC_ABSTRACT
+                | Opcodes.ACC_NATIVE)) != 0) {
+            throw mismatch("CampaignEngine entity-index rebuild method access changed");
+        }
+
+        FieldInsnNode mapWrite = null;
+        int hashMapAllocations = 0;
+        for (AbstractInsnNode insn : rebuild.instructions.toArray()) {
+            if (insn instanceof FieldInsnNode field && field.getOpcode() == Opcodes.PUTFIELD
+                    && field.owner.equals(node.name) && field.desc.equals("Ljava/util/Map;")) {
+                if (mapWrite != null) {
+                    throw mismatch("CampaignEngine entity-index rebuild writes multiple Map fields");
+                }
+                mapWrite = field;
+            }
+            if (insn instanceof TypeInsnNode type && type.getOpcode() == Opcodes.NEW
+                    && type.desc.equals("java/util/HashMap")) {
+                hashMapAllocations++;
+            }
+        }
+        if (mapWrite == null) {
+            throw mismatch("CampaignEngine entity-index rebuild Map field was not found");
+        }
+        requireCount("CampaignEngine entity-index HashMap allocation", hashMapAllocations, 1);
+        requireCount("CampaignEngine entity-index population sites",
+                calls(rebuild, Opcodes.INVOKEINTERFACE, "java/util/Map", "put",
+                        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;").size(), 2);
+
+        MethodNode lookup = requireMethod(node, "getEntityById",
+                "(Ljava/lang/String;)" + ENTITY_TOKEN_DESC);
+        MethodInsnNode lookupRebuild = only(calls(lookup, Opcodes.INVOKEVIRTUAL,
+                node.name, rebuild.name, rebuild.desc),
+                "CampaignEngine.getEntityById null-map rebuild");
+        Frame<SourceValue>[] lookupFrames = sourceFrames(node.name, lookup);
+        if (!sourceIsLocal(receiverSource(lookup, lookupRebuild, lookupFrames),
+                Opcodes.ALOAD, 0)) {
+            throw mismatch("CampaignEngine.getEntityById rebuild receiver is not this");
+        }
+        int lookupMapReads = 0;
+        for (AbstractInsnNode insn : lookup.instructions.toArray()) {
+            if (!(insn instanceof FieldInsnNode field) || field.getOpcode() != Opcodes.GETFIELD
+                    || !field.owner.equals(node.name) || !field.desc.equals("Ljava/util/Map;")) {
+                continue;
+            }
+            if (!field.name.equals(mapWrite.name)) {
+                throw mismatch("CampaignEngine.getEntityById reads multiple Map fields");
+            }
+            lookupMapReads++;
+        }
+        requireCount("CampaignEngine.getEntityById entity-index reads", lookupMapReads, 5);
+
+        MethodNode advance = requireMethod(node, "advance",
+                "(FLcom/fs/starfarer/util/A/new;)V");
+        MethodInsnNode listenerBoundary = requireEntityLookupListenerBoundary(node, advance);
+        return new EntityLookupIndexSurface(rebuild, advance, listenerBoundary);
+    }
+
+    private static MethodInsnNode requireEntityLookupListenerBoundary(
+            ClassNode node, MethodNode advance) {
+        List<MethodInsnNode> raw = calls(advance, Opcodes.INVOKEVIRTUAL,
+                node.name, "readdChangeListeners", "()V");
+        String hookDesc = "(Ljava/lang/Object;Ljava/util/List;Ljava/lang/Object;)V";
+        List<MethodInsnNode> throttled = calls(advance, Opcodes.INVOKESTATIC, HOOKS,
+                "readdChangeListenersIfNeeded", hookDesc);
+        Frame<SourceValue>[] frames = sourceFrames(node.name, advance);
+        if (raw.size() == 1 && throttled.isEmpty()) {
+            MethodInsnNode boundary = raw.get(0);
+            if (!sourceIsLocal(receiverSource(advance, boundary, frames),
+                    Opcodes.ALOAD, 0)) {
+                throw mismatch("CampaignEngine listener restoration receiver is not this");
+            }
+            return boundary;
+        }
+        if (raw.isEmpty() && throttled.size() == 1) {
+            MethodInsnNode boundary = throttled.get(0);
+            if (!sourceIsLocal(argumentSource(advance, boundary, frames, 0),
+                    Opcodes.ALOAD, 0)) {
+                throw mismatch("CampaignEngine throttled listener restoration engine is not this");
+            }
+            return boundary;
+        }
+        throw mismatch("CampaignEngine listener restoration boundary is missing or ambiguous: raw="
+                + raw.size() + ", throttled=" + throttled.size());
+    }
+
+    private static void requireEntityLookupIndexRepairBlock(
+            ClassNode node, EntityLookupIndexSurface surface) {
+        requireCount("CampaignEngine repaired advance entity-index rebuilds",
+                countCalls(surface.advance(), Opcodes.INVOKEVIRTUAL, node.name,
+                        surface.rebuild().name, surface.rebuild().desc), 2);
+
+        AbstractInsnNode cursor = nextMeaningful(surface.listenerBoundary());
+        requireVar(cursor, Opcodes.ALOAD, 0, "entity-index readiness owner");
+        cursor = nextMeaningful(cursor);
+        requireField(cursor, Opcodes.GETFIELD, node.name,
+                ENTITY_LOOKUP_INDEX_REPAIR_FIELD, "Z", "entity-index readiness read");
+        cursor = nextMeaningful(cursor);
+        if (!(cursor instanceof JumpInsnNode ready) || ready.getOpcode() != Opcodes.IFNE) {
+            throw mismatch("entity-index readiness branch changed");
+        }
+        cursor = nextMeaningful(cursor);
+        requireVar(cursor, Opcodes.ALOAD, 0, "entity-index rebuild owner");
+        cursor = nextMeaningful(cursor);
+        if (!(cursor instanceof MethodInsnNode rebuild)
+                || !callMatches(rebuild, Opcodes.INVOKEVIRTUAL, node.name,
+                surface.rebuild().name, surface.rebuild().desc)) {
+            throw mismatch("entity-index guarded rebuild call changed");
+        }
+        cursor = nextMeaningful(cursor);
+        requireVar(cursor, Opcodes.ALOAD, 0, "entity-index readiness write owner");
+        cursor = nextMeaningful(cursor);
+        if (cursor == null || cursor.getOpcode() != Opcodes.ICONST_1) {
+            throw mismatch("entity-index readiness value changed");
+        }
+        cursor = nextMeaningful(cursor);
+        requireField(cursor, Opcodes.PUTFIELD, node.name,
+                ENTITY_LOOKUP_INDEX_REPAIR_FIELD, "Z", "entity-index readiness write");
+        if (surface.advance().instructions.indexOf(ready.label)
+                <= surface.advance().instructions.indexOf(cursor)
+                || nextMeaningful(cursor) != nextMeaningful(ready.label)) {
+            throw mismatch("entity-index readiness branch does not join after publication");
+        }
+    }
+
+    private record EntityLookupIndexSurface(
+            MethodNode rebuild, MethodNode advance,
+            MethodInsnNode listenerBoundary) {}
 
     private PatchReport patchCampaignListenerThrottle(ClassNode node) {
         MethodNode refresh = requireMethod(node, "readdChangeListeners", "()V");

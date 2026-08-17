@@ -115,6 +115,12 @@ public final class FasterRenderingLoaderSmokeTest {
         require("APPLIED".equals(presentationPatchStatus),
                 "FR did not apply presentation coalescing before the structural transformer: status="
                         + presentationPatchStatus);
+        String entityLookupRepairStatus = System.getProperty(
+                "starsector.prepatcher.patchStatus." + CAMPAIGN_ENGINE
+                        + ".entityLookupIndexRepair");
+        require("APPLIED".equals(entityLookupRepairStatus),
+                "FR did not apply the post-load entity-index repair: status="
+                        + entityLookupRepairStatus);
         String apiPresentationPatchStatus = System.getProperty(
                 "starsector.prepatcher.patchStatus." + BASE_TERRAIN
                         + ".fastForwardPresentation");
@@ -154,6 +160,8 @@ public final class FasterRenderingLoaderSmokeTest {
                 + " commodityEventModDirtyCache=" + commodityPatchStatus);
         System.out.println("OK ordered overlapping target " + CAMPAIGN_ENGINE
                 + " fastForwardPresentation=" + presentationPatchStatus);
+        System.out.println("OK entity-index actual-loader transform status="
+                + entityLookupRepairStatus);
         System.out.println("OK FR API-container target " + BASE_TERRAIN
                 + " fastForwardPresentation=" + apiPresentationPatchStatus);
         System.out.println("OK FR upstream-mutated target " + HYPERSPACE_TERRAIN

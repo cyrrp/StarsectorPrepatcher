@@ -16,6 +16,18 @@
 
 ## [Unreleased]
 
+## [0.18.3] - 2026-08-17
+
+### Fixed
+
+- Rebuild `CampaignEngine`'s transient entity-id map once after the first post-load repository-listener restoration. This prevents an early `getEntityById()` call during XStream restore from leaving a non-null incomplete map and forcing every later valid lookup through a sector-wide fallback scan.
+
+### Изменено
+
+- Точный runtime-контракт переведён на Scheduler Fork `1.0.14-spp13`; bridge schema V10 и capability masks `0xbff`/`0xfff` не изменены.
+
+Подробности и состав проверок: [отчёт о выпуске 0.18.3](docs/releases/0.18.3.md).
+
 ## [0.18.2] - 2026-08-11
 
 ### Изменено

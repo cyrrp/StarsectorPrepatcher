@@ -2,7 +2,7 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Текущая версия: **0.18.2**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
+Текущая версия: **0.18.3**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
 
 [![Без препатчера и с ним](media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
@@ -21,7 +21,7 @@ StarsectorPrepatcher — compatibility-first слой ранних патчей 
 - хранить зависимое от версии игры знание о bytecode внутри prepatcher, а не размножать его по
   игровым модам.
 
-Публичный API в `0.18.2` ещё не выпущен и остаётся пунктом roadmap. Планируемый namespace —
+Публичный API в `0.18.3` ещё не выпущен и остаётся пунктом roadmap. Планируемый namespace —
 `com.starsector.prepatcher.api`; типы станут поддерживаемым контрактом только после появления
 документации и compatibility-тестов.
 
@@ -61,7 +61,7 @@ Bootstrap plugin не меняет bytecode. Он выводит состоян�
 
 Если установлен **AoTD — Theory of Toolbox**, используйте поддерживаемый
 [Scheduler Fork](https://github.com/cyrrp/AoTD-Theory-Of-Toolbox-Scheduler-Fork) выпуска
-`1.0.14-spp12`. Форк необходим для оптимальной производительности AoTD и поддерживаемого native
+`1.0.14-spp13`. Форк необходим для оптимальной производительности AoTD и поддерживаемого native
 scheduler/capability path. Будущие ревизии остаются fail-closed до проверки их контрактов. Без AoTD
 форк не требуется.
 
@@ -235,14 +235,14 @@ Rendering. Сборка описана в [`BUILDING.md`](BUILDING.md).
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — план structural discovery, архитектуры, tooling и платформ;
 - [`docs/architecture/MARKET_SCHEDULER.md`](docs/architecture/MARKET_SCHEDULER.md) — долговременное
   устройство и инварианты scheduler;
-- [`docs/releases/0.18.2.md`](docs/releases/0.18.2.md) — подробный отчёт текущего выпуска.
+- [`docs/releases/0.18.3.md`](docs/releases/0.18.3.md) — подробный отчёт текущего выпуска.
 
 Условия распространения находятся в [`LICENSE`](LICENSE).
 
 ## Интеграция с AoTD Scheduler Fork
 
-Prepatcher 0.18.2 сохраняет clean wrapper на оригинальный `BaseIndustry.getMaxDeficit()` и
-поддерживает Scheduler Fork `1.0.14-spp12`. Обязательный production-профиль `0xbff` включает
+Prepatcher 0.18.3 сохраняет clean wrapper на оригинальный `BaseIndustry.getMaxDeficit()` и
+поддерживает Scheduler Fork `1.0.14-spp13`. Обязательный production-профиль `0xbff` включает
 economy-restore coordination; optional UI market-mutation capability расширяет полный V10-профиль
 до `0xfff`. Bridge публикует campaign/economy epoch и читает актуальную runtime
 capability mask. Поздние callbacks старой эпохи отклоняются, а fail-stop listener запускает
@@ -251,7 +251,7 @@ capability mask. Поздние callbacks старой эпохи отклоня
 
 Обязательные capabilities не зависят от optional optimization switches, поэтому safe profile тоже
 согласует `0xbff`. Регистрация поддерживает только текущий контракт: форма bridge должна быть V10,
-версия — точно `1.0.14-spp12`, declared mask — точно `0xfff`. Любое расхождение
+версия — точно `1.0.14-spp13`, declared mask — точно `0xfff`. Любое расхождение
 логируется и целиком отклоняется без режима частичной совместимости.
 
 Read-only UI patch также удаляет точный UI-triggered глобальный `tripleStep()` при открытии
@@ -292,7 +292,7 @@ market reapply-вызовов. Во всех поставляемых профи
 `NOT_READY`; ошибки calculation scripts остаются видимыми. Новые сохранения исключают содержимое и
 ссылки derived per-industry supply/demand caches и перестраивают их после полного restore barrier.
 
-При установленном AoTD Theory of Toolbox поддерживаемый Scheduler Fork `1.0.14-spp12` необходим для
+При установленном AoTD Theory of Toolbox поддерживаемый Scheduler Fork `1.0.14-spp13` необходим для
 оптимальной производительности. В остальных конфигурациях Prepatcher не требует ни AoTD, ни форк.
 Исходная сборка AoTD может использовать сохранённые fail-closed/raw пути, но не предоставляет полный
 поддерживаемый native scheduler contract.

@@ -49,6 +49,8 @@ public final class StructuralCompatibilityTest {
             "com/fs/starfarer/api/StarsectorPrepatcherTempModHooks";
     private static final String CORE_WORLDS_RUNTIME =
             "com/fs/starfarer/api/StarsectorPrepatcherCoreWorldsRuntime";
+    private static final String ENTITY_LOOKUP_INDEX_REPAIR_FIELD =
+            "spp$entityLookupIndexReady";
 
     private StructuralCompatibilityTest() {}
 
@@ -77,6 +79,8 @@ public final class StructuralCompatibilityTest {
                 "market scheduler must remain disabled when configuration is missing");
         require(!defaults.directMarketObservation,
                 "direct-market observation must remain disabled when configuration is missing");
+        require(defaults.entityLookupIndexRepair,
+                "post-load entity-index repair must remain enabled when configuration is missing");
         require(!defaults.commodityTemporalFastPath,
                 "aggressive commodity active set must remain disabled when configuration is missing");
         require(!defaults.marketNoOpCallbacks,
@@ -134,6 +138,8 @@ public final class StructuralCompatibilityTest {
         runNegativeIntelArrowRenderingTests(Path.of(args[1]).toAbsolutePath().normalize());
         runNegativeEventsPanelReconciliationTests(Path.of(args[1]).toAbsolutePath().normalize());
         runNegativeLifecycleTests(config, Path.of(args[1]).toAbsolutePath().normalize());
+        runEntityLookupIndexRepairStructuralTests(
+                config, Path.of(args[1]).toAbsolutePath().normalize());
         runExp6OwnershipTests(config, Path.of(args[1]).toAbsolutePath().normalize());
         runInlineFastPathNegativeTests(config,
                 Path.of(args[1]).toAbsolutePath().normalize());
@@ -160,6 +166,7 @@ public final class StructuralCompatibilityTest {
                 + " intel-arrow-scope-tamper intel-arrow-callback/vector-tamper"
                 + " events-panel-reconciliation-atomicity events-panel-marker-ownership"
                 + " events-panel-scope-tamper events-panel-hook-tamper"
+                + " entity-index-load-repair/transient/idempotency/composition/tamper"
                 + " safe-missing-config-defaults composition-final-validation");
         System.out.println("SUMMARY jars=" + jars + " transformedClasses=" + classes
                 + " verifiedMethods=" + methods);
@@ -1797,6 +1804,101 @@ public final class StructuralCompatibilityTest {
         set.instructions.set(producer, new InsnNode(Opcodes.ACONST_NULL));
         assertLifecycleRejectedButIndependentPatchSurvives(config, write(wrongSource),
                 "wrong setInstance singleton source");
+    }
+
+    private static void runEntityLookupIndexRepairStructuralTests(
+            PrepatcherConfig config, Path jarPath) throws Exception {
+        byte[] original;
+        try (JarFile jar = new JarFile(jarPath.toFile())) {
+            original = jar.getInputStream(jar.getJarEntry(
+                    PrepatcherTransformer.CAMPAIGN_ENGINE + ".class")).readAllBytes();
+        }
+        String status = "starsector.prepatcher.patchStatus."
+                + PrepatcherTransformer.CAMPAIGN_ENGINE.replace('/', '.')
+                + ".entityLookupIndexRepair";
+
+        byte[] patched = new PrepatcherTransformer(config).transform(
+                null, PrepatcherTransformer.CAMPAIGN_ENGINE, null, null, original);
+        require(patched != null, "CampaignEngine entity-index repair did not compose");
+        ClassNode repaired = read(patched);
+        FieldNode readiness = null;
+        for (FieldNode field : repaired.fields) {
+            if (!field.name.equals(ENTITY_LOOKUP_INDEX_REPAIR_FIELD)) continue;
+            require(readiness == null, "duplicate entity-index readiness field");
+            readiness = field;
+        }
+        int expectedAccess = Opcodes.ACC_PRIVATE | Opcodes.ACC_TRANSIENT
+                | Opcodes.ACC_SYNTHETIC;
+        require(readiness != null && readiness.desc.equals("Z")
+                        && readiness.access == expectedAccess
+                        && readiness.signature == null && readiness.value == null,
+                "entity-index readiness field is not private/transient/synthetic");
+        MethodNode advance = method(repaired, "advance", "(FLcom/fs/starfarer/util/A/new;)V");
+        require(countCalls(advance, Opcodes.INVOKEVIRTUAL,
+                        PrepatcherTransformer.CAMPAIGN_ENGINE,
+                        "rebuildIDToEntityMap", "()V") == 2,
+                "entity-index repair did not add exactly one guarded vanilla rebuild");
+        require(new PrepatcherTransformer(config).transform(
+                        null, PrepatcherTransformer.CAMPAIGN_ENGINE,
+                        null, null, patched) == null,
+                "entity-index repair is not idempotent");
+        verifyBytecode(patched);
+
+        Constructor<PrepatcherConfig> constructor =
+                PrepatcherConfig.class.getDeclaredConstructor(Properties.class);
+        constructor.setAccessible(true);
+        for (boolean listenerThrottle : new boolean[]{false, true}) {
+            Properties properties = new Properties();
+            properties.setProperty("patch.entityLookupIndexRepair", "true");
+            properties.setProperty("patch.campaignListenerThrottle",
+                    Boolean.toString(listenerThrottle));
+            PrepatcherConfig isolated = constructor.newInstance(properties);
+            byte[] composed = new PrepatcherTransformer(isolated).transform(
+                    null, PrepatcherTransformer.CAMPAIGN_ENGINE,
+                    null, null, original);
+            require(composed != null,
+                    "entity-index repair failed with listenerThrottle=" + listenerThrottle);
+            MethodNode composedAdvance = method(read(composed), "advance",
+                    "(FLcom/fs/starfarer/util/A/new;)V");
+            require(countCalls(composedAdvance, Opcodes.INVOKEVIRTUAL,
+                            PrepatcherTransformer.CAMPAIGN_ENGINE,
+                            "rebuildIDToEntityMap", "()V") == 2,
+                    "listener composition changed entity-index rebuild count");
+            require(countCalls(composedAdvance, Opcodes.INVOKESTATIC, HOOKS,
+                            "readdChangeListenersIfNeeded",
+                            "(Ljava/lang/Object;Ljava/util/List;Ljava/lang/Object;)V")
+                            == (listenerThrottle ? 1 : 0),
+                    "listener composition state does not match configuration");
+            verifyBytecode(composed);
+        }
+
+        ClassNode changedRebuild = read(original);
+        MethodNode rebuild = method(changedRebuild, "rebuildIDToEntityMap", "()V");
+        rebuild.access = (rebuild.access & ~Opcodes.ACC_PRIVATE) | Opcodes.ACC_PUBLIC;
+        System.clearProperty(status);
+        byte[] independent = new PrepatcherTransformer(config).transform(
+                null, PrepatcherTransformer.CAMPAIGN_ENGINE,
+                null, null, write(changedRebuild));
+        require(independent != null,
+                "changed entity-index rebuild blocked independent CampaignEngine patches");
+        require(read(independent).fields.stream().noneMatch(
+                        field -> field.name.equals(ENTITY_LOOKUP_INDEX_REPAIR_FIELD)),
+                "changed entity-index rebuild was accepted by the repair matcher");
+        require("SKIPPED_STRUCTURAL".equals(System.getProperty(status)),
+                "changed entity-index rebuild did not fail open locally");
+        verifyBytecode(independent);
+
+        ClassNode partial = read(patched);
+        require(partial.fields.removeIf(
+                        field -> field.name.equals(ENTITY_LOOKUP_INDEX_REPAIR_FIELD)),
+                "entity-index partial-state test input had no readiness field");
+        System.clearProperty(status);
+        require(new PrepatcherTransformer(config).transform(
+                        null, PrepatcherTransformer.CAMPAIGN_ENGINE,
+                        null, null, write(partial)) == null,
+                "partial entity-index repair state was rewritten");
+        require("SKIPPED_STRUCTURAL".equals(System.getProperty(status)),
+                "partial entity-index repair state was not rejected structurally");
     }
 
     private static void runExp6OwnershipTests(PrepatcherConfig config, Path jarPath) throws Exception {

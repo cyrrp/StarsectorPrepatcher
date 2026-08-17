@@ -22,6 +22,7 @@ public final class PrepatcherConfig {
     public final boolean sampleCacheClearThrottle;
     public final boolean gridLineCap;
     public final boolean campaignListenerThrottle;
+    public final boolean entityLookupIndexRepair;
     public final boolean routeJumpPointIndex;
     public final boolean strategicJumpDestinationFirst;
     public final boolean strategicJumpDestinationIndex;
@@ -171,6 +172,7 @@ public final class PrepatcherConfig {
         sampleCacheClearThrottle = bool("patch.sampleCacheClearThrottle", true);
         gridLineCap = bool("patch.gridLineCap", true);
         campaignListenerThrottle = bool("patch.campaignListenerThrottle", true);
+        entityLookupIndexRepair = bool("patch.entityLookupIndexRepair", true);
         routeJumpPointIndex = bool("patch.routeJumpPointIndex", true);
         strategicJumpDestinationFirst = bool(
                 "patch.strategicJumpDestinationFirst", false);

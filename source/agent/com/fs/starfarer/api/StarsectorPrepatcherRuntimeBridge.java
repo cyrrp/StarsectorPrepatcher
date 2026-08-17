@@ -87,7 +87,7 @@ public final class StarsectorPrepatcherRuntimeBridge {
             "dispatchPrepatcherUiEconomyStep";
 
     private static final String AOTD_MOD_ID = "aotd_theory_of_toolbox";
-    public static final String AOTD_CURRENT_FORK_VERSION = "1.0.14-spp12";
+    public static final String AOTD_CURRENT_FORK_VERSION = "1.0.14-spp13";
     private static final String AOTD_ECONOMY_CLASS =
             "data.kaysaar.aotd.tot.scripts.economy.AoTDEconomy";
     private static final String CORE_LIFECYCLE_CLASS =
@@ -373,7 +373,7 @@ public final class StarsectorPrepatcherRuntimeBridge {
     }
 
     /**
-     * Resolves the only ordering race in the required spp12 handshake. Loading without
+     * Resolves the only ordering race in the required spp13 handshake. Loading without
      * initialization is enough to run the already-installed exact transformer; it neither
      * executes CoreLifecycle code nor retains a fork loader. The structural transformer publishes
      * the operational gate synchronously before Class.forName returns.

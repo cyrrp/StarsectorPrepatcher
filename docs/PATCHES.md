@@ -34,6 +34,7 @@ classfile или JAR не участвует в решении.
 | `patch.intelArrowRendering` | `Z.o00000(FF)` Intel arrows | atomic `getArrowData` TTL cache plus two reusable internal vectors under one scratch scope | callback, both non-escaping allocations, scope and ownership marker must match together; miss/error calls plugin |
 | internal lifecycle | `CampaignEngine.set/resetInstance`, `CampaignEngine.advance`, save boundary | generation reset plus throttled UI-cache/scratch maintenance | two-phase generation boundary; maintenance runs only on campaign thread and forced save sweep still honors idle/grace thresholds |
 | `patch.campaignListenerThrottle` | campaign advance | skip unchanged internal repository listener sweep | public method untouched, periodic audit |
+| `patch.entityLookupIndexRepair` | first campaign advance after construction/load | rebuild the vanilla transient entity-id map once after repository listeners are restored | private transient readiness bit; exact vanilla rebuild; no steady full scan |
 | `patch.campaignSnapshotReuse` | `BaseLocation` | reusable eager snapshots | point-in-time order/mutation isolation |
 | `patch.entityScriptSnapshotReuse` | entity scripts | inline empty fast return; non-empty fresh vanilla snapshot | no scratch scope for empty lists; mutation isolation unchanged |
 | `patch.emptyMemoryAdvanceFastPath` | `Memory.advance` | inline return when expire+require are empty | restoration/pause and non-empty loops remain vanilla |
@@ -87,7 +88,7 @@ fail-closed: original bytes, including `tripleStep()`, are returned unchanged.
 
 ### Explicit AoTD UI economy dispatch
 
-Scheduler Fork `1.0.14-spp12` restores the standard virtual-step contract:
+Scheduler Fork `1.0.14-spp13` restores the standard virtual-step contract:
 `AoTDEconomy.nextStep(EconWorkParams)`, `doubleStep()`, `tripleStep()` and
 `AoTDReachEconomy.nextStep(EconWorkParams)` always run the full all-market pipeline. They do not
 inspect `currentlyOpenMarket`, infer UI intent from a null payload or consume a Prepatcher context;
@@ -118,7 +119,7 @@ instead collects its immutable transaction IDs directly inside its guard and use
 round trip. No
 static `Class`, `Method`, `ClassLoader`, campaign object or mod instance is cached for dispatch.
 
-Only exact Scheduler Fork `1.0.14-spp12` registers. The current declared mask must be exactly
+Only exact Scheduler Fork `1.0.14-spp13` registers. The current declared mask must be exactly
 `0xfff`; `spp4`–`spp9`, future and partially declared contracts are logged and rejected wholesale
 with mask `0`. For the exact current fork, required economy-restore bit 11 is independent of optional
 optimization switches: every shipped profile negotiates `0xbff`, while

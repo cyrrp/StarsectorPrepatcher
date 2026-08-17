@@ -40,6 +40,7 @@ public final class FastForwardPresentationCompatibilityTest {
                     "smo$patched$campaignCacheLifecycle",
                     "smo$patched$coreWorldsExtentCache",
                     "smo$patched$marketScheduler",
+                    "smo$patched$entityLookupIndexRepair",
                     "smo$patched$campaignListenerThrottle"),
             "com/fs/starfarer/campaign/BaseLocation", Set.of(
                     "smo$patched$campaignSnapshotReuse",
@@ -374,6 +375,7 @@ public final class FastForwardPresentationCompatibilityTest {
         // CampaignEngine lifecycle companion is a required dependency of its
         // listener throttle and is therefore expected as a second marker.
         properties.setProperty("patch.campaignListenerThrottle", "true");
+        properties.setProperty("patch.entityLookupIndexRepair", "true");
         properties.setProperty("patch.campaignSnapshotReuse", "true");
         properties.setProperty("patch.entityScriptSnapshotReuse", "true");
         properties.setProperty("patch.skipNoOpTerrainLayer", "true");
