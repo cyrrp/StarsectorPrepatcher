@@ -7,9 +7,9 @@ import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.jar.*;
-import jdk.internal.org.objectweb.asm.*;
-import jdk.internal.org.objectweb.asm.tree.*;
-import jdk.internal.org.objectweb.asm.tree.analysis.*;
+import org.objectweb.asm.*;
+import org.objectweb.asm.tree.*;
+import org.objectweb.asm.tree.analysis.*;
 
 public final class HyperspaceCompatibilityTest {
     public static void main(String[] a)throws Exception{

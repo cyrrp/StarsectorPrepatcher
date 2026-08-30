@@ -2,14 +2,14 @@ package com.starsector.prepatcher.agent;
 
 import com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge;
 import com.fs.starfarer.api.campaign.econ.MarketAPI;
-import jdk.internal.org.objectweb.asm.ClassReader;
-import jdk.internal.org.objectweb.asm.ClassWriter;
-import jdk.internal.org.objectweb.asm.Opcodes;
-import jdk.internal.org.objectweb.asm.tree.AbstractInsnNode;
-import jdk.internal.org.objectweb.asm.tree.ClassNode;
-import jdk.internal.org.objectweb.asm.tree.LdcInsnNode;
-import jdk.internal.org.objectweb.asm.tree.MethodInsnNode;
-import jdk.internal.org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -323,7 +323,7 @@ public final class DirectMarketObserveTransformerTest {
         var pass = writer.visitMethod(Opcodes.ACC_PUBLIC, "passThrough",
                 "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;F)V", null, null);
         pass.visitCode();
-        jdk.internal.org.objectweb.asm.Label passLine = new jdk.internal.org.objectweb.asm.Label();
+        org.objectweb.asm.Label passLine = new org.objectweb.asm.Label();
         pass.visitLabel(passLine);
         pass.visitLineNumber(10, passLine);
         pass.visitVarInsn(Opcodes.ALOAD, 1);
@@ -411,7 +411,7 @@ public final class DirectMarketObserveTransformerTest {
         advance.visitMethodInsn(Opcodes.INVOKEINTERFACE,
                 "com/fs/starfarer/api/campaign/econ/MarketAPI",
                 "advance", "(F)V", true);
-        jdk.internal.org.objectweb.asm.Label done = new jdk.internal.org.objectweb.asm.Label();
+        org.objectweb.asm.Label done = new org.objectweb.asm.Label();
         advance.visitVarInsn(Opcodes.FLOAD, 1);
         advance.visitInsn(Opcodes.FCONST_0);
         advance.visitInsn(Opcodes.FCMPG);

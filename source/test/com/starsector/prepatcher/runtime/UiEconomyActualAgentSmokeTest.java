@@ -22,8 +22,9 @@ public final class UiEconomyActualAgentSmokeTest {
         try {
             Class.forName("com.fs.starfarer.campaign.ui.class", false, loader);
         } catch (ClassFormatError expectedForKeywordClassName) {
+            if (Runtime.version().feature() >= 27) throw expectedForKeywordClassName;
             // The stock JVM loader rejects this obfuscated keyword name after the transformer
-            // has already received the class bytes. The published status is the real contract.
+            // has already received the class bytes on legacy runtimes without name repair.
         }
         require("APPLIED".equals(System.getProperty(
                         "starsector.prepatcher.campaignCargoNoGlobalEconomyStepPatch", "")),
@@ -93,9 +94,9 @@ public final class UiEconomyActualAgentSmokeTest {
         try {
             Class.forName(className, false, loader);
         } catch (ClassFormatError expectedForObfuscatedIdentifier) {
+            if (Runtime.version().feature() >= 27) throw expectedForObfuscatedIdentifier;
             // Some game classes contain JVM-illegal obfuscated member identifiers. The
-            // transformer has already processed and published status before defineClass rejects
-            // the unchanged identifier; structural tests verify the emitted method bodies.
+            // Java-17 compatibility smoke may still observe the legacy unchanged identifier.
         }
     }
 

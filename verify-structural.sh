@@ -2,6 +2,13 @@
 set -euo pipefail
 
 MOD_ROOT="$(cd "$(dirname "$0")" && pwd)"
+java_native_path() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    printf '%s\n' "$1"
+  fi
+}
 find_game_root() {
   local candidate="$1"
   while [[ "$candidate" != "/" ]]; do
@@ -19,27 +26,47 @@ GAME_ROOT="$(find_game_root "$MOD_ROOT")" || {
 }
 CORE="$GAME_ROOT/starsector-core"
 BUILD="$MOD_ROOT/.build"
-AGENT_CLASSES="$BUILD/agent-classes"
+AGENT_CLASSES="$BUILD/agent-raw-classes"
 TEST_CLASSES="$BUILD/test-classes"
 FR_SMOKE_CLASSES="$BUILD/fr-smoke-classes"
 REPORT_DIR="$BUILD/reports"
-EXPORTS=(
-  --add-exports java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED
-  --add-exports java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED
-  --add-exports java.base/jdk.internal.org.objectweb.asm.tree.analysis=ALL-UNNAMED
-)
+AGENT_JAR_JAVA="$(java_native_path "$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar")"
+AGGRESSIVE_CONFIG_JAVA="$(java_native_path "$MOD_ROOT/profiles/aggressive.properties")"
+# Tests compile against public ASM; the packaged agent is audited separately
+# after relocating ASM into the private Prepatcher namespace.
+# This array is kept (empty) so the existing "${EXPORTS[@]}" expansions remain valid no-ops.
+EXPORTS=()
 
 bash "$MOD_ROOT/build-agent.sh"
 rm -rf "$TEST_CLASSES" "$FR_SMOKE_CLASSES"
 mkdir -p "$TEST_CLASSES" "$FR_SMOKE_CLASSES" "$REPORT_DIR"
 
-TEST_CP="$AGENT_CLASSES:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
+TEST_CP="$AGENT_CLASSES:$MOD_ROOT/lib/asm-9.10.1.jar:$MOD_ROOT/lib/asm-tree-9.10.1.jar:$MOD_ROOT/lib/asm-analysis-9.10.1.jar:$MOD_ROOT/lib/asm-util-9.10.1.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
 FR_SMOKE_SOURCE="$MOD_ROOT/source/test/com/starsector/prepatcher/fr/FasterRenderingLoaderSmokeTest.java"
 find "$MOD_ROOT/source/test" -name '*.java' ! -path "$FR_SMOKE_SOURCE" -print0 | \
-  xargs -0 javac -encoding UTF-8 -source 17 -target 17 \
+  xargs -0 javac -encoding UTF-8 --release 17 \
   "${EXPORTS[@]}" -cp "$TEST_CP" -d "$TEST_CLASSES"
-javac -encoding UTF-8 -source 17 -target 17 \
+javac -encoding UTF-8 --release 17 \
   -d "$FR_SMOKE_CLASSES" "$FR_SMOKE_SOURCE"
+
+PROBE_MUTATION_AGENT_JAR="$BUILD/fr.agent.jar"
+PROBE_MUTATION_MANIFEST="$BUILD/probe-mutation-test-agent.mf"
+printf '%s\n' 'Manifest-Version: 1.0' \
+  'Premain-Class: com.starsector.prepatcher.agent.ProbeMutationTestAgent' '' \
+  > "$PROBE_MUTATION_MANIFEST"
+jar --create --file "$PROBE_MUTATION_AGENT_JAR" \
+  --manifest "$PROBE_MUTATION_MANIFEST" \
+  -C "$TEST_CLASSES" com/starsector/prepatcher/agent/ProbeMutationTestAgent.class \
+  -C "$TEST_CLASSES" 'com/starsector/prepatcher/agent/ProbeMutationTestAgent$Mutation.class'
+
+LEGACY_FR_PRELOAD_AGENT_JAR="$BUILD/legacy-fr-preload-test-agent.jar"
+LEGACY_FR_PRELOAD_MANIFEST="$BUILD/legacy-fr-preload-test-agent.mf"
+printf '%s\n' 'Manifest-Version: 1.0' \
+  'Premain-Class: com.starsector.prepatcher.agent.LegacyFrPreloadTestAgent' '' \
+  > "$LEGACY_FR_PRELOAD_MANIFEST"
+jar --create --file "$LEGACY_FR_PRELOAD_AGENT_JAR" \
+  --manifest "$LEGACY_FR_PRELOAD_MANIFEST" \
+  -C "$TEST_CLASSES" com/starsector/prepatcher/agent/LegacyFrPreloadTestAgent.class
 
 java -cp "$TEST_CLASSES" \
   com.starsector.prepatcher.docs.DocumentationConsistencyTest "$MOD_ROOT" \
@@ -56,8 +83,12 @@ else
   CORE_JARS=("$@")
 fi
 
-CLASS_PATH="$AGENT_CLASSES:$TEST_CLASSES"
+CLASS_PATH="$TEST_CLASSES:$TEST_CP"
+java -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.FasterRenderingConfigurationTest \
+  2>&1 | tee "$REPORT_DIR/faster-rendering-configuration.txt"
 VERIFICATION_CONFIG="$BUILD/structural-all-enabled.properties"
+VERIFICATION_CONFIG_JAVA="$(java_native_path "$VERIFICATION_CONFIG")"
 {
   printf '%s\n' '# Generated for structural coverage only; never shipped or used by startup smoke.'
   sed \
@@ -75,6 +106,11 @@ java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
   com.starsector.prepatcher.agent.StructuralCompatibilityTest \
   "$VERIFICATION_CONFIG" "${CORE_JARS[@]}" \
   2>&1 | tee "$REPORT_DIR/structural-verification.txt"
+
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.FasterRenderingIllegalNameRepairTest \
+  "$CORE/starfarer_obf.jar" \
+  2>&1 | tee "$REPORT_DIR/illegal-obfuscated-member-name-repair.txt"
 
 java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
   com.starsector.prepatcher.agent.CoreWorldsStructuralMatcherTest \
@@ -145,6 +181,11 @@ java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
   com.starsector.prepatcher.agent.TradeMarketMutationTransformerTest \
   "$CORE/starfarer_obf.jar" \
   2>&1 | tee "$REPORT_DIR/trade-market-mutation-transformer.txt"
+
+java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.UiMutationRepairedNamePipelineTest \
+  "$CORE/starfarer_obf.jar" \
+  2>&1 | tee "$REPORT_DIR/ui-mutation-repaired-name-pipeline.txt"
 
 java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
   com.starsector.prepatcher.agent.IndustryMarketMutationTransformerTest \
@@ -249,7 +290,7 @@ java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
   com.starsector.prepatcher.agent.DirectMarketObserveTransformerTest \
   2>&1 | tee "$REPORT_DIR/direct-market-transformer.txt"
 
-RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
+RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$MOD_ROOT/lib/asm-9.10.1.jar:$MOD_ROOT/lib/asm-tree-9.10.1.jar:$MOD_ROOT/lib/asm-analysis-9.10.1.jar:$MOD_ROOT/lib/asm-util-9.10.1.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
 java -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.runtime.AoTDEconomyRestoreRuntimeTest \
   2>&1 | tee "$REPORT_DIR/aotd-economy-restore-runtime.txt"
@@ -316,10 +357,136 @@ java "${EXPORTS[@]}" -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.agent.StartupAuditCoverageTest \
   2>&1 | tee "$REPORT_DIR/startup-audit-coverage.txt"
 
+JAVA27="$GAME_ROOT/jdk-27+22/bin/java"
+if [[ -x "$JAVA27" ]]; then
+  "$JAVA27" -Xverify:all \
+    "-javaagent:$AGENT_JAR_JAVA" \
+    -cp "$RUNTIME_CP" \
+    com.starsector.prepatcher.agent.JavaCompatibilityRouteSmokeMain \
+    2>&1 | tee "$REPORT_DIR/java27-standard-route.txt"
+  grep -q 'profile=JAVA27_STANDARD' "$REPORT_DIR/java27-standard-route.txt"
+  grep -q 'status=transformer-installed' "$REPORT_DIR/java27-standard-route.txt"
+
+  "$JAVA27" -Xverify:all \
+    "-javaagent:$AGENT_JAR_JAVA=config=$AGGRESSIVE_CONFIG_JAVA" \
+    -cp "$RUNTIME_CP" \
+    com.starsector.prepatcher.runtime.FastForwardPresentationActualAgentSmokeTest \
+    2>&1 | tee "$REPORT_DIR/java27-standard-presentation-actual-agent.txt"
+  grep -q 'Java compatibility route: JAVA27_STANDARD' \
+    "$REPORT_DIR/java27-standard-presentation-actual-agent.txt"
+  grep -q 'classes=24' "$REPORT_DIR/java27-standard-presentation-actual-agent.txt"
+
+  java27_ui_args=()
+  if [[ -f "$NEX_JAR" ]]; then
+    java27_ui_args+=("$NEX_JAR")
+  fi
+  "$JAVA27" -Xverify:all \
+    "-javaagent:$AGENT_JAR_JAVA=config=$AGGRESSIVE_CONFIG_JAVA" \
+    -cp "$RUNTIME_CP" \
+    com.starsector.prepatcher.runtime.UiEconomyActualAgentSmokeTest \
+    "${java27_ui_args[@]}" \
+    2>&1 | tee "$REPORT_DIR/java27-standard-ui-economy-actual-agent.txt"
+  grep -q 'Java compatibility route: JAVA27_STANDARD' \
+    "$REPORT_DIR/java27-standard-ui-economy-actual-agent.txt"
+  grep -q 'OK actual-agent UI economy contracts' \
+    "$REPORT_DIR/java27-standard-ui-economy-actual-agent.txt"
+
+  REAL_FR_AGENT="$CORE/fr.agent.jar"
+  if [[ -f "$REAL_FR_AGENT" ]]; then
+    new_fr_cp="$RUNTIME_CP"
+    if [[ -f "$CORE/fr.jar" ]]; then
+      new_fr_cp="$CORE/fr.jar:$new_fr_cp"
+    fi
+    "$JAVA27" -Xverify:all \
+      "-javaagent:$REAL_FR_AGENT" \
+      "-javaagent:$AGENT_JAR_JAVA=config=$AGGRESSIVE_CONFIG_JAVA" \
+      -cp "$new_fr_cp" \
+      com.starsector.prepatcher.runtime.UiEconomyActualAgentSmokeTest \
+      "${java27_ui_args[@]}" \
+      2>&1 | tee "$REPORT_DIR/java27-fr-agent-ui-economy.txt"
+    grep -q 'Java compatibility route: FR_AGENT_CHAIN' \
+      "$REPORT_DIR/java27-fr-agent-ui-economy.txt"
+    grep -q 'OK actual-agent UI economy contracts' \
+      "$REPORT_DIR/java27-fr-agent-ui-economy.txt"
+  else
+    printf 'SKIPPED: real %s not found\n' "$REAL_FR_AGENT" \
+      > "$REPORT_DIR/java27-fr-agent-ui-economy.txt"
+  fi
+
+  : > "$REPORT_DIR/java27-route-negative-probes.txt"
+  for route_case in configured-no-op fr-after-prepatcher declaration-only corrupt-body; do
+    before=()
+    after=()
+    case "$route_case" in
+      configured-no-op)
+        before=("-javaagent:$PROBE_MUTATION_AGENT_JAR=no-op") ;;
+      fr-after-prepatcher)
+        after=("-javaagent:$PROBE_MUTATION_AGENT_JAR=valid") ;;
+      declaration-only)
+        before=("-javaagent:$PROBE_MUTATION_AGENT_JAR=declaration-only") ;;
+      corrupt-body)
+        before=("-javaagent:$PROBE_MUTATION_AGENT_JAR=corrupt-body") ;;
+    esac
+    set +e
+    output="$("$JAVA27" "${before[@]}" \
+      "-javaagent:$AGENT_JAR_JAVA" "${after[@]}" \
+      -cp "$RUNTIME_CP" \
+      com.starsector.prepatcher.agent.JavaCompatibilityRouteSmokeMain 2>&1)"
+    status=$?
+    set -e
+    if (( status == 0 )) || [[ "$output" != *'cannot prove a safe configured bytecode route'* ]]; then
+      echo "Java 27 negative compatibility probe '$route_case' did not fail closed." >&2
+      exit 1
+    fi
+    echo "OK $route_case fatal-before-main" | \
+      tee -a "$REPORT_DIR/java27-route-negative-probes.txt"
+  done
+
+  if [[ -f "$CORE/fr.jar" ]]; then
+    : > "$REPORT_DIR/java27-legacy-fr-route-probes.txt"
+    for route_case in not-preloaded preloaded-retransform; do
+      preload=()
+      if [[ "$route_case" == preloaded-retransform ]]; then
+        preload=("-javaagent:$LEGACY_FR_PRELOAD_AGENT_JAR")
+      fi
+      set +e
+      output="$("$JAVA27" \
+        -Djava.system.class.loader=com.genir.renderer.loaders.AppClassLoader \
+        "${preload[@]}" "-javaagent:$AGENT_JAR_JAVA" \
+        -cp "$CORE/fr.jar:$RUNTIME_CP" \
+        com.starsector.prepatcher.agent.JavaCompatibilityRouteSmokeMain 2>&1)"
+      status=$?
+      set -e
+      if (( status != 0 )) || [[ "$output" != *'profile=FR_PREDEFINE_BRIDGE'* ]]; then
+        echo "Java 27 legacy FR route probe '$route_case' failed." >&2
+        exit 1
+      fi
+      if [[ "$route_case" == preloaded-retransform \
+          && "$output" != *'legacyPreloaded=true'* ]]; then
+        echo 'Java 27 legacy FR retransform probe did not preload ClassTransformer.' >&2
+        exit 1
+      fi
+      echo "OK $route_case FR_PREDEFINE_BRIDGE" | \
+        tee -a "$REPORT_DIR/java27-legacy-fr-route-probes.txt"
+    done
+  fi
+else
+  printf 'SKIPPED: %s not found\n' "$JAVA27" \
+    > "$REPORT_DIR/java27-standard-route.txt"
+  printf 'SKIPPED: %s not found\n' "$JAVA27" \
+    > "$REPORT_DIR/java27-standard-presentation-actual-agent.txt"
+  printf 'SKIPPED: %s not found\n' "$JAVA27" \
+    > "$REPORT_DIR/java27-standard-ui-economy-actual-agent.txt"
+  printf 'SKIPPED: %s not found\n' "$JAVA27" \
+    > "$REPORT_DIR/java27-fr-agent-ui-economy.txt"
+  printf 'SKIPPED: %s not found\n' "$JAVA27" \
+    > "$REPORT_DIR/java27-route-negative-probes.txt"
+fi
+
 if [[ -f "$AOTD_JAR" ]]; then
   for restore_order in core-first fork-first; do
     java \
-      "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MOD_ROOT/profiles/aggressive.properties" \
+      "-javaagent:$AGENT_JAR_JAVA=config=$AGGRESSIVE_CONFIG_JAVA" \
       -cp "$RUNTIME_CP:$AOTD_JAR" \
       com.starsector.prepatcher.runtime.AoTDEconomyRestoreActualAgentSmokeTest \
       "$restore_order" \
@@ -340,7 +507,7 @@ if [[ -f "$AOTD_JAR" ]]; then
     --add-opens=java.desktop/java.awt.font=ALL-UNNAMED \
     --add-opens=java.desktop/java.awt=ALL-UNNAMED \
     -Dstarsector.prepatcher.sessionOrigin=aotd-supply-demand-xstream \
-    "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MOD_ROOT/profiles/aggressive.properties" \
+    "-javaagent:$AGENT_JAR_JAVA=config=$AGGRESSIVE_CONFIG_JAVA" \
     -cp "$RUNTIME_CP:$AOTD_JAR" \
     com.starsector.prepatcher.runtime.AoTDSupplyDemandXStreamMigrationTest \
     2>&1 | tee "$REPORT_DIR/aotd-supply-demand-xstream-migration.txt"
@@ -354,13 +521,13 @@ if [[ -f "$NEX_JAR" ]]; then
   UI_ECONOMY_AGENT_ARGS+=("$NEX_JAR")
 fi
 java \
-  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MOD_ROOT/profiles/aggressive.properties" \
+  "-javaagent:$AGENT_JAR_JAVA=config=$AGGRESSIVE_CONFIG_JAVA" \
   -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.runtime.CoreWorldsActualAgentSmokeTest \
   2>&1 | tee "$REPORT_DIR/core-worlds-actual-agent.txt"
 
 java \
-  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MOD_ROOT/profiles/aggressive.properties" \
+  "-javaagent:$AGENT_JAR_JAVA=config=$AGGRESSIVE_CONFIG_JAVA" \
   -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.runtime.VanillaDetachedCargoContractActualAgentSmokeTest \
   2>&1 | tee "$REPORT_DIR/vanilla-detached-cargo-actual-agent.txt"
@@ -370,28 +537,28 @@ java -cp "$RUNTIME_CP" \
   2>&1 | tee "$REPORT_DIR/vanilla-market-open-coalescing-runtime.txt"
 
 java \
-  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MOD_ROOT/profiles/aggressive.properties" \
+  "-javaagent:$AGENT_JAR_JAVA=config=$AGGRESSIVE_CONFIG_JAVA" \
   -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.runtime.UiEconomyActualAgentSmokeTest \
   "${UI_ECONOMY_AGENT_ARGS[@]}" \
   2>&1 | tee "$REPORT_DIR/ui-economy-actual-agent.txt"
 
 java -noverify \
-  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MOD_ROOT/profiles/aggressive.properties" \
+  "-javaagent:$AGENT_JAR_JAVA=config=$AGGRESSIVE_CONFIG_JAVA" \
   -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.runtime.FastForwardPresentationActualAgentSmokeTest \
   2>&1 | tee "$REPORT_DIR/fast-forward-presentation-actual-agent.txt"
 
 java \
   -Dstarsector.prepatcher.sessionOrigin=temp-mod-smoke \
-  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" \
+  "-javaagent:$AGENT_JAR_JAVA" \
   -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.runtime.TempModActualAgentSmokeTest \
   2>&1 | tee "$REPORT_DIR/temp-mod-actual-agent-smoke.txt"
 
 java \
   -Dstarsector.prepatcher.sessionOrigin=market-step-replay-smoke \
-  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" \
+  "-javaagent:$AGENT_JAR_JAVA" \
   -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.runtime.MarketStepReplayActualAgentSmokeTest \
   2>&1 | tee "$REPORT_DIR/market-step-replay-actual-agent-smoke.txt"
@@ -400,6 +567,7 @@ java \
 # the real javaagent with all unrelated
 # bytecode patches disabled. Nexerelin remains an optional target.
 MARKET_SHARE_AGENT_CONFIG="$BUILD/market-share-agent-smoke.properties"
+MARKET_SHARE_AGENT_CONFIG_JAVA="$(java_native_path "$MARKET_SHARE_AGENT_CONFIG")"
 sed -E \
   -e 's/^(patch\.[^=]+)=.*/\1=false/' \
   -e 's/^logging\.statsIntervalSeconds=.*/logging.statsIntervalSeconds=0/' \
@@ -422,7 +590,7 @@ if [[ -f "$AOTD_JAR" ]]; then
 fi
 java -Xverify:all \
   -Dstarsector.prepatcher.sessionOrigin=market-share-smoke \
-  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MARKET_SHARE_AGENT_CONFIG" \
+  "-javaagent:$AGENT_JAR_JAVA=config=$MARKET_SHARE_AGENT_CONFIG_JAVA" \
   -cp "$MARKET_SHARE_AGENT_CP" \
   com.starsector.prepatcher.runtime.MarketShareActualAgentSmokeTest \
   "${MARKET_SHARE_AGENT_ARGS[@]}" \
@@ -431,6 +599,7 @@ java -Xverify:all \
 # Exercise Local Resources legality and the owner-local econ-group index in isolation.
 # The exact AoTDReachEconomy path is added when the maintained fork JAR is present.
 ECONOMY_HOTPATH_AGENT_CONFIG="$BUILD/economy-hotpath-agent-smoke.properties"
+ECONOMY_HOTPATH_AGENT_CONFIG_JAVA="$(java_native_path "$ECONOMY_HOTPATH_AGENT_CONFIG")"
 sed -E \
   -e 's/^(patch\.[^=]+)=.*/\1=false/' \
   -e 's/^economy\.structureAuditMs=.*/economy.structureAuditMs=0/' \
@@ -449,16 +618,36 @@ if [[ -f "$AOTD_JAR" ]]; then
 fi
 java -Xverify:all \
   -Dstarsector.prepatcher.sessionOrigin=economy-hotpath-smoke \
-  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$ECONOMY_HOTPATH_AGENT_CONFIG" \
+  "-javaagent:$AGENT_JAR_JAVA=config=$ECONOMY_HOTPATH_AGENT_CONFIG_JAVA" \
   -cp "$ECONOMY_HOTPATH_AGENT_CP" \
   com.starsector.prepatcher.runtime.EconomyHotpathActualAgentSmokeTest \
   "${ECONOMY_HOTPATH_AGENT_ARGS[@]}" \
   2>&1 | tee "$REPORT_DIR/economy-hotpath-actual-agent-smoke.txt"
 
+if [[ -x "$JAVA27" ]]; then
+  "$JAVA27" -Xverify:all \
+    -Dstarsector.prepatcher.sessionOrigin=java27-standard-local-resources \
+    "-javaagent:$AGENT_JAR_JAVA=config=$ECONOMY_HOTPATH_AGENT_CONFIG_JAVA" \
+    -cp "$ECONOMY_HOTPATH_AGENT_CP" \
+    com.starsector.prepatcher.runtime.EconomyHotpathActualAgentSmokeTest \
+    "${ECONOMY_HOTPATH_AGENT_ARGS[@]}" \
+    2>&1 | tee "$REPORT_DIR/java27-standard-local-resources-actual-agent.txt"
+  grep -q 'Java compatibility route: JAVA27_STANDARD' \
+    "$REPORT_DIR/java27-standard-local-resources-actual-agent.txt"
+  grep -q 'APPLIED localResourcesTooltipSnapshot' \
+    "$REPORT_DIR/java27-standard-local-resources-actual-agent.txt"
+  grep -q 'OK economy-hotpath-actual-agent' \
+    "$REPORT_DIR/java27-standard-local-resources-actual-agent.txt"
+else
+  printf 'SKIPPED: %s not found\n' "$JAVA27" \
+    > "$REPORT_DIR/java27-standard-local-resources-actual-agent.txt"
+fi
+
 # Exercise the active-set dependency contract with every other patch, including
 # the standalone temp-mod switch, disabled. The transformer must still install
 # its direct scheduler because the Market active set depends on it.
 COMMODITY_SMOKE_CONFIG="$BUILD/commodity-temporal-agent-smoke.properties"
+COMMODITY_SMOKE_CONFIG_JAVA="$(java_native_path "$COMMODITY_SMOKE_CONFIG")"
 sed -E \
   -e 's/^(patch\.[^=]+)=.*/\1=false/' \
   -e 's/^commodity\.temporalAuditFrames=.*/commodity.temporalAuditFrames=7/' \
@@ -467,7 +656,7 @@ sed -E \
   sed -E 's/^patch\.commodityTemporalFastPath=false/patch.commodityTemporalFastPath=true/' \
   > "$COMMODITY_SMOKE_CONFIG"
 java \
-  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$COMMODITY_SMOKE_CONFIG" \
+  "-javaagent:$AGENT_JAR_JAVA=config=$COMMODITY_SMOKE_CONFIG_JAVA" \
   -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.runtime.CommodityTemporalAgentSmokeTest \
   2>&1 | tee "$REPORT_DIR/commodity-temporal-agent-smoke.txt"
@@ -475,6 +664,7 @@ java \
 # Exercise the direct dormant BaseIndustry wrapper in isolation. The test
 # expects exactly two skipped callbacks between full vanilla audits.
 MARKET_NOOP_SMOKE_CONFIG="$BUILD/market-noop-agent-smoke.properties"
+MARKET_NOOP_SMOKE_CONFIG_JAVA="$(java_native_path "$MARKET_NOOP_SMOKE_CONFIG")"
 sed -E \
   -e 's/^(patch\.[^=]+)=.*/\1=false/' \
   -e 's/^market\.noOpIndustryAuditFrames=.*/market.noOpIndustryAuditFrames=2/' \
@@ -483,7 +673,7 @@ sed -E \
   sed -E 's/^patch\.marketNoOpCallbacks=false/patch.marketNoOpCallbacks=true/' \
   > "$MARKET_NOOP_SMOKE_CONFIG"
 java \
-  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$MARKET_NOOP_SMOKE_CONFIG" \
+  "-javaagent:$AGENT_JAR_JAVA=config=$MARKET_NOOP_SMOKE_CONFIG_JAVA" \
   -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.runtime.MarketNoOpActualAgentSmokeTest \
   2>&1 | tee "$REPORT_DIR/market-noop-actual-agent-smoke.txt"
@@ -495,7 +685,7 @@ java \
   --add-opens=java.desktop/java.awt.font=ALL-UNNAMED \
   --add-opens=java.desktop/java.awt=ALL-UNNAMED \
   -Dstarsector.prepatcher.sessionOrigin=temp-mod-xstream \
-  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" \
+  "-javaagent:$AGENT_JAR_JAVA" \
   -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.runtime.TempModXStreamSaveSmokeTest \
   2>&1 | tee "$REPORT_DIR/temp-mod-xstream-save-smoke.txt"
@@ -509,7 +699,7 @@ java "${EXPORTS[@]}" \
 
 java \
   -Dstarsector.prepatcher.sessionOrigin=startup-smoke \
-  "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" \
+  "-javaagent:$AGENT_JAR_JAVA" \
   -version 2>&1 | tee "$REPORT_DIR/startup-smoke.txt"
 
 FR_JAR="$CORE/fr.jar"
@@ -531,11 +721,33 @@ else
   java \
     -Djava.system.class.loader=com.genir.renderer.loaders.AppClassLoader \
     -Dstarsector.prepatcher.sessionOrigin=fr-smoke \
-    "-javaagent:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar=config=$VERIFICATION_CONFIG" \
+    "-javaagent:$AGENT_JAR_JAVA=config=$VERIFICATION_CONFIG_JAVA" \
     -cp "$FR_SMOKE_CP" \
     com.starsector.prepatcher.fr.FasterRenderingLoaderSmokeTest \
     "$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" \
     2>&1 | tee "$FR_SMOKE_REPORT"
+
+  if [[ -x "$JAVA27" ]]; then
+    for route_case in not-preloaded preloaded-retransform; do
+      preload=()
+      if [[ "$route_case" == preloaded-retransform ]]; then
+        preload=("-javaagent:$LEGACY_FR_PRELOAD_AGENT_JAR")
+      fi
+      report="$REPORT_DIR/java27-legacy-fr-ui-$route_case.txt"
+      "$JAVA27" -Xverify:all \
+        -Djava.system.class.loader=com.genir.renderer.loaders.AppClassLoader \
+        "-Dstarsector.prepatcher.sessionOrigin=java27-legacy-fr-ui-$route_case" \
+        "${preload[@]}" \
+        "-javaagent:$AGENT_JAR_JAVA=config=$VERIFICATION_CONFIG_JAVA" \
+        -cp "$FR_SMOKE_CP" \
+        com.starsector.prepatcher.fr.FasterRenderingLoaderSmokeTest \
+        "$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" \
+        2>&1 | tee "$report"
+      grep -q 'Java compatibility route: FR_PREDEFINE_BRIDGE' "$report"
+      grep -q 'OK FR normalized UI market fields trade=APPLIED overview=APPLIED cargo=APPLIED' \
+        "$report"
+    done
+  fi
 fi
 
 echo 'Documentation/structural/runtime/hyperspace/startup/FR verification completed.'

@@ -33,16 +33,15 @@ function Find-GameRoot([string] $startPath) {
 $gameRoot = Find-GameRoot $modRoot
 $core = Join-Path $gameRoot 'starsector-core'
 $build = Join-Path $modRoot '.build'
-$agentClasses = Join-Path $build 'agent-classes'
+$agentClasses = Join-Path $build 'agent-raw-classes'
 $testClasses = Join-Path $build 'test-classes'
 $frSmokeClasses = Join-Path $build 'fr-smoke-classes'
 $reportDir = Join-Path $build 'reports'
 $utf8 = New-Object Text.UTF8Encoding($false)
-$exports = @(
-    '--add-exports', 'java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED',
-    '--add-exports', 'java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED',
-    '--add-exports', 'java.base/jdk.internal.org.objectweb.asm.tree.analysis=ALL-UNNAMED'
-)
+# Tests compile against the public build-time ASM API. The release JAR contains
+# a separately relocated copy under the private Prepatcher namespace.
+# This array is kept (empty) so the existing @exports splats remain valid no-ops.
+$exports = @()
 
 & (Join-Path $modRoot 'build-agent.ps1')
 if (Test-Path $testClasses) { Remove-Item -Recurse -Force $testClasses }
@@ -50,6 +49,10 @@ New-Item -ItemType Directory -Force -Path $testClasses, $frSmokeClasses, $report
 
 $testCp = @(
     $agentClasses,
+    (Join-Path $modRoot 'lib\asm-9.10.1.jar'),
+    (Join-Path $modRoot 'lib\asm-tree-9.10.1.jar'),
+    (Join-Path $modRoot 'lib\asm-analysis-9.10.1.jar'),
+    (Join-Path $modRoot 'lib\asm-util-9.10.1.jar'),
     (Join-Path $core 'starfarer.api.jar'),
     (Join-Path $core 'starfarer_obf.jar'),
     (Join-Path $core 'fs.common_obf.jar'),
@@ -65,10 +68,29 @@ $frSmokeSource = Join-Path $modRoot `
 $testSources = Get-ChildItem -Path (Join-Path $modRoot 'source\test') -Filter '*.java' -Recurse |
     Where-Object { $_.FullName -ne $frSmokeSource } |
     ForEach-Object FullName
-& javac -encoding UTF-8 -source 17 -target 17 @exports -cp $testCp -d $testClasses @testSources
+& javac -encoding UTF-8 --release 17 @exports -cp $testCp -d $testClasses @testSources
 if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed.' }
-& javac -encoding UTF-8 -source 17 -target 17 -d $frSmokeClasses $frSmokeSource
+& javac -encoding UTF-8 --release 17 -d $frSmokeClasses $frSmokeSource
 if ($LASTEXITCODE -ne 0) { throw 'FR smoke harness compilation failed.' }
+
+$probeMutationAgentJar = Join-Path $build 'fr.agent.jar'
+$probeMutationManifest = Join-Path $build 'probe-mutation-test-agent.mf'
+[IO.File]::WriteAllText($probeMutationManifest,
+    "Manifest-Version: 1.0`nPremain-Class: com.starsector.prepatcher.agent.ProbeMutationTestAgent`n`n",
+    $utf8)
+& jar --create --file $probeMutationAgentJar --manifest $probeMutationManifest `
+    -C $testClasses 'com/starsector/prepatcher/agent/ProbeMutationTestAgent.class' `
+    -C $testClasses 'com/starsector/prepatcher/agent/ProbeMutationTestAgent$Mutation.class'
+if ($LASTEXITCODE -ne 0) { throw 'Probe mutation test-agent packaging failed.' }
+
+$legacyFrPreloadAgentJar = Join-Path $build 'legacy-fr-preload-test-agent.jar'
+$legacyFrPreloadManifest = Join-Path $build 'legacy-fr-preload-test-agent.mf'
+[IO.File]::WriteAllText($legacyFrPreloadManifest,
+    "Manifest-Version: 1.0`nPremain-Class: com.starsector.prepatcher.agent.LegacyFrPreloadTestAgent`n`n",
+    $utf8)
+& jar --create --file $legacyFrPreloadAgentJar --manifest $legacyFrPreloadManifest `
+    -C $testClasses 'com/starsector/prepatcher/agent/LegacyFrPreloadTestAgent.class'
+if ($LASTEXITCODE -ne 0) { throw 'Legacy FR preload test-agent packaging failed.' }
 
 $savedErrorActionPreference = $ErrorActionPreference
 $documentationReport = Join-Path $reportDir 'documentation-consistency.txt'
@@ -94,7 +116,18 @@ if ($CoreJars.Count -gt 0) {
         (Join-Path $core 'starfarer.api.jar')
     )
 }
-$classPath = @($agentClasses, $testClasses) -join [IO.Path]::PathSeparator
+$classPath = @($testClasses, $testCp) -join [IO.Path]::PathSeparator
+$frConfigurationReport = Join-Path $reportDir 'faster-rendering-configuration.txt'
+$frConfigurationOutput = @(& java -cp $classPath `
+    com.starsector.prepatcher.agent.FasterRenderingConfigurationTest 2>&1)
+$frConfigurationExitCode = $LASTEXITCODE
+$frConfigurationLines = @($frConfigurationOutput | ForEach-Object { $_.ToString() })
+$frConfigurationLines
+[IO.File]::WriteAllLines(
+    $frConfigurationReport, [string[]] $frConfigurationLines, $utf8)
+if ($frConfigurationExitCode -ne 0) {
+    throw 'Faster Rendering effective-configuration test failed.'
+}
 $structuralReport = Join-Path $reportDir 'structural-verification.txt'
 $verificationConfig = Join-Path $build 'structural-all-enabled.properties'
 $verificationText = [IO.File]::ReadAllText(
@@ -131,6 +164,26 @@ $structuralLines = @($structuralOutput | ForEach-Object { $_.ToString() })
 $structuralLines
 [IO.File]::WriteAllLines($structuralReport, [string[]] $structuralLines, $utf8)
 if ($structuralExitCode -ne 0) { throw 'Structural compatibility verification failed.' }
+
+$legacyFrIllegalNameReport =
+    Join-Path $reportDir 'illegal-obfuscated-member-name-repair.txt'
+$ErrorActionPreference = 'Continue'
+try {
+    $legacyFrIllegalNameOutput = @(& java @exports -cp $classPath `
+        com.starsector.prepatcher.agent.FasterRenderingIllegalNameRepairTest `
+        (Join-Path $core 'starfarer_obf.jar') 2>&1)
+    $legacyFrIllegalNameExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorActionPreference
+}
+$legacyFrIllegalNameLines = @(
+    $legacyFrIllegalNameOutput | ForEach-Object { $_.ToString() })
+$legacyFrIllegalNameLines
+[IO.File]::WriteAllLines(
+    $legacyFrIllegalNameReport, [string[]] $legacyFrIllegalNameLines, $utf8)
+if ($legacyFrIllegalNameExitCode -ne 0) {
+    throw 'Legacy Faster Rendering illegal-name repair verification failed.'
+}
 
 $coreWorldsStructuralReport = Join-Path $reportDir 'core-worlds-structural-matcher.txt'
 $ErrorActionPreference = 'Continue'
@@ -299,6 +352,8 @@ $marketOverviewMutationTransformerReport =
     Join-Path $reportDir 'market-overview-mutation-transformer.txt'
 $tradeMarketMutationTransformerReport =
     Join-Path $reportDir 'trade-market-mutation-transformer.txt'
+$uiMutationRepairedNamePipelineReport =
+    Join-Path $reportDir 'ui-mutation-repaired-name-pipeline.txt'
 $industryMarketMutationTransformerReport =
     Join-Path $reportDir 'industry-market-mutation-transformer.txt'
 $marketMutationContextRuntimeReport =
@@ -355,6 +410,9 @@ foreach ($case in @(
       (Join-Path $core 'starfarer_obf.jar')),
     @('com.starsector.prepatcher.agent.TradeMarketMutationTransformerTest',
       $tradeMarketMutationTransformerReport,
+      (Join-Path $core 'starfarer_obf.jar')),
+    @('com.starsector.prepatcher.agent.UiMutationRepairedNamePipelineTest',
+      $uiMutationRepairedNamePipelineReport,
       (Join-Path $core 'starfarer_obf.jar')),
     @('com.starsector.prepatcher.agent.IndustryMarketMutationTransformerTest',
       $industryMarketMutationTransformerReport,
@@ -660,6 +718,10 @@ if ($directMarketTransformerExitCode -ne 0) {
 $runtimeCp = @(
     $testClasses,
     (Join-Path $modRoot 'agent\StarsectorPrepatcherAgent.jar'),
+    (Join-Path $modRoot 'lib\asm-9.10.1.jar'),
+    (Join-Path $modRoot 'lib\asm-tree-9.10.1.jar'),
+    (Join-Path $modRoot 'lib\asm-analysis-9.10.1.jar'),
+    (Join-Path $modRoot 'lib\asm-util-9.10.1.jar'),
     (Join-Path $core 'starfarer.api.jar'),
     (Join-Path $core 'starfarer_obf.jar'),
     (Join-Path $core 'fs.common_obf.jar'),
@@ -788,6 +850,217 @@ $startupAuditLines
 if ($startupAuditExitCode -ne 0) { throw 'Startup audit coverage test failed.' }
 
 $mainAgentJar = Join-Path $modRoot 'agent\StarsectorPrepatcherAgent.jar'
+$java27 = Join-Path $gameRoot 'jdk-27+22\bin\java.exe'
+if (Test-Path -LiteralPath $java27 -PathType Leaf) {
+    $java27StandardReport = Join-Path $reportDir 'java27-standard-route.txt'
+    $ErrorActionPreference = 'Continue'
+    try {
+        $java27StandardOutput = @(& $java27 -Xverify:all `
+            "-javaagent:$mainAgentJar" -cp $runtimeCp `
+            com.starsector.prepatcher.agent.JavaCompatibilityRouteSmokeMain 2>&1)
+        $java27StandardExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    $java27StandardLines = @(
+        $java27StandardOutput | ForEach-Object { $_.ToString() })
+    $java27StandardJoined = $java27StandardLines -join "`n"
+    $java27StandardLines
+    [IO.File]::WriteAllLines(
+        $java27StandardReport, [string[]] $java27StandardLines, $utf8)
+    if ($java27StandardExitCode -ne 0 `
+            -or $java27StandardJoined -notmatch 'profile=JAVA27_STANDARD' `
+            -or $java27StandardJoined -notmatch 'status=transformer-installed') {
+        throw 'Java 27 standard route without Faster Rendering failed.'
+    }
+
+    $java27PresentationReport =
+        Join-Path $reportDir 'java27-standard-presentation-actual-agent.txt'
+    $ErrorActionPreference = 'Continue'
+    try {
+        $java27PresentationOutput = @(& $java27 -Xverify:all `
+            "-javaagent:$mainAgentJar=config=$(Join-Path $modRoot 'profiles\aggressive.properties')" `
+            -cp $runtimeCp `
+            com.starsector.prepatcher.runtime.FastForwardPresentationActualAgentSmokeTest 2>&1)
+        $java27PresentationExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    $java27PresentationLines = @(
+        $java27PresentationOutput | ForEach-Object { $_.ToString() })
+    $java27PresentationJoined = $java27PresentationLines -join "`n"
+    $java27PresentationLines
+    [IO.File]::WriteAllLines(
+        $java27PresentationReport, [string[]] $java27PresentationLines, $utf8)
+    if ($java27PresentationExitCode -ne 0 `
+            -or $java27PresentationJoined -notmatch 'Java compatibility route: JAVA27_STANDARD' `
+            -or $java27PresentationJoined -notmatch 'classes=24') {
+        throw 'Java 27 no-FR presentation actual-agent smoke failed.'
+    }
+
+    $java27UiReport = Join-Path $reportDir 'java27-standard-ui-economy-actual-agent.txt'
+    $java27UiArgs = @()
+    if ($nexAvailable) { $java27UiArgs += $nexJar }
+    $ErrorActionPreference = 'Continue'
+    try {
+        $java27UiOutput = @(& $java27 -Xverify:all `
+            "-javaagent:$mainAgentJar=config=$(Join-Path $modRoot 'profiles\aggressive.properties')" `
+            -cp $runtimeCp `
+            com.starsector.prepatcher.runtime.UiEconomyActualAgentSmokeTest `
+            @java27UiArgs 2>&1)
+        $java27UiExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    $java27UiLines = @($java27UiOutput | ForEach-Object { $_.ToString() })
+    $java27UiJoined = $java27UiLines -join "`n"
+    $java27UiLines
+    [IO.File]::WriteAllLines(
+        $java27UiReport, [string[]] $java27UiLines, $utf8)
+    if ($java27UiExitCode -ne 0 `
+            -or $java27UiJoined -notmatch 'Java compatibility route: JAVA27_STANDARD' `
+            -or $java27UiJoined -notmatch 'OK actual-agent UI economy contracts') {
+        throw 'Java 27 no-FR UI economy actual-agent smoke failed.'
+    }
+
+    $realFrAgent = Join-Path $core 'fr.agent.jar'
+    $java27FrAgentReport = Join-Path $reportDir 'java27-fr-agent-ui-economy.txt'
+    if (Test-Path -LiteralPath $realFrAgent -PathType Leaf) {
+        $newFrCpEntries = @()
+        $legacyFrRuntime = Join-Path $core 'fr.jar'
+        if (Test-Path -LiteralPath $legacyFrRuntime -PathType Leaf) {
+            $newFrCpEntries += $legacyFrRuntime
+        }
+        $newFrCpEntries += $runtimeCp
+        $newFrCp = $newFrCpEntries -join [IO.Path]::PathSeparator
+        $ErrorActionPreference = 'Continue'
+        try {
+            $java27FrAgentOutput = @(& $java27 -Xverify:all `
+                "-javaagent:$realFrAgent" `
+                "-javaagent:$mainAgentJar=config=$(Join-Path $modRoot 'profiles\aggressive.properties')" `
+                -cp $newFrCp `
+                com.starsector.prepatcher.runtime.UiEconomyActualAgentSmokeTest `
+                @java27UiArgs 2>&1)
+            $java27FrAgentExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $savedErrorActionPreference
+        }
+        $java27FrAgentLines = @(
+            $java27FrAgentOutput | ForEach-Object { $_.ToString() })
+        $java27FrAgentJoined = $java27FrAgentLines -join "`n"
+        $java27FrAgentLines
+        [IO.File]::WriteAllLines(
+            $java27FrAgentReport, [string[]] $java27FrAgentLines, $utf8)
+        if ($java27FrAgentExitCode -ne 0 `
+                -or $java27FrAgentJoined -notmatch 'Java compatibility route: FR_AGENT_CHAIN' `
+                -or $java27FrAgentJoined -notmatch 'OK actual-agent UI economy contracts') {
+            throw 'Java 27 Faster Rendering agent-chain UI smoke failed.'
+        }
+    } else {
+        [IO.File]::WriteAllText(
+            $java27FrAgentReport,
+            "SKIPPED: real $realFrAgent not found`n", $utf8)
+    }
+
+    $java27NegativeReport = Join-Path $reportDir 'java27-route-negative-probes.txt'
+    $java27NegativeLines = [System.Collections.Generic.List[string]]::new()
+    $java27NegativeCases = @(
+        [pscustomobject]@{
+            Label = 'configured-no-op'
+            Before = @("-javaagent:$probeMutationAgentJar=no-op"); After = @()
+        },
+        [pscustomobject]@{
+            Label = 'fr-after-prepatcher'; Before = @()
+            After = @("-javaagent:$probeMutationAgentJar=valid")
+        },
+        [pscustomobject]@{
+            Label = 'declaration-only'
+            Before = @("-javaagent:$probeMutationAgentJar=declaration-only"); After = @()
+        },
+        [pscustomobject]@{
+            Label = 'corrupt-body'
+            Before = @("-javaagent:$probeMutationAgentJar=corrupt-body"); After = @()
+        }
+    )
+    foreach ($case in $java27NegativeCases) {
+        $before = @($case.Before)
+        $after = @($case.After)
+        $ErrorActionPreference = 'Continue'
+        try {
+            $output = @(& $java27 @before "-javaagent:$mainAgentJar" @after `
+                -cp $runtimeCp `
+                com.starsector.prepatcher.agent.JavaCompatibilityRouteSmokeMain 2>&1)
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $savedErrorActionPreference
+        }
+        $lines = @($output | ForEach-Object { $_.ToString() })
+        $joined = $lines -join "`n"
+        if ($exitCode -eq 0 -or $joined -notmatch 'cannot prove a safe configured bytecode route') {
+            throw "Java 27 negative compatibility probe '$($case.Label)' did not fail closed as expected."
+        }
+        $java27NegativeLines.Add("OK $($case.Label) fatal-before-main")
+    }
+    $java27NegativeLines
+    [IO.File]::WriteAllLines(
+        $java27NegativeReport, [string[]] $java27NegativeLines, $utf8)
+
+    $legacyFrJar = Join-Path $core 'fr.jar'
+    if (Test-Path -LiteralPath $legacyFrJar -PathType Leaf) {
+        $java27LegacyRouteReport = Join-Path $reportDir 'java27-legacy-fr-route-probes.txt'
+        $legacyCp = @($legacyFrJar, $runtimeCp) -join [IO.Path]::PathSeparator
+        $legacyRouteLines = [System.Collections.Generic.List[string]]::new()
+        $legacyCases = @(
+            [pscustomobject]@{ Label = 'not-preloaded'; Preload = @() },
+            [pscustomobject]@{
+                Label = 'preloaded-retransform'
+                Preload = @("-javaagent:$legacyFrPreloadAgentJar")
+            }
+        )
+        foreach ($case in $legacyCases) {
+            $preload = @($case.Preload)
+            $ErrorActionPreference = 'Continue'
+            try {
+                $output = @(& $java27 `
+                    '-Djava.system.class.loader=com.genir.renderer.loaders.AppClassLoader' `
+                    @preload "-javaagent:$mainAgentJar" -cp $legacyCp `
+                    com.starsector.prepatcher.agent.JavaCompatibilityRouteSmokeMain 2>&1)
+                $exitCode = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $savedErrorActionPreference
+            }
+            $lines = @($output | ForEach-Object { $_.ToString() })
+            $joined = $lines -join "`n"
+            if ($exitCode -ne 0 -or $joined -notmatch 'profile=FR_PREDEFINE_BRIDGE') {
+                throw "Java 27 legacy FR route probe '$($case.Label)' failed."
+            }
+            if ($case.Label -eq 'preloaded-retransform' -and
+                    $joined -notmatch 'legacyPreloaded=true') {
+                throw 'Java 27 legacy FR retransform probe did not preload ClassTransformer.'
+            }
+            $legacyRouteLines.Add("OK $($case.Label) FR_PREDEFINE_BRIDGE")
+        }
+        $legacyRouteLines
+        [IO.File]::WriteAllLines(
+            $java27LegacyRouteReport, [string[]] $legacyRouteLines, $utf8)
+    }
+} else {
+    [IO.File]::WriteAllText(
+        (Join-Path $reportDir 'java27-standard-route.txt'),
+        "SKIPPED: $java27 not found`n", $utf8)
+    [IO.File]::WriteAllText(
+        (Join-Path $reportDir 'java27-standard-presentation-actual-agent.txt'),
+        "SKIPPED: $java27 not found`n", $utf8)
+    [IO.File]::WriteAllText(
+        (Join-Path $reportDir 'java27-standard-ui-economy-actual-agent.txt'),
+        "SKIPPED: $java27 not found`n", $utf8)
+    [IO.File]::WriteAllText(
+        (Join-Path $reportDir 'java27-fr-agent-ui-economy.txt'),
+        "SKIPPED: $java27 not found`n", $utf8)
+    [IO.File]::WriteAllText(
+        (Join-Path $reportDir 'java27-route-negative-probes.txt'),
+        "SKIPPED: $java27 not found`n", $utf8)
+}
 $aotdEconomyRestoreActualAgentCases = @(
     @('core-first',
       (Join-Path $reportDir 'aotd-economy-restore-actual-agent-core-first.txt')),
@@ -1115,6 +1388,41 @@ if ($economyHotpathAgentExitCode -ne 0) {
     throw 'Economy-hotpath actual-agent smoke failed.'
 }
 
+if (Test-Path -LiteralPath $java27 -PathType Leaf) {
+    $java27LocalResourcesReport =
+        Join-Path $reportDir 'java27-standard-local-resources-actual-agent.txt'
+    $ErrorActionPreference = 'Continue'
+    try {
+        $java27LocalResourcesOutput = @(& $java27 -Xverify:all `
+            '-Dstarsector.prepatcher.sessionOrigin=java27-standard-local-resources' `
+            "-javaagent:$mainAgentJar=config=$economyHotpathAgentConfig" `
+            -cp $economyHotpathAgentCp `
+            com.starsector.prepatcher.runtime.EconomyHotpathActualAgentSmokeTest `
+            @economyHotpathAgentArgs 2>&1)
+        $java27LocalResourcesExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    $java27LocalResourcesLines = @(
+        $java27LocalResourcesOutput | ForEach-Object { $_.ToString() })
+    $java27LocalResourcesJoined = $java27LocalResourcesLines -join "`n"
+    $java27LocalResourcesLines
+    [IO.File]::WriteAllLines(
+        $java27LocalResourcesReport,
+        [string[]] $java27LocalResourcesLines,
+        $utf8)
+    if ($java27LocalResourcesExitCode -ne 0 `
+            -or $java27LocalResourcesJoined -notmatch 'Java compatibility route: JAVA27_STANDARD' `
+            -or $java27LocalResourcesJoined -notmatch 'localResourcesTooltipSnapshot.*APPLIED|APPLIED localResourcesTooltipSnapshot' `
+            -or $java27LocalResourcesJoined -notmatch 'OK economy-hotpath-actual-agent') {
+        throw 'Java 27 no-FR Local Resources actual-agent smoke failed.'
+    }
+} else {
+    [IO.File]::WriteAllText(
+        (Join-Path $reportDir 'java27-standard-local-resources-actual-agent.txt'),
+        "SKIPPED: $java27 not found`n", $utf8)
+}
+
 $commoditySmokeConfig = Join-Path $build 'commodity-temporal-agent-smoke.properties'
 $commoditySmokeText = [IO.File]::ReadAllText((Join-Path $modRoot 'prepatcher.properties'))
 $commoditySmokeText = [regex]::Replace(
@@ -1283,6 +1591,43 @@ if (-not (Test-Path -LiteralPath $frJar -PathType Leaf)) {
     $frSmokeLines
     [IO.File]::WriteAllLines($frSmokeReport, [string[]] $frSmokeLines, $utf8)
     if ($frSmokeExitCode -ne 0) { throw 'Faster Rendering loader smoke failed.' }
+
+    if (Test-Path -LiteralPath $java27 -PathType Leaf) {
+        $java27LegacyUiCases = @(
+            [pscustomobject]@{ Label = 'not-preloaded'; Preload = @() },
+            [pscustomobject]@{
+                Label = 'preloaded-retransform'
+                Preload = @("-javaagent:$legacyFrPreloadAgentJar")
+            }
+        )
+        foreach ($case in $java27LegacyUiCases) {
+            $preload = @($case.Preload)
+            $report = Join-Path $reportDir `
+                "java27-legacy-fr-ui-$($case.Label).txt"
+            $ErrorActionPreference = 'Continue'
+            try {
+                $output = @(& $java27 -Xverify:all `
+                    '-Djava.system.class.loader=com.genir.renderer.loaders.AppClassLoader' `
+                    "-Dstarsector.prepatcher.sessionOrigin=java27-legacy-fr-ui-$($case.Label)" `
+                    @preload "-javaagent:$mainAgentJar=config=$verificationConfig" `
+                    -cp $frSmokeCp `
+                    com.starsector.prepatcher.fr.FasterRenderingLoaderSmokeTest `
+                    $mainAgentJar 2>&1)
+                $exitCode = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $savedErrorActionPreference
+            }
+            $lines = @($output | ForEach-Object { $_.ToString() })
+            $joined = $lines -join "`n"
+            $lines
+            [IO.File]::WriteAllLines($report, [string[]] $lines, $utf8)
+            if ($exitCode -ne 0 `
+                    -or $joined -notmatch 'Java compatibility route: FR_PREDEFINE_BRIDGE' `
+                    -or $joined -notmatch 'OK FR normalized UI market fields trade=APPLIED overview=APPLIED cargo=APPLIED') {
+                throw "Java 27 legacy FR UI smoke '$($case.Label)' failed."
+            }
+        }
+    }
 }
 
 Write-Host 'Documentation/structural/runtime/hyperspace/startup/FR verification completed.' -ForegroundColor Green

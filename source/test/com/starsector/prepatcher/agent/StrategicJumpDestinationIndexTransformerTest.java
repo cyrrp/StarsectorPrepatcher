@@ -1,18 +1,18 @@
 package com.starsector.prepatcher.agent;
 
-import jdk.internal.org.objectweb.asm.ClassReader;
-import jdk.internal.org.objectweb.asm.Opcodes;
-import jdk.internal.org.objectweb.asm.tree.AbstractInsnNode;
-import jdk.internal.org.objectweb.asm.tree.ClassNode;
-import jdk.internal.org.objectweb.asm.tree.FieldInsnNode;
-import jdk.internal.org.objectweb.asm.tree.JumpInsnNode;
-import jdk.internal.org.objectweb.asm.tree.MethodInsnNode;
-import jdk.internal.org.objectweb.asm.tree.MethodNode;
-import jdk.internal.org.objectweb.asm.tree.VarInsnNode;
-import jdk.internal.org.objectweb.asm.tree.analysis.Analyzer;
-import jdk.internal.org.objectweb.asm.tree.analysis.AnalyzerException;
-import jdk.internal.org.objectweb.asm.tree.analysis.BasicValue;
-import jdk.internal.org.objectweb.asm.tree.analysis.BasicVerifier;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.VarInsnNode;
+import org.objectweb.asm.tree.analysis.Analyzer;
+import org.objectweb.asm.tree.analysis.AnalyzerException;
+import org.objectweb.asm.tree.analysis.BasicValue;
+import org.objectweb.asm.tree.analysis.BasicVerifier;
 
 import java.io.InputStream;
 import java.nio.file.Path;
@@ -161,7 +161,7 @@ public final class StrategicJumpDestinationIndexTransformerTest {
             }
         }
         require(zero != null, "JumpPlan expiry fixture missing");
-        update.instructions.set(zero, new jdk.internal.org.objectweb.asm.tree.InsnNode(
+        update.instructions.set(zero, new org.objectweb.asm.tree.InsnNode(
                 Opcodes.FCONST_1));
 
         System.clearProperty(INDEX_STATUS);
@@ -307,9 +307,9 @@ public final class StrategicJumpDestinationIndexTransformerTest {
     }
 
     private static byte[] write(ClassNode node) {
-        jdk.internal.org.objectweb.asm.ClassWriter writer =
-                new jdk.internal.org.objectweb.asm.ClassWriter(
-                        jdk.internal.org.objectweb.asm.ClassWriter.COMPUTE_MAXS);
+        org.objectweb.asm.ClassWriter writer =
+                new org.objectweb.asm.ClassWriter(
+                        org.objectweb.asm.ClassWriter.COMPUTE_MAXS);
         node.accept(writer);
         return writer.toByteArray();
     }

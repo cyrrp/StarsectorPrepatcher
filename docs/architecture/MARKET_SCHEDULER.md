@@ -1,3 +1,8 @@
+> Project home:
+> [StarsectorPrepatcher — overview, installation and downloads](https://github.com/kirpoly/StarsectorPrepatcher)
+
+---
+
 # Устройство market scheduler
 
 `patch.marketScheduler` ограничивает число дорогих `Market.advance(float)` при ускорении кампании,

@@ -1,3 +1,8 @@
+> Project home:
+> [StarsectorPrepatcher — overview, installation and downloads](https://github.com/kirpoly/StarsectorPrepatcher)
+
+---
+
 # Совместимость и применение патчей
 
 Единый agent не сравнивает SHA-256 игры, JAR или target-классов. Каждый `patch.*`, включая
@@ -10,14 +15,93 @@ hyperspace-патчи из `starfarer.api.jar` и `starfarer_obf.jar`, неза�
 
 ## Classloader-архитектура и Faster Rendering
 
-В vanilla запуске game classes и startup-agent доступны через system loader. Faster Rendering
-меняет topology: `com.genir.renderer.loaders.AppClassLoader` становится system/game loader и
-child-load'ит `com.fs.*`, а premain-классы javaagent находятся в отдельном
-`AppClassLoader$JavaAgentLoader`. Если typed hook остаётся в JAR agent как обычный вызываемый класс,
-оба loader'а могут определить собственный `CampaignEngine`, `Economy` и API types. Первый вызов
-hook с таким descriptor завершается `loader constraint violation`/`LinkageError`.
+Версия 0.18.4 поддерживает Java 17 и проверенную Miko Java `27+22`. Для JVM новее 27 применяется
+та же проверка возможностей, но поддержка такой версии не заявляется без отдельной валидации.
+Решение никогда не зависит от версии или checksum Faster Rendering.
 
-Prepatcher разделяет control plane и target runtime:
+До загрузки игровых targets выбирается один профиль:
+
+- `JAVA17_STANDARD`: обычная цепочка Java-agent на Java 17–26;
+- `JAVA27_STANDARD`: Java 27+ без активного Faster Rendering; единый pipeline регистрируется как
+  обычный последний Java-agent;
+- `FR_AGENT_CHAIN`: на Java 27+ синтетический Java 8 class `com.fs.*` с объявлением и self-call
+  `while.new` определяется изолированным loader'ом. Временный observer, зарегистрированный после
+  FR, должен увидеть одинаково исправленные declaration/reference, неизменённые тела методов и
+  bytes, которые JVM действительно определила. Observer всегда удаляется в `finally`;
+- `FR_PREDEFINE_BRIDGE`: если agent probe не прошёл, проверяется data flow старого
+  `AppClassLoader.findBytecode(String) -> ClassTransformer.transformBytes(...) ->
+  findClass(String) -> defineClass`. В единственный итоговый return `transformBytes` внедряется
+  вызов `BiFunction<String,byte[],byte[]>` из `System.getProperties()`.
+
+Активность FR определяется только по эффективным параметрам текущей JVM. Новый FR распознаётся по
+`-javaagent` с именем `fr.agent.jar` либо по `Premain-Class: com.genir.renderer.agent.Agent` в
+фактически указанном agent JAR. Старый FR распознаётся по
+`-Djava.system.class.loader=com.genir.renderer.loaders.AppClassLoader`; `fr.jar` в действующем
+classpath используется как проверка согласованности. Файлы FR, которые просто лежат на диске, не
+влияют на выбор. Prepatcher обязан быть последним `-javaagent`; одновременная настройка нового и
+старого FR является явным конфликтом.
+
+На Java 27 сначала выполняется agent probe. Успешный repair выбирает `FR_AGENT_CHAIN`. Если probe
+изменён предыдущим агентом, но его совокупные условия не выполнены, либо FR-agent заявлен в
+параметрах и probe не прошёл, запуск завершается. При настроенном legacy loader проверяется только
+`FR_PREDEFINE_BRIDGE`. Если ни один признак активного FR отсутствует и probe дошёл до observer без
+изменений, выбирается `JAVA27_STANDARD` — отсутствие FR само по себе не является ошибкой.
+
+Старый bridge устанавливается и проверяется до `RuntimeInstaller`. Если `ClassTransformer` уже
+загружен, используется `Instrumentation.retransformClasses`; временный transformer затем удаляется.
+Живая проверка вызывает настоящий
+`AppClassLoader.findBytecode("com/fs/starfarer/api/Global.class")`: bridge обязан сработать ровно
+один раз и вернуть тот же byte array. При ошибке property и transformer удаляются, исходный
+`ClassTransformer` восстанавливается повторной трансформацией. Bridge хранит pipeline через
+`WeakReference` и не кэширует `Class`, `Method`, loader, campaign objects или mod instances.
+
+Vanilla bytes и legacy FR содержат запрещённые обфускатором member names вида `while.new`, которые
+Java 17 при отключённой проверке принимала, а Java 27 отвергает ещё в class-file parser. Поэтому
+`JAVA27_STANDARD` перед единым pipeline, а legacy bridge перед своим pipeline выполняют один
+length-preserving compatibility step только для
+`com/fs/*`, `sound/*` и `zzz/com/fs/*`: в точных `CONSTANT_Utf8`-именах из известного набора
+обфускаторных сегментов точка заменяется подчёркиванием. Длина constant pool, индексы, method
+bodies, descriptors и frames не меняются; одно и то же UTF8-значение одновременно обслуживает
+declaration и все его references. Повторная обработка возвращает тот же byte array. Эта операция
+не имеет config switch и выполняется до всех поверхностей `OrderedTransformerPipeline`. В
+`FR_PREDEFINE_BRIDGE` входом служат уже преобразованные FR bytes; в `JAVA27_STANDARD` — исходные
+game bytes. Новый FR выполняет подтверждённый эквивалентный repair раньше, поэтому его pipeline
+повторно этот шаг не запускает.
+
+Structural matcher не предполагает, в каком виде придёт обфусцированное имя. Для двух UI market
+surfaces разрешены только точные пары `if.new$class`/`if_new$class` и
+`String.interface$float`/`String_interface$float`. Matcher выбирает единственное реально
+объявленное non-static поле с точным descriptor и использует это же имя при mutation и
+postcondition. Ноль или два допустимых alias, неизвестное имя и другой descriptor являются
+structural drift; произвольное поле того же типа не подбирается.
+
+На Java 27 HotSpot проверяет bytes, возвращённые `ClassFileLoadHook`, даже при выключенных старых
+verification flags. Поэтому в `FR_PREDEFINE_BRIDGE` единый pipeline применяется до `defineClass`
+внутри FR, а обычный agent возвращает `null` для targets системного game loader. Это исключает
+двойную трансформацию и проверку промежуточного результата. Если настроенный FR не прошёл свою
+проверку, обнаружен конфликт/неполный classpath либо после Prepatcher объявлен ещё один agent,
+`premain` публикует `fatal-incompatible-java-route`, пишет причину в log/stderr и позволяет
+исключению прервать запуск JVM; `Runtime.halt` не используется.
+
+Профиль и результат доступны в диагностических properties:
+
+```text
+starsector.prepatcher.javaCompatibilityProfile=JAVA17_STANDARD|JAVA27_STANDARD|FR_AGENT_CHAIN|FR_PREDEFINE_BRIDGE
+starsector.prepatcher.javaCompatibilityProbe=PASSED|FAILED:<причина>
+starsector.prepatcher.fasterRenderingConfiguration=<эффективные признаки JVM>
+```
+
+Все patch stages входят в один `OrderedTransformerPipeline`. Каждый stage получает текущие bytes;
+его `null` означает «оставить текущие», а не «вернуться к исходному JAR». Порядок закреплён в
+metadata: AoTD economy completion → scheduler bridge → fork compatibility → fast-forward
+presentation → structural plan → read-only UI economy → Market/Trade/Industry mutation →
+detached-cargo contract → market-open localization → commodity-data contract → AoTD market-open
+context → AoTD detached-cargo context → direct-market observer. Вход класса сохраняется до
+завершения всей атомарной цепочки; необработанное исключение откатывает класс к этому входу.
+
+В vanilla запуске game classes и startup-agent доступны через system loader. Старый Faster
+Rendering делает `com.genir.renderer.loaders.AppClassLoader` system/game loader и child-load'ит
+`com.fs.*`. Prepatcher разделяет control plane и target runtime:
 
 ```text
 agent loader
@@ -38,14 +122,6 @@ Payload-classfile'ы остаются обычными entries внутри agen
 определяет payload через `MethodHandles.privateLookupIn(...).defineClass(...)`. Exact-пакет
 `com.fs.starfarer.api` нужен для package lookup. Внешний descriptor configuration bridge содержит
 только JDK types (`Object`, `Path`), поэтому agent control plane не разрешает payload-классы.
-
-Текущая реализация runtime внутри bridge/hooks всё ещё использует `PrepatcherConfig` и
-`PrepatcherLog` из control plane. В проверенной topology Faster Rendering system `AppClassLoader`
-для non-`com.fs.*` сначала делегирует parent, затем явно использует fallback `JavaAgentLoader`,
-поэтому обе ссылки разрешаются в исходную agent-копию. Это осознанная остаточная связь, а не общий
-classloader-контракт: изменение resolver в другой версии FR должно привести к ошибке установки до
-регистрации transformer. Будущее усиление — передавать immutable JDK-only config snapshot и logging
-callback, полностью убрав обратные symbolic references из payload.
 
 Transformer регистрируется лишь после успешной установки и настройки всего payload. Для каждого
 target, который вызывает typed runtime, loader должен быть identity-equal loader'у runtime. При
@@ -144,7 +220,7 @@ the original call. The local path deliberately retains the last committed global
 
 ## UI market-mutation refresh
 
-Prepatcher 0.18.3 and Scheduler Fork `1.0.14-spp13` use bridge schema V10. The required production
+Prepatcher 0.18.4 and Scheduler Fork `1.0.14-spp13` use bridge schema V10. The required production
 mask `0xbff` includes `UI_ECONOMY_DISPATCH` and `ECONOMY_RESTORE_COORDINATION`; the optional
 `UI_MARKET_MUTATION_REFRESH` bit 10 extends the complete profile to `0xfff`. The explicit dispatcher
 receives a classified action, detail value and, when needed, an immutable sorted `String[]` of
@@ -183,10 +259,13 @@ AoTD dispatch, and returns `false` after any failed transaction/cargo/stack/proo
 also contains the independent detached-Cargo constructor surface. Explicit application order is
 `TradeMarketMutationTransformer → AoTDDetachedCargoContextTransformer`; the later transformer reads
 the current trade-transformed bytes, and combined/idempotent postconditions are verified.
+The trade market-field read accepts only the exact raw/repaired alias pair selected from the current
+class bytes; a later Cargo rejection rolls the class-level pipeline back before the trade marker.
 
 `patch.uiMarketMutationRefresh` owns this complete behavior rather than exposing separate development
 stages. The exact stock `marketinfo.s.actionPerformed(Object,Object)` bytecode is
 required to contain the proven setter inventory and one shared `recreateWithEconUpdate()` call.
+Its shared helper uses the same exact raw/repaired market-field alias rule as the trade surface.
 Wrappers attempt to deliver pending scheduler debt before invoking the original setter or industry
 mutator and publish a one-shot agent-internal context only after that call returns normally. The
 original mutation is outside instrumentation `catch` regions, executes exactly once, and propagates
@@ -620,7 +699,7 @@ Telemetry schema `0.7.1`: старый `pooledRandom` называется `pool
 Structural proof показывает однозначность site, linkage, no-escape и verifier postconditions, но
 не доказывает величину ускорения. Runtime и performance evidence создаётся в `.build/reports/`;
 проверенные выводы и остаточные риски фиксируются в отчёте соответствующего выпуска, например
-[`releases/0.18.3.md`](releases/0.18.3.md).
+[`releases/0.18.4.md`](releases/0.18.4.md).
 
 Если несколько javaagent меняют одни и те же классы, располагайте Prepatcher после них:
 transformer увидит bytes, возвращённые ранее зарегистрированными агентами. Installer обеспечивает
@@ -629,7 +708,7 @@ transformer увидит bytes, возвращённые ранее зареги
 ```bat
 StarsectorPrepatcher.bat install Vanilla
 StarsectorPrepatcher.bat install FasterRendering
-StarsectorPrepatcher.bat install Both
+StarsectorPrepatcher.bat install All
 ```
 
 Без параметров единый Windows-launcher показывает меню и поясняет назначение каждой операции.
@@ -649,7 +728,7 @@ inventory. Structural pass проверяет их до анализа и пос
 
 ## AoTD Scheduler Fork
 
-Scheduler Fork release `1.0.14-spp13` requires Prepatcher `0.18.3`, an active compatible javaagent
+Scheduler Fork release `1.0.14-spp13` requires Prepatcher `0.18.4`, an active compatible javaagent
 and the original game `starfarer.api.jar`. The fork is required for optimal performance when
 AoTD Theory of Toolbox is installed; it is not a dependency for configurations without AoTD.
 

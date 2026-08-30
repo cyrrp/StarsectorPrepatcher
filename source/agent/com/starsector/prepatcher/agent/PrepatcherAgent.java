@@ -9,14 +9,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 public final class PrepatcherAgent {
-    public static final String VERSION = "0.18.3";
+    public static final String VERSION = "0.18.4";
     private PrepatcherAgent() {}
 
     public static void premain(String agentArgs, Instrumentation instrumentation) {
@@ -63,10 +61,8 @@ public final class PrepatcherAgent {
                 return;
             }
 
-            // Transformer plans reference JDK-internal ASM types. Export the packages before
-            // constructing any plan whose verifier may resolve a ClassWriter subclass.
-            exportInternalAsm(instrumentation);
-
+            // Official ASM is relocated into the agent JAR, so no JDK-internal export or
+            // public org.objectweb.asm dependency is needed at runtime.
             PrepatcherTransformer transformPlan = new PrepatcherTransformer(config);
             ReadOnlyUiEconomyStepTransformer readOnlyUiEconomyPlan =
                     new ReadOnlyUiEconomyStepTransformer(
@@ -108,6 +104,9 @@ public final class PrepatcherAgent {
                 return;
             }
 
+            JavaCompatibilityRoute compatibilityRoute =
+                    JavaCompatibilityRoute.select(instrumentation, agentJar);
+
             ClassLoader runtimeLoader;
             try {
                 runtimeLoader = RuntimeInstaller.install(agentJar, config, modRoot);
@@ -129,57 +128,28 @@ public final class PrepatcherAgent {
             boolean presentationMarkerLoaded = recordLoadedPresentationTargets(
                     instrumentation, presentationPlan, runtimeLoader);
 
-            // Install and prove the successful tail of vanilla economy restoration before the
-            // fork bridge can negotiate the corresponding required capability.
-            instrumentation.addTransformer(
-                    new AoTDEconomyRestoreCompletionTransformer(
-                            config.aotdEconomyRestoreCoordination, runtimeLoader), false);
+            // Publish enabled-state diagnostics before exposing the one ordered pipeline.
             System.setProperty(
                     AoTDEconomyRestoreCompletionTransformer.statusProperty(),
                     config.aotdEconomyRestoreCoordination
                             ? "transformer-installed" : "disabled");
-            // AoTD owns an inert bridge class. Patch only that verified class at
-            // load time so the mod never uses reflection or loader probing.
-            instrumentation.addTransformer(
-                    new AoTDSchedulerBridgeTransformer(runtimeLoader), false);
-            instrumentation.addTransformer(
-                    new AoTDForkCompatibilityTransformer(config.marketScheduler), false);
             System.setProperty("starsector.prepatcher.aotdBridgePatch", "transformer-installed");
             System.setProperty("starsector.prepatcher.aotdForkCompatibilityPatch",
                     config.marketScheduler ? "transformer-installed" : "disabled");
             if (!presentationMarkerLoaded) {
-                instrumentation.addTransformer(
-                        new FastForwardPresentationTransformer(config, runtimeLoader), false);
                 System.setProperty(
                         "starsector.prepatcher.presentationStatus", "transformer-installed");
             } else {
                 System.setProperty("starsector.prepatcher.presentationStatus",
                         "disabled-frame-marker-already-loaded");
             }
-            ClassFileTransformer transformer = new PrepatcherTransformer(config, runtimeLoader);
-            instrumentation.addTransformer(transformer, false);
-            instrumentation.addTransformer(
-                    new ReadOnlyUiEconomyStepTransformer(
-                            config.commandTabNoGlobalEconomyStep,
-                            config.commodityDetailNoGlobalEconomyStep,
-                            config.marketDefensesNoGlobalEconomyStep, runtimeLoader),
-                    false);
             initializeReadOnlyUiEconomyStatuses(config);
-            instrumentation.addTransformer(
-                    new MarketOverviewMutationTransformer(
-                            config.uiMarketMutationRefresh, runtimeLoader), false);
             System.setProperty(MarketOverviewMutationTransformer.statusProperty(),
                     config.uiMarketMutationRefresh
                             ? "transformer-installed" : "disabled");
-            instrumentation.addTransformer(
-                    new TradeMarketMutationTransformer(
-                            config.uiMarketMutationRefresh, runtimeLoader), false);
             System.setProperty(TradeMarketMutationTransformer.statusProperty(),
                     config.uiMarketMutationRefresh
                             ? "transformer-installed" : "disabled");
-            instrumentation.addTransformer(
-                    new IndustryMarketMutationTransformer(
-                            config.uiMarketMutationRefresh, runtimeLoader), false);
             for (String industryTarget
                     : IndustryMarketMutationTransformer.TARGET_CLASSES) {
                 System.setProperty(
@@ -188,41 +158,18 @@ public final class PrepatcherAgent {
                         config.uiMarketMutationRefresh
                                 ? "transformer-installed" : "disabled");
             }
-            // Registered after the structural plan so it validates the final
-            // Economy body seen by later detached-Cargo call-site logic.
-            instrumentation.addTransformer(
-                    new VanillaDetachedCargoEconomyContractTransformer(
-                            syntheticCargoEconomySkipEnabled, runtimeLoader),
-                    false);
             System.setProperty(
                     "starsector.prepatcher.detachedCargoVanillaEconomyContract",
                     syntheticCargoEconomySkipEnabled
                             ? "awaiting-economy-load" : "disabled");
-            instrumentation.addTransformer(
-                    new VanillaMarketOpenLocalizationContractTransformer(
-                            config.vanillaMarketOpenLocalization, runtimeLoader),
-                    false);
             System.setProperty(
                     "starsector.prepatcher.vanillaMarketOpenLocalizationContract",
                     config.vanillaMarketOpenLocalization
                             ? "awaiting-economy-and-reach-load" : "disabled");
-            instrumentation.addTransformer(
-                    new CommodityMarketDataContractTransformer(
-                            config.uiMarketMutationRefresh, runtimeLoader), false);
             System.setProperty(
                     "starsector.prepatcher.commodityMarketDataContract",
                     config.uiMarketMutationRefresh
                             ? "awaiting-commodity-market-data-load" : "disabled");
-            // Registered after the structural plan so it guards the final
-            // CampaignEngine Economy.nextStep call with the explicit market
-            // action while retaining that virtual call as the global fallback.
-            instrumentation.addTransformer(
-                    new AoTDMarketOpenContextTransformer(
-                            marketOpenContextEnabled,
-                            config.planetConditionMarketOpenNoGlobalEconomyStep,
-                            config.vanillaMarketOpenLocalization,
-                            runtimeLoader),
-                    false);
             System.setProperty("starsector.prepatcher.aotdMarketOpenContextPatch",
                     marketOpenContextEnabled ? "transformer-installed" : "disabled");
             System.setProperty(
@@ -233,10 +180,6 @@ public final class PrepatcherAgent {
                     "starsector.prepatcher.vanillaMarketOpenLocalizationPatch",
                     config.vanillaMarketOpenLocalization
                             ? "transformer-installed" : "disabled");
-            instrumentation.addTransformer(
-                    new AoTDDetachedCargoContextTransformer(
-                            syntheticCargoUiEnabled, runtimeLoader),
-                    false);
             String detachedCargoPatchStatus = syntheticCargoUiEnabled
                     ? "transformer-installed" : "disabled";
             System.setProperty(
@@ -249,34 +192,137 @@ public final class PrepatcherAgent {
                             ? "transformer-installed" : "disabled");
             System.setProperty("starsector.prepatcher.presentationStructuralOrder",
                     presentationMarkerLoaded ? "structural-only" : "presentation->structural");
-            if (config.directMarketObservation || config.marketScheduler
-                    || config.marketAdvanceSemanticRiskObserver) {
-                instrumentation.addTransformer(
-                        new DirectMarketObserveTransformer(config, runtimeLoader, modRoot), false);
+            boolean directObserverEnabled = config.directMarketObservation
+                    || config.marketScheduler
+                    || config.marketAdvanceSemanticRiskObserver;
+            if (directObserverEnabled) {
                 System.setProperty("starsector.prepatcher.directMarketObservation",
                         config.directMarketObservation ? "enabled"
                                 : (config.marketScheduler ? "scheduler-sync-only" : "risk-observer-only"));
                 PrepatcherLog.info(config.directMarketObservation
-                        ? "Direct Market.advance transformer installed for telemetry and scheduler debt synchronization."
+                        ? "Direct Market.advance pipeline stage enabled for telemetry and scheduler debt synchronization."
                         : (config.marketScheduler
-                                ? "Direct Market.advance transformer installed to synchronize scheduler debt before mod-owned calls."
-                                : "Static Market.advance semantic-risk observer installed."));
+                                ? "Direct Market.advance pipeline stage enabled to synchronize scheduler debt before mod-owned calls."
+                                : "Static Market.advance semantic-risk pipeline stage enabled."));
             } else {
                 System.setProperty("starsector.prepatcher.directMarketObservation", "disabled");
             }
+
+            OrderedTransformerPipeline pipeline = createOrderedPipeline(
+                    config, runtimeLoader, modRoot, presentationMarkerLoaded,
+                    syntheticCargoEconomySkipEnabled, marketOpenContextEnabled,
+                    syntheticCargoUiEnabled, directObserverEnabled,
+                    compatibilityRoute.usesPredefineBridge(),
+                    compatibilityRoute.repairsIllegalNamesInAgentPipeline());
+            instrumentation.addTransformer(pipeline, false);
+            compatibilityRoute.armBridge(pipeline);
             System.setProperty("starsector.prepatcher.status", "transformer-installed");
             if (presentationMarkerLoaded) {
-                PrepatcherLog.info("Structural transformer installed; presentation transformer"
-                        + " stayed disabled because its frame marker was already loaded.");
+                PrepatcherLog.info("Ordered transformer pipeline installed; its presentation"
+                        + " stage is a no-op because the frame marker was already loaded.");
             } else {
-                PrepatcherLog.info("Presentation and structural transformers installed in explicit"
-                        + " presentation->structural order. Overlapping targets publish a"
+                PrepatcherLog.info("Ordered transformer pipeline installed with explicit stage"
+                        + " metadata. Presentation/structural overlapping targets publish a"
                         + " presentation ownership/mask contract that the structural transformer"
                         + " revalidates after every commit and at final composition.");
             }
+        } catch (JavaCompatibilityRoute.FatalCompatibilityException fatal) {
+            // Let premain fail when the effective Java 27+ configuration declares an
+            // incompatible FR route or cannot be inspected safely.
+            throw fatal;
         } catch (Throwable ex) {
             System.setProperty("starsector.prepatcher.status", "agent-error");
             PrepatcherLog.error("Fatal agent initialization error; prepatcher has failed open and the game will continue unpatched.", ex);
+        }
+    }
+
+    private static OrderedTransformerPipeline createOrderedPipeline(
+            PrepatcherConfig config,
+            ClassLoader runtimeLoader,
+            Path modRoot,
+            boolean presentationMarkerLoaded,
+            boolean syntheticCargoEconomySkipEnabled,
+            boolean marketOpenContextEnabled,
+            boolean syntheticCargoUiEnabled,
+            boolean directObserverEnabled,
+            boolean predefineBridgeRoute,
+            boolean repairIllegalNamesInAgentPipeline) {
+        List<OrderedTransformerPipeline.Stage> stages = new ArrayList<>();
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "AoTD economy completion",
+                new AoTDEconomyRestoreCompletionTransformer(
+                        config.aotdEconomyRestoreCoordination, runtimeLoader)));
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "AoTD scheduler bridge",
+                new AoTDSchedulerBridgeTransformer(runtimeLoader)));
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "AoTD fork compatibility",
+                new AoTDForkCompatibilityTransformer(config.marketScheduler)));
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "fast-forward presentation",
+                presentationMarkerLoaded ? new NoOpTransformer()
+                        : new FastForwardPresentationTransformer(config, runtimeLoader)));
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "structural plan",
+                new PrepatcherTransformer(config, runtimeLoader)));
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "read-only UI economy",
+                new ReadOnlyUiEconomyStepTransformer(
+                        config.commandTabNoGlobalEconomyStep,
+                        config.commodityDetailNoGlobalEconomyStep,
+                        config.marketDefensesNoGlobalEconomyStep, runtimeLoader)));
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "Market mutation",
+                new MarketOverviewMutationTransformer(
+                        config.uiMarketMutationRefresh, runtimeLoader)));
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "Trade mutation",
+                new TradeMarketMutationTransformer(
+                        config.uiMarketMutationRefresh, runtimeLoader)));
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "Industry mutation",
+                new IndustryMarketMutationTransformer(
+                        config.uiMarketMutationRefresh, runtimeLoader)));
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "detached-cargo contract",
+                new VanillaDetachedCargoEconomyContractTransformer(
+                        syntheticCargoEconomySkipEnabled, runtimeLoader)));
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "market-open localization",
+                new VanillaMarketOpenLocalizationContractTransformer(
+                        config.vanillaMarketOpenLocalization, runtimeLoader)));
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "commodity-data contract",
+                new CommodityMarketDataContractTransformer(
+                        config.uiMarketMutationRefresh, runtimeLoader)));
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "AoTD market-open context",
+                new AoTDMarketOpenContextTransformer(
+                        marketOpenContextEnabled,
+                        config.planetConditionMarketOpenNoGlobalEconomyStep,
+                        config.vanillaMarketOpenLocalization,
+                        runtimeLoader)));
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "AoTD detached-cargo context",
+                new AoTDDetachedCargoContextTransformer(
+                        syntheticCargoUiEnabled, runtimeLoader)));
+        stages.add(new OrderedTransformerPipeline.Stage(
+                "direct-market observer",
+                directObserverEnabled
+                        ? new DirectMarketObserveTransformer(config, runtimeLoader, modRoot)
+                        : new NoOpTransformer()));
+        return new OrderedTransformerPipeline(
+                stages, runtimeLoader, predefineBridgeRoute,
+                repairIllegalNamesInAgentPipeline);
+    }
+
+    private static final class NoOpTransformer implements ClassFileTransformer {
+        @Override
+        public byte[] transform(ClassLoader loader, String className,
+                                Class<?> classBeingRedefined,
+                                java.security.ProtectionDomain protectionDomain,
+                                byte[] classfileBuffer) {
+            return null;
         }
     }
 
@@ -459,23 +505,6 @@ public final class PrepatcherAgent {
             PrepatcherLog.warn("Could not inspect JVM arguments for a duplicate standalone"
                     + " FastForward Presentation Patch agent: " + failure);
         }
-    }
-
-    private static void exportInternalAsm(Instrumentation instrumentation) {
-        Module javaBase = Object.class.getModule();
-        Module ours = PrepatcherAgent.class.getModule();
-        Map<String, Set<Module>> exports = new HashMap<>();
-        exports.put("jdk.internal.org.objectweb.asm", Collections.singleton(ours));
-        exports.put("jdk.internal.org.objectweb.asm.tree", Collections.singleton(ours));
-        exports.put("jdk.internal.org.objectweb.asm.tree.analysis", Collections.singleton(ours));
-        instrumentation.redefineModule(
-                javaBase,
-                Collections.emptySet(),
-                exports,
-                Collections.emptyMap(),
-                Collections.emptySet(),
-                Collections.emptyMap());
-        PrepatcherLog.info("Exported JDK-internal ASM packages to the prepatcher agent module.");
     }
 
     private static Path locateAgentJar() {

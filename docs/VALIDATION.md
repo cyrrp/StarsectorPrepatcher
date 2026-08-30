@@ -1,3 +1,8 @@
+> Project home:
+> [StarsectorPrepatcher — overview, installation and downloads](https://github.com/kirpoly/StarsectorPrepatcher)
+
+---
+
 # Проверка optimization-патчей
 
 Это единый pre-merge playbook для патчей, которые кэшируют данные игры, переиспользуют
@@ -54,6 +59,50 @@ explicit special policies. The test defines one already-loaded synthetic class f
 target and verifies rejection in the runtime loader, non-rejection when the feature target is absent,
 and non-rejection of an unrelated-loader copy. Adding a transformer without an audit entry or an
 explicit special policy must fail this gate.
+
+## Java 17/27 и Faster Rendering
+
+Release gate выполняется на Java 17 и на точной Miko Java `27+22`. Для Java 27 обязательны три
+реальных subprocess-сценария: обычный Prepatcher без FR, `fr.agent.jar → Prepatcher` с новым
+`fr.jar` и legacy `AppClassLoader + Prepatcher` со старым установленным `fr.jar`. Проверяются
+выбранный профиль, порядок единого pipeline, все presentation/structural targets, отсутствие
+нелегальных method names, загрузка `CampaignState` и полная verification-загрузка Local Resources.
+
+No-FR gate использует эффективные JVM arguments без `fr.agent.jar`, legacy system loader и
+`fr.jar` в classpath. Он обязан выбрать `JAVA27_STANDARD`, загрузить все 24 presentation targets и
+оба Local Resources patches с `-Xverify:all`. Отдельный classification test проверяет новый FR по
+имени и по `Premain-Class`, legacy loader, конфликт обоих маршрутов, agent после Prepatcher,
+осиротевший `fr.jar` в classpath и duplicate Prepatcher.
+
+Для `JAVA27_STANDARD` и legacy FR отдельно проверяется общий length-preserving constant-pool
+repair: реальный `CampaignState`, согласованная synthetic declaration/reference, неизменность всех
+байтов вне точного UTF8-имени, identity-idempotence и отказ на повреждённом class file.
+
+UI market alias gate дополнительно использует настоящие `campaign.ui.class` и `marketinfo.s` в
+четырёх формах pipeline: raw Java 17, repair внутри `JAVA27_STANDARD`, уже исправленные bytes
+`FR_AGENT_CHAIN` и pre-define вызов `FR_PREDEFINE_BRIDGE`. Для обоих полей проверяются raw/repaired
+alias, точный descriptor, неоднозначность, неизвестное имя, idempotence и `BasicVerifier`. Trade
+обязательно проходит в порядке `Trade mutation → AoTD detached-cargo context`; повреждение поздней
+Cargo surface откатывает оба маркера к совместимому входу pipeline.
+
+Agent probe имеет отрицательные fixtures: FR заявлен, но ничего не меняет; зарегистрирован после
+Prepatcher; исправляет только declaration без call; либо повреждает тело класса. Каждый случай
+обязан завершить JVM до игровых targets со статусом `fatal-incompatible-java-route`. Legacy route
+проверяется как для ещё не загруженного `ClassTransformer`, так и через retransformation; ошибка
+handshake обязана удалить property/временный transformer и восстановить исходный класс.
+
+Для `localResourcesTooltipSnapshot` gate требует ровно один `F_SAME` сразу после fallback label,
+неизменённые locals/stack, совместные postconditions обоих Local Resources patches, idempotent
+reprocessing, atomic rollback при несовпадении и успешную JVM load с `-Xverify:all` на Java 27.
+Package gate дважды собирает JAR каждым build script и сравнивает hashes; внутри agent должны быть
+private ASM, `META-INF/LICENSES/ASM.txt`, и не должно быть `jdk/internal/org/objectweb/asm`,
+`org/objectweb/asm`, `module-info.class`, чужих manifests или signatures.
+
+Miko install/reinstall/uninstall тестируется для обоих layouts FR. Проверяются backups, rollback
+при ошибке, завершающие переводы строк, отсутствие duplicate agents и `spp.dump.campaignState`,
+порядок остальные agents → FR → Prepatcher → classpath и сохранение реального `%ERRORLEVEL%` в
+`Miko_Rouge.bat`. Финальный игровой запуск не завершается автоматизацией: она только читает log,
+а процесс завершает пользователь либо он заканчивается сам.
 
 ## Каталог повторяющихся регрессий
 
@@ -145,7 +194,7 @@ Review не считается завершённым без следующих 
 Численное performance-заявление делается только после этих gates и одинакового A/B-прогона. Если
 какой-либо gate временно неприменим, патч остаётся experimental/disabled by default. Исключение
 допустимо только по явному решению владельца релиза, при наличии отдельного kill switch и записи
-причины/остаточного риска в отчёте соответствующего выпуска из [`releases/`](releases/0.18.3.md).
+причины/остаточного риска в отчёте соответствующего выпуска из [`releases/`](releases/0.18.4.md).
 
 ## Матрица запуска vanilla и Faster Rendering
 

@@ -1,3 +1,8 @@
+> Project home:
+> [StarsectorPrepatcher — overview, installation and downloads](https://github.com/kirpoly/StarsectorPrepatcher)
+
+---
+
 # Карта патчей
 
 ## Модель применения
@@ -118,6 +123,13 @@ Post-commit counters and logging are best-effort and cannot revoke successful lo
 instead collects its immutable transaction IDs directly inside its guard and uses no record/consume
 round trip. No
 static `Class`, `Method`, `ClassLoader`, campaign object or mod instance is cached for dispatch.
+
+Две UI-поверхности, читающие обфусцированное поле рынка, принимают только точную пару представлений
+одного имени. Trade допускает `if.new$class` или исправленное `if_new$class`; market overview —
+`String.interface$float` или `String_interface$float`. В текущих bytes должен существовать ровно один
+вариант с ожидаемым descriptor и без `static`; неизвестное имя, неправильный тип или оба alias сразу
+оставляют исходный глобальный путь. Выбранное имя используется и в добавленных `GETFIELD`, и в
+postcondition, поэтому Java 17, Java 27 и оба маршрута FR не требуют отдельных вариантов патча.
 
 Only exact Scheduler Fork `1.0.14-spp13` registers. The current declared mask must be exactly
 `0xfff`; `spp4`–`spp9`, future and partially declared contracts are logged and rejected wholesale
@@ -770,6 +782,23 @@ the preserved raw getter instead of guessing.
 The runtime stores only core `VarHandle` metadata, primitive counters and unload-safe `ClassValue`
 accessors. It does not keep a static `MarketAPI`, commodity, optional `Class`, `Method`,
 `ClassLoader`, or mod instance.
+
+### `patch.localResourcesTooltipSnapshot`
+
+Transformation surface: exact vanilla class
+`com/fs/starfarer/api/impl/campaign/submarkets/LocalResourcesSubmarketPlugin`, method
+`createTooltipAfterDescription(Lcom/fs/starfarer/api/ui/TooltipMakerAPI;Z)V`, specifically its
+wrapper boundary, snapshot-hook branch and preserved raw fallback. The original body is retained as
+private `spp$rawCreateTooltipAfterDescription`; exact vanilla and maintained AoTD paths calculate
+each stockpile limit once, while an unknown subclass calls the raw method.
+
+The branch to the raw fallback begins with an explicit `FrameNode(F_SAME)`. Locals and operand
+stack are unchanged at that point. This is part of the existing tooltip-snapshot postcondition,
+not a separate transformer or switch. Serialization remains `COMPUTE_MAXS`; global
+`COMPUTE_FRAMES` is deliberately not used because it would resolve game/mod hierarchy through the
+agent loader. The cold-data and tooltip surfaces are committed through the same structural class
+plan; a mismatch leaves the input class unchanged, and reprocessing requires the exact wrapper,
+raw method, hook count and `F_SAME` frame.
 
 ### `patch.economyGroupIndex`
 

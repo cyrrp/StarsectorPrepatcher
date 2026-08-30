@@ -6,8 +6,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.jar.JarFile;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Early, side-effect-free discovery of an AoTD fork candidate.
@@ -20,6 +24,10 @@ final class AoTDForkMarkerScanner {
     private static final String MOD_ID = "aotd_theory_of_toolbox";
     private static final String MARKER_ENTRY =
             "data/kaysaar/aotd/tot/compat/PrepatcherContract.class";
+    private static final Pattern JARS_ARRAY = Pattern.compile(
+            "\\\"jars\\\"\\s*:\\s*\\[(.*?)]", Pattern.DOTALL);
+    private static final Pattern JSON_STRING = Pattern.compile(
+            "\\\"((?:\\\\.|[^\\\"\\\\])*)\\\"");
 
     private AoTDForkMarkerScanner() {}
 
@@ -71,22 +79,59 @@ final class AoTDForkMarkerScanner {
         }
         if (!containsModId(json, MOD_ID)) return;
 
-        try (var files = Files.walk(directory, 3)) {
-            files.filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().endsWith(".jar"))
-                    .sorted()
-                    .forEach(jar -> {
-                        try (JarFile file = new JarFile(jar.toFile())) {
-                            if (file.getJarEntry(MARKER_ENTRY) != null) {
-                                result.add(new Candidate(directory, jar));
-                            }
-                        } catch (IOException ignored) {
-                            // A malformed unrelated JAR cannot make startup fail.
-                        }
-                    });
-        } catch (IOException ignored) {
-            // Runtime handshake remains authoritative if early discovery fails.
+        for (String declared : declaredJars(json)) {
+            Path jar = directory.resolve(declared).normalize();
+            if (!jar.startsWith(directory) || !Files.isReadable(jar)
+                    || !Files.isRegularFile(jar)
+                    || !jar.getFileName().toString().toLowerCase(java.util.Locale.ROOT)
+                    .endsWith(".jar")) {
+                continue;
+            }
+            try (JarFile file = new JarFile(jar.toFile())) {
+                if (file.getJarEntry(MARKER_ENTRY) != null) {
+                    result.add(new Candidate(directory, jar));
+                }
+            } catch (IOException ignored) {
+                // A malformed declared JAR cannot make startup fail.
+            }
         }
+    }
+
+    private static Set<String> declaredJars(String json) {
+        Matcher array = JARS_ARRAY.matcher(json);
+        if (!array.find()) return Set.of();
+        Set<String> result = new LinkedHashSet<>();
+        Matcher strings = JSON_STRING.matcher(array.group(1));
+        while (strings.find()) {
+            String value = unescapeJsonString(strings.group(1));
+            if (!value.isBlank()) result.add(value.replace('\\', '/'));
+        }
+        return result;
+    }
+
+    private static String unescapeJsonString(String value) {
+        StringBuilder result = new StringBuilder(value.length());
+        boolean escaped = false;
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (!escaped) {
+                if (current == '\\') escaped = true;
+                else result.append(current);
+                continue;
+            }
+            escaped = false;
+            result.append(switch (current) {
+                case '\\', '/', '"' -> current;
+                case 'b' -> '\b';
+                case 'f' -> '\f';
+                case 'n' -> '\n';
+                case 'r' -> '\r';
+                case 't' -> '\t';
+                default -> current;
+            });
+        }
+        if (escaped) result.append('\\');
+        return result.toString();
     }
 
     private static boolean containsModId(String json, String expected) {

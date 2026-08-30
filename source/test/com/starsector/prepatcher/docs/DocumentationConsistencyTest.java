@@ -633,7 +633,7 @@ public final class DocumentationConsistencyTest {
                     .sorted()
                     .forEach(inputs::add);
         }
-        for (String directory : List.of("agent", "baseline", "docs", "jars", "media", "profiles", "source")) {
+        for (String directory : List.of("agent", "baseline", "docs", "jars", "lib", "media", "profiles", "source")) {
             Path base = root.resolve(directory);
             require(Files.isDirectory(base), "checksum input directory is missing: " + base);
             try (Stream<Path> files = Files.walk(base)) {

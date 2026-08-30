@@ -33,6 +33,10 @@ public final class FasterRenderingLoaderSmokeTest {
             "com.fs.starfarer.campaign.comms.v2.IntelManager";
     private static final String COMMODITY_ON_MARKET =
             "com.fs.starfarer.campaign.econ.CommodityOnMarket";
+    private static final String TRADE_UI =
+            "com.fs.starfarer.campaign.ui.class";
+    private static final String MARKET_OVERVIEW =
+            "com.fs.starfarer.campaign.ui.marketinfo.s";
     private static final String VECTOR_2F = "org.lwjgl.util.vector.Vector2f";
     private static final String RUNTIME_HOOKS =
             "com.fs.starfarer.api.StarsectorPrepatcherHooks";
@@ -69,6 +73,8 @@ public final class FasterRenderingLoaderSmokeTest {
         Class<?> baseTerrain = load(system, BASE_TERRAIN);
         Class<?> intelManager = load(system, INTEL_MANAGER);
         Class<?> commodityOnMarket = load(system, COMMODITY_ON_MARKET);
+        Class<?> tradeUi = loadUiTarget(system, TRADE_UI);
+        Class<?> marketOverview = loadUiTarget(system, MARKET_OVERVIEW);
         Class<?> hooks = load(system, RUNTIME_HOOKS);
         Class<?> hyperspaceHooks = load(system, HYPERSPACE_HOOKS);
         Class<?> bridge = load(system, RUNTIME_BRIDGE);
@@ -81,6 +87,8 @@ public final class FasterRenderingLoaderSmokeTest {
         assertDefinedBy(system, baseTerrain);
         assertDefinedBy(system, intelManager);
         assertDefinedBy(system, commodityOnMarket);
+        if (tradeUi != null) assertDefinedBy(system, tradeUi);
+        if (marketOverview != null) assertDefinedBy(system, marketOverview);
         assertDefinedBy(system, hooks);
         assertDefinedBy(system, hyperspaceHooks);
         assertDefinedBy(system, bridge);
@@ -133,6 +141,26 @@ public final class FasterRenderingLoaderSmokeTest {
         require("APPLIED".equals(frMutatedPresentationStatus),
                 "FR-mutated presentation target did not match its unchanged local sound surface: status="
                         + frMutatedPresentationStatus);
+        String tradeMutationStatus = System.getProperty(
+                "starsector.prepatcher.tradeMarketMutationPatch");
+        require("APPLIED".equals(tradeMutationStatus),
+                "FR did not apply the trade market-mutation patch: status="
+                        + tradeMutationStatus);
+        String marketOverviewStatus = System.getProperty(
+                "starsector.prepatcher.marketOverviewMutationPatch");
+        require("APPLIED".equals(marketOverviewStatus),
+                "FR did not apply the market-overview mutation patch: status="
+                        + marketOverviewStatus);
+        String cargoStatus = System.getProperty(
+                "starsector.prepatcher.campaignCargoNoGlobalEconomyStepPatch");
+        require("APPLIED".equals(cargoStatus),
+                "FR did not preserve the later Cargo patch after trade mutation: status="
+                        + cargoStatus);
+        require(System.getProperty("starsector.prepatcher.pipelineFailure." + TRADE_UI) == null,
+                "FR trade target published an atomic pipeline failure");
+        require(System.getProperty(
+                        "starsector.prepatcher.pipelineFailure." + MARKET_OVERVIEW) == null,
+                "FR market-overview target published an atomic pipeline failure");
 
         Class<?> agent = load(system, AGENT);
         ClassLoader agentLoader = agent.getClassLoader();
@@ -166,12 +194,24 @@ public final class FasterRenderingLoaderSmokeTest {
                 + " fastForwardPresentation=" + apiPresentationPatchStatus);
         System.out.println("OK FR upstream-mutated target " + HYPERSPACE_TERRAIN
                 + " fastForwardPresentation=" + frMutatedPresentationStatus);
+        System.out.println("OK FR normalized UI market fields trade=" + tradeMutationStatus
+                + " overview=" + marketOverviewStatus + " cargo=" + cargoStatus);
         System.out.println("OK runtime payload inventory classes=" + runtimeClassCount);
     }
 
     private static Class<?> load(ClassLoader loader, String name)
             throws ClassNotFoundException {
         return Class.forName(name, false, loader);
+    }
+
+    private static Class<?> loadUiTarget(ClassLoader loader, String name)
+            throws ClassNotFoundException {
+        try {
+            return load(loader, name);
+        } catch (ClassFormatError legacyIllegalName) {
+            if (Runtime.version().feature() >= 27) throw legacyIllegalName;
+            return null;
+        }
     }
 
     private static void assertDefinedBy(ClassLoader expected, Class<?> type) {

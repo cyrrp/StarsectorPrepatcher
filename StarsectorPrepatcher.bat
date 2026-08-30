@@ -2,57 +2,45 @@
 setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
 
+for /f "usebackq delims=" %%v in (`powershell.exe -NoProfile -Command "(Get-Content 'mod_info.json' | ConvertFrom-Json).version"`) do set "VERSION=%%v"
+if not defined VERSION set "VERSION=unknown"
+
 if not "%~1"=="" goto dispatch
 
 :menu
 cls
 echo ================================================================
-echo                    StarsectorPrepatcher 0.18.3
+echo                    StarsectorPrepatcher %VERSION%
 echo ================================================================
 echo.
-echo  1. Build release JARs
-echo     Compiles the agent/bootstrap and updates SHA256SUMS.txt.
+echo  1. Install javaagent
+echo     Adds the Prepatcher agent to a chosen launch path, after any
+echo     existing javaagents, with a timestamped backup.
 echo.
-echo  2. Install javaagent
-echo     Adds Prepatcher to the selected launch configuration with a backup.
+echo  2. Remove javaagent
+echo     Removes only the Prepatcher entry; other launch options are
+echo     preserved. A backup is created before modifying the file.
 echo.
-echo  3. Remove javaagent
-echo     Removes only the managed entry and backs up the vmparams file.
-echo.
-echo  4. Run full verification
-echo     Rebuilds the project and runs documentation, structural,
-echo     runtime, startup, hyperspace, and Faster Rendering tests.
-echo.
-echo  5. Show detailed help
+echo  3. Show detailed help
 echo  0. Exit
 echo.
-choice /C 123450 /N /M "Select an action [1-5, 0]: "
-if errorlevel 6 exit /b 0
-if errorlevel 5 goto help_interactive
-if errorlevel 4 goto verify_interactive
-if errorlevel 3 goto uninstall_interactive
-if errorlevel 2 goto install_interactive
-if errorlevel 1 goto build_interactive
-goto menu
-
-:build_interactive
-call :run_action "Build release JARs and SHA-256 inventory" "build-agent.ps1"
+choice /C 1230 /N /M "Select an action [1-3, 0]: "
+if errorlevel 4 exit /b 0
+if errorlevel 3 goto help_interactive
+if errorlevel 2 goto uninstall_interactive
+if errorlevel 1 goto install_interactive
 goto menu
 
 :install_interactive
 call :select_target "INSTALL"
 if errorlevel 1 goto menu
-call :run_action "Install javaagent: %TARGET%" "install-agent.ps1" "%TARGET%"
+call :run_action "Install javaagent: %TARGETS%" "install-agent.ps1" "%TARGETS%"
 goto menu
 
 :uninstall_interactive
 call :select_target "REMOVE"
 if errorlevel 1 goto menu
-call :run_action "Remove javaagent: %TARGET%" "uninstall-agent.ps1" "%TARGET%"
-goto menu
-
-:verify_interactive
-call :run_action "Full release verification" "verify-structural.ps1"
+call :run_action "Remove javaagent: %TARGETS%" "uninstall-agent.ps1" "%TARGETS%"
 goto menu
 
 :help_interactive
@@ -67,32 +55,33 @@ echo ================================================================
 echo  %~1 JAVAAGENT
 echo ================================================================
 echo.
-echo  1. Vanilla
-echo     Updates the main Starsector\vmparams file.
+echo  Select launch paths to update:
 echo.
-echo  2. Faster Rendering
-echo     Updates Starsector\starsector-core\fr.vmparams.
-echo.
-echo  3. Both launch paths
-echo     Validates both files before updating either one.
-echo.
-echo  0. Back without changes
-echo.
-choice /C 1230 /N /M "Select a target [1-3, 0]: "
-if errorlevel 4 exit /b 1
-if errorlevel 3 (
-    set "TARGET=Both"
-    exit /b 0
+set "TARGETS="
+
+choice /C YN /N /M "  Vanilla (Starsector\vmparams)? [Y/N]: "
+if errorlevel 2 goto :select_fr
+set "TARGETS=Vanilla"
+
+:select_fr
+choice /C YN /N /M "  Faster Rendering (starsector-core\fr.vmparams)? [Y/N]: "
+if errorlevel 2 goto :select_miko
+if defined TARGETS (set "TARGETS=%TARGETS%,FasterRendering") else (set "TARGETS=FasterRendering")
+
+:select_miko
+choice /C YN /N /M "  Mikohime / Java 27 (Miko_Simple.txt, DefaultVM, Configure_Me.cmd, Miko_Rouge.bat)? [Y/N]: "
+if errorlevel 2 goto :select_done
+if defined TARGETS (set "TARGETS=%TARGETS%,Mikohime") else (set "TARGETS=Mikohime")
+
+:select_done
+if not defined TARGETS (
+    echo.
+    echo  No target selected.
+    timeout /t 2 >nul
+    exit /b 1
 )
-if errorlevel 2 (
-    set "TARGET=FasterRendering"
-    exit /b 0
-)
-if errorlevel 1 (
-    set "TARGET=Vanilla"
-    exit /b 0
-)
-exit /b 1
+if /I "%TARGETS%"=="Vanilla,FasterRendering,Mikohime" set "TARGETS=All"
+exit /b 0
 
 :run_action
 cls
@@ -148,12 +137,20 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall-agent.ps
 exit /b %ERRORLEVEL%
 
 :normalize_target
-set "TARGET="
-if /I "%~1"=="Vanilla" set "TARGET=Vanilla"
-if /I "%~1"=="FasterRendering" set "TARGET=FasterRendering"
-if /I "%~1"=="Both" set "TARGET=Both"
-if defined TARGET exit /b 0
-echo Specify an install/uninstall target: Vanilla, FasterRendering, or Both.
+set "TARGET=%~1"
+if not defined TARGET goto :show_target_usage
+if /I "%TARGET%"=="All" exit /b 0
+set "BAD="
+for %%t in (%TARGET%) do (
+    if /I not "%%t"=="Vanilla" if /I not "%%t"=="FasterRendering" if /I not "%%t"=="Mikohime" set "BAD=%%t"
+)
+if defined BAD (
+    echo Unknown target: %BAD%
+    goto :show_target_usage
+)
+exit /b 0
+:show_target_usage
+echo Specify targets: Vanilla, FasterRendering, Mikohime (comma-separated), or All.
 echo.
 call :show_usage
 exit /b 1
@@ -165,23 +162,36 @@ exit /b 0
 :show_help
 echo StarsectorPrepatcher.bat - unified Windows launcher.
 echo.
-echo Build:
-echo   Creates agent\StarsectorPrepatcherAgent.jar and the bootstrap JAR,
-echo   validates the runtime payload, and recalculates SHA256SUMS.txt.
+echo IMPORTANT: fully close Starsector before installing or removing the
+echo javaagent. If the game is running, it may overwrite the launch files
+echo and undo the change.
 echo.
-echo Install:
-echo   Adds -javaagent after other javaagents. It validates vmparams first
-echo   and creates a timestamped backup before writing any changes.
+echo Install (menu item 1 / 'install' command):
+echo   Adds -javaagent:../mods/StarsectorPrepatcher/agent/StarsectorPrepatcherAgent.jar
+echo   after any existing javaagents in the chosen launch path. Every target
+echo   file is validated before any of them is written, and a timestamped
+echo   backup is created. The agent exports its ASM modules at startup, so
+echo   no --add-exports flags are needed.
+echo   Targets: Vanilla, FasterRendering, Mikohime (comma-separated), or All.
 echo.
-echo Remove:
-echo   Removes only the StarsectorPrepatcher entry. Other launch options
-echo   are preserved, and a backup is created before modifying the file.
+echo Remove (menu item 2 / 'uninstall' command):
+echo   Removes only the Prepatcher entry; other javaagents and launch
+echo   options are left intact. A timestamped backup is created first.
+echo   Same targets as install.
 echo.
-echo Verify:
-echo   Runs the complete release gate. Reports are written to
-echo   .build\reports; .build is excluded from Git and the release.
+echo Build ('build' command; not in the menu):
+echo   Compiles agent\StarsectorPrepatcherAgent.jar and
+echo   jars\StarsectorPrepatcherBootstrap.jar, validates the runtime
+echo   payload, and recalculates SHA256SUMS.txt.
+echo   Requires JDK 17+ on PATH (javac, java, jar).
+echo   Not needed for normal use -- the release ships prebuilt JARs.
 echo.
-echo Fully close Starsector before installing or removing the javaagent.
+echo Verify ('verify' command; not in the menu):
+echo   Runs the full release gate (documentation, structural, runtime,
+echo   startup, hyperspace, Faster Rendering). Reports go to
+echo   .build\reports, which is excluded from Git and the release.
+echo   Requires JDK 17+ on PATH. Not needed for normal use.
+echo.
 echo Run without arguments to open the interactive menu.
 echo.
 call :show_usage
@@ -190,13 +200,17 @@ exit /b 0
 :show_usage
 echo Command-line usage:
 echo   StarsectorPrepatcher.bat
-echo   StarsectorPrepatcher.bat build
-echo   StarsectorPrepatcher.bat verify
 echo   StarsectorPrepatcher.bat install Vanilla
 echo   StarsectorPrepatcher.bat install FasterRendering
-echo   StarsectorPrepatcher.bat install Both
+echo   StarsectorPrepatcher.bat install Mikohime
+echo   StarsectorPrepatcher.bat install Vanilla,Mikohime
+echo   StarsectorPrepatcher.bat install All
 echo   StarsectorPrepatcher.bat uninstall Vanilla
 echo   StarsectorPrepatcher.bat uninstall FasterRendering
-echo   StarsectorPrepatcher.bat uninstall Both
+echo   StarsectorPrepatcher.bat uninstall Mikohime
+echo   StarsectorPrepatcher.bat uninstall Vanilla,Mikohime
+echo   StarsectorPrepatcher.bat uninstall All
+echo   StarsectorPrepatcher.bat build
+echo   StarsectorPrepatcher.bat verify
 echo   StarsectorPrepatcher.bat help
 exit /b 0

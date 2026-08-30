@@ -1,20 +1,21 @@
 package com.starsector.prepatcher.agent;
 
-import jdk.internal.org.objectweb.asm.ClassReader;
-import jdk.internal.org.objectweb.asm.ClassWriter;
-import jdk.internal.org.objectweb.asm.Opcodes;
-import jdk.internal.org.objectweb.asm.tree.AbstractInsnNode;
-import jdk.internal.org.objectweb.asm.tree.ClassNode;
-import jdk.internal.org.objectweb.asm.tree.FieldNode;
-import jdk.internal.org.objectweb.asm.tree.JumpInsnNode;
-import jdk.internal.org.objectweb.asm.tree.LdcInsnNode;
-import jdk.internal.org.objectweb.asm.tree.MethodInsnNode;
-import jdk.internal.org.objectweb.asm.tree.MethodNode;
-import jdk.internal.org.objectweb.asm.tree.TryCatchBlockNode;
-import jdk.internal.org.objectweb.asm.tree.VarInsnNode;
-import jdk.internal.org.objectweb.asm.tree.analysis.Analyzer;
-import jdk.internal.org.objectweb.asm.tree.analysis.BasicValue;
-import jdk.internal.org.objectweb.asm.tree.analysis.BasicVerifier;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.FieldNode;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
+import org.objectweb.asm.tree.VarInsnNode;
+import org.objectweb.asm.tree.analysis.Analyzer;
+import org.objectweb.asm.tree.analysis.BasicValue;
+import org.objectweb.asm.tree.analysis.BasicVerifier;
 
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -27,6 +28,10 @@ public final class TradeMarketMutationTransformerTest {
             "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
     private static final String ECONOMY_API =
             "com/fs/starfarer/api/campaign/econ/EconomyAPI";
+    private static final String MARKET_DESC =
+            "Lcom/fs/starfarer/campaign/econ/Market;";
+    private static final String LEGACY_MARKET_FIELD = "if.new$class";
+    private static final String REPAIRED_MARKET_FIELD = "if_new$class";
     private static final String GUARD_DESC =
             "(L" + ECONOMY_API + ";"
                     + "Lcom/fs/starfarer/api/campaign/econ/MarketAPI;"
@@ -42,13 +47,24 @@ public final class TradeMarketMutationTransformerTest {
                 "Usage: TradeMarketMutationTransformerTest <starfarer_obf.jar>");
         inspectRuntimeFailOpenBoundaries();
         byte[] original = readClass(Path.of(args[0]), TARGET);
+        byte[] repaired = IllegalObfuscatedMemberNameRepair.repair(TARGET, original);
+        require(repaired != original, "trade fixture was not name-repaired");
+        exerciseVariant(original, LEGACY_MARKET_FIELD);
+        exerciseVariant(repaired, REPAIRED_MARKET_FIELD);
+        assertFieldRejections(original);
 
+        System.out.println("OK trade guard raw/repaired aliases preserve virtual doubleStep; "
+                + "exact CFG, idempotence, rollback, BasicVerifier, and trade->Cargo composition");
+    }
+
+    private static void exerciseVariant(byte[] original, String expectedMarketField)
+            throws Exception {
         TradeMarketMutationTransformer trade =
                 new TradeMarketMutationTransformer(true, null);
         byte[] tradePatched = trade.transform(null, TARGET, null, null, original);
         require(tradePatched != null, "exact trade target was not patched: "
                 + System.getProperty(TradeMarketMutationTransformer.statusProperty()));
-        inspectTrade(tradePatched);
+        inspectTrade(tradePatched, expectedMarketField);
         verify(tradePatched);
         require(trade.transform(null, TARGET, null, null, tradePatched) == null,
                 "trade idempotent reprocessing changed bytes");
@@ -80,7 +96,7 @@ public final class TradeMarketMutationTransformerTest {
                 null, TARGET, null, null, orderedTradeBytes);
         require(fullyPatched != null,
                 "Cargo transformer silently skipped the trade post-state");
-        inspectTrade(fullyPatched);
+        inspectTrade(fullyPatched, expectedMarketField);
         inspectCargo(fullyPatched);
         verify(fullyPatched);
         require(orderedTrade.transform(null, TARGET, null, null, fullyPatched) == null,
@@ -94,13 +110,10 @@ public final class TradeMarketMutationTransformerTest {
                 "changed Cargo surface patched after the trade post-state");
         require(Arrays.equals(cargoFuture, cargoFutureBefore),
                 "failed later transformer mutated the earlier trade post-state");
-        inspectTrade(cargoFuture);
-
-        System.out.println("OK trade guard preserves virtual doubleStep; exact CFG, "
-                + "idempotence, rollback, BasicVerifier, and trade->Cargo composition");
+        inspectTrade(cargoFuture, expectedMarketField);
     }
 
-    private static void inspectTrade(byte[] bytes) {
+    private static void inspectTrade(byte[] bytes, String expectedMarketField) {
         ClassNode node = read(bytes);
         FieldNode marker = field(node, "spp$patched$tradeMarketMutationRefresh");
         require(marker != null
@@ -138,6 +151,12 @@ public final class TradeMarketMutationTransformerTest {
         AbstractInsnNode market = previousMeaningful(transaction);
         AbstractInsnNode owner = previousMeaningful(market);
         AbstractInsnNode guardEconomy = previousMeaningful(owner);
+        require(market instanceof FieldInsnNode field
+                        && field.getOpcode() == Opcodes.GETFIELD
+                        && TARGET.equals(field.owner)
+                        && expectedMarketField.equals(field.name)
+                        && MARKET_DESC.equals(field.desc),
+                "trade guard does not use the selected market-field alias");
         require(fallbackReceiver instanceof VarInsnNode fallbackLoad
                         && fallbackLoad.getOpcode() == Opcodes.ALOAD
                         && guardEconomy instanceof VarInsnNode guardLoad
@@ -161,6 +180,17 @@ public final class TradeMarketMutationTransformerTest {
                         && indexOf(method, guard) < indexOf(method, fallback)
                         && indexOf(method, fallback) < indexOf(method, price),
                 "trade semantic call order changed");
+
+        MethodInsnNode prepare = uniqueCall(method, RUNTIME,
+                "prepareTradeMarketMutation",
+                "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)V");
+        AbstractInsnNode prepareMarket = previousMeaningful(prepare);
+        require(prepareMarket instanceof FieldInsnNode field
+                        && field.getOpcode() == Opcodes.GETFIELD
+                        && TARGET.equals(field.owner)
+                        && expectedMarketField.equals(field.name)
+                        && MARKET_DESC.equals(field.desc),
+                "trade preparation does not use the selected market-field alias");
     }
 
     private static void inspectCargo(byte[] bytes) {
@@ -257,6 +287,49 @@ public final class TradeMarketMutationTransformerTest {
         }
         require(found > 0, "missing proof call " + owner + "." + name
                 + " in " + method.name);
+    }
+
+    private static void assertFieldRejections(byte[] original) {
+        assertRejected(renameMarketField(original, LEGACY_MARKET_FIELD,
+                        "future_market_identity"),
+                "unknown trade market-field alias was accepted");
+
+        ClassNode wrongType = read(original);
+        field(wrongType, LEGACY_MARKET_FIELD).desc = "Ljava/lang/Object;";
+        assertRejected(write(wrongType), "wrong trade market-field descriptor was accepted");
+
+        ClassNode ambiguous = read(original);
+        FieldNode legacy = field(ambiguous, LEGACY_MARKET_FIELD);
+        ambiguous.fields.add(new FieldNode(Opcodes.ASM9, legacy.access,
+                REPAIRED_MARKET_FIELD, legacy.desc, legacy.signature, null));
+        assertRejected(write(ambiguous), "ambiguous trade market-field aliases were accepted");
+    }
+
+    private static void assertRejected(byte[] bytes, String message) {
+        byte[] before = bytes.clone();
+        TradeMarketMutationTransformer transformer =
+                new TradeMarketMutationTransformer(true, null);
+        require(transformer.transform(null, TARGET, null, null, bytes) == null, message);
+        require(Arrays.equals(bytes, before), "rejected trade bytes were mutated");
+        require("SKIPPED_STRUCTURAL".equals(System.getProperty(
+                        TradeMarketMutationTransformer.statusProperty())),
+                "trade market-field rejection status is not SKIPPED_STRUCTURAL");
+    }
+
+    private static byte[] renameMarketField(byte[] bytes, String from, String to) {
+        ClassNode node = read(bytes);
+        FieldNode declaration = field(node, from);
+        require(declaration != null, "missing field alias " + from);
+        declaration.name = to;
+        for (MethodNode method : node.methods) {
+            for (AbstractInsnNode instruction : method.instructions) {
+                if (instruction instanceof FieldInsnNode field
+                        && TARGET.equals(field.owner) && from.equals(field.name)) {
+                    field.name = to;
+                }
+            }
+        }
+        return write(node);
     }
 
     private static byte[] changeCallName(

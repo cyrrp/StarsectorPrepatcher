@@ -19,29 +19,49 @@ GAME_ROOT="$(find_game_root "$MOD_ROOT")" || {
 CORE="$GAME_ROOT/starsector-core"
 BUILD="$MOD_ROOT/.build"
 rm -rf "$BUILD"
-mkdir -p "$BUILD/agent-classes" "$BUILD/bootstrap-classes" "$MOD_ROOT/agent" "$MOD_ROOT/jars"
-CP_AGENT="$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar"
+mkdir -p "$BUILD/agent-raw-classes" "$BUILD/asm-raw-classes" "$BUILD/agent-classes" "$BUILD/build-classes" "$BUILD/bootstrap-classes" "$MOD_ROOT/agent" "$MOD_ROOT/jars"
+ASM_CORE="$MOD_ROOT/lib/asm-9.10.1.jar"
+ASM_TREE="$MOD_ROOT/lib/asm-tree-9.10.1.jar"
+ASM_ANALYSIS="$MOD_ROOT/lib/asm-analysis-9.10.1.jar"
+ASM_COMMONS="$MOD_ROOT/lib/asm-commons-9.10.1.jar"
+CP_AGENT="$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$ASM_CORE:$ASM_TREE:$ASM_ANALYSIS"
+CP_BUILD="$ASM_CORE:$ASM_COMMONS"
 CP_BOOT="$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/log4j-1.2.9.jar"
-EXPORTS=(
-  --add-exports java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED
-  --add-exports java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED
-  --add-exports java.base/jdk.internal.org.objectweb.asm.tree.analysis=ALL-UNNAMED
-)
-find "$MOD_ROOT/source/agent" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 -source 17 -target 17 "${EXPORTS[@]}" -cp "$CP_AGENT" -d "$BUILD/agent-classes"
-find "$MOD_ROOT/source/bootstrap" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 -source 17 -target 17 -cp "$CP_BOOT" -d "$BUILD/bootstrap-classes"
+find "$MOD_ROOT/source/agent" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -cp "$CP_AGENT" -d "$BUILD/agent-raw-classes"
+find "$MOD_ROOT/source/build" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -cp "$CP_BUILD" -d "$BUILD/build-classes"
+find "$MOD_ROOT/source/bootstrap" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -cp "$CP_BOOT" -d "$BUILD/bootstrap-classes"
+# Extract only runtime ASM, then relocate its classes and all agent references into
+# com.starsector.prepatcher.internal.asm with the build-only ASM Commons tool.
+for asm_jar in asm-9.10.1.jar asm-tree-9.10.1.jar asm-analysis-9.10.1.jar; do
+  asm_path="$MOD_ROOT/lib/$asm_jar"
+  if [[ ! -f "$asm_path" ]]; then
+    echo "Required ASM library is missing: $asm_path" >&2
+    exit 1
+  fi
+  ( cd "$BUILD/asm-raw-classes" && jar xf "$asm_path" )
+done
+java -cp "$BUILD/build-classes:$CP_BUILD" com.starsector.prepatcher.build.AsmRelocator \
+  "$BUILD/agent-classes" "$BUILD/agent-raw-classes" "$BUILD/asm-raw-classes"
+mkdir -p "$BUILD/agent-classes/META-INF/LICENSES"
+cp "$MOD_ROOT/lib/ASM-LICENSE.txt" "$BUILD/agent-classes/META-INF/LICENSES/ASM.txt"
+if grep -aRIl -e 'org/objectweb/asm' -e 'jdk/internal/org/objectweb/asm' \
+    "$BUILD/agent-classes" --include='*.class' | grep -q .; then
+  echo 'Unrelocated ASM reference remains in the agent class tree.' >&2
+  exit 1
+fi
 printf '%s\n' \
   'Manifest-Version: 1.0' \
   'Implementation-Title: StarsectorPrepatcher Agent' \
-  'Implementation-Version: 0.18.3' \
+  'Implementation-Version: 0.18.4' \
   'Premain-Class: com.starsector.prepatcher.agent.PrepatcherAgent' \
   'Can-Redefine-Classes: false' \
-  'Can-Retransform-Classes: false' '' > "$BUILD/agent.mf"
+  'Can-Retransform-Classes: true' '' > "$BUILD/agent.mf"
 printf '%s\n' \
   'Manifest-Version: 1.0' \
   'Implementation-Title: StarsectorPrepatcher Bootstrap' \
-  'Implementation-Version: 0.18.3' '' > "$BUILD/bootstrap.mf"
-jar cfm "$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" "$BUILD/agent.mf" -C "$BUILD/agent-classes" .
-jar cfm "$MOD_ROOT/jars/StarsectorPrepatcherBootstrap.jar" "$BUILD/bootstrap.mf" -C "$BUILD/bootstrap-classes" .
+  'Implementation-Version: 0.18.4' '' > "$BUILD/bootstrap.mf"
+jar --create --file "$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" --manifest "$BUILD/agent.mf" --date=2026-01-01T00:00:00Z -C "$BUILD/agent-classes" .
+jar --create --file "$MOD_ROOT/jars/StarsectorPrepatcherBootstrap.jar" --manifest "$BUILD/bootstrap.mf" --date=2026-01-01T00:00:00Z -C "$BUILD/bootstrap-classes" .
 
 # RuntimeInstaller reads these classfiles as bytes from the agent JAR and
 # defines them in the target game loader. Keep them as normal class entries,
@@ -88,7 +108,7 @@ fi
       printf '%s\n' "$top_level"
     fi
   done
-  find agent baseline docs jars media profiles source -type f -print
+  find agent baseline docs jars lib media profiles source -type f -print
   printf '%s\n' 'logs/README.txt'
 ) | sed 's#^\./##' | LC_ALL=C sort -u > "$CHECKSUM_INPUTS"
 

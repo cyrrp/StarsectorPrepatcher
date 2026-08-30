@@ -1,18 +1,18 @@
 package com.starsector.prepatcher.agent;
 
-import jdk.internal.org.objectweb.asm.ClassReader;
-import jdk.internal.org.objectweb.asm.ClassWriter;
-import jdk.internal.org.objectweb.asm.Opcodes;
-import jdk.internal.org.objectweb.asm.tree.AbstractInsnNode;
-import jdk.internal.org.objectweb.asm.tree.ClassNode;
-import jdk.internal.org.objectweb.asm.tree.FieldInsnNode;
-import jdk.internal.org.objectweb.asm.tree.FieldNode;
-import jdk.internal.org.objectweb.asm.tree.InsnList;
-import jdk.internal.org.objectweb.asm.tree.JumpInsnNode;
-import jdk.internal.org.objectweb.asm.tree.LabelNode;
-import jdk.internal.org.objectweb.asm.tree.MethodInsnNode;
-import jdk.internal.org.objectweb.asm.tree.MethodNode;
-import jdk.internal.org.objectweb.asm.tree.VarInsnNode;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.FieldNode;
+import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.VarInsnNode;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
@@ -36,7 +36,8 @@ final class MarketOverviewMutationTransformer implements ClassFileTransformer {
     private static final String SECTOR_API = "com/fs/starfarer/api/campaign/SectorAPI";
     private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
     private static final String MARKET_DESC = "L" + MARKET_API + ";";
-    private static final String MARKET_FIELD = "String.interface$float";
+    private static final String LEGACY_MARKET_FIELD = "String.interface$float";
+    private static final String REPAIRED_MARKET_FIELD = "String_interface$float";
     private static final String MARKER = "spp$patched$marketOverviewMutationRefresh";
     private static final String MARKER_VALUE =
             "StarsectorPrepatcher:market-overview-mutation-refresh-v1";
@@ -81,28 +82,30 @@ final class MarketOverviewMutationTransformer implements ClassFileTransformer {
         try {
             ClassNode node = read(classfileBuffer);
             if (!TARGET.equals(node.name)) return null;
+            String marketField = requireMarketFieldName(node);
             FieldNode marker = field(node, MARKER);
             if (marker != null) {
                 requireMarker(marker);
-                requirePatchedShape(node);
+                requirePatchedShape(node, marketField);
                 record("ALREADY_APPLIED");
                 return null;
             }
 
-            requireOriginalShape(node);
+            requireOriginalShape(node, marketField);
             patchMutationCalls(requireMethod(node, ACTION, ACTION_DESC));
-            patchEconomyGuard(requireMethod(node, RECREATE, RECREATE_DESC));
+            patchEconomyGuard(requireMethod(node, RECREATE, RECREATE_DESC), marketField);
             node.fields.add(new FieldNode(Opcodes.ASM8,
                     Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL
                             | Opcodes.ACC_SYNTHETIC,
                     MARKER, "Ljava/lang/String;", null, MARKER_VALUE));
-            requirePatchedShape(node);
+            requirePatchedShape(node, marketField);
 
             ClassWriter writer = new LoaderNeutralClassWriter(
                     ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
             node.accept(writer);
             byte[] transformed = writer.toByteArray();
-            requirePatchedShape(read(transformed));
+            ClassNode emitted = read(transformed);
+            requirePatchedShape(emitted, requireMarketFieldName(emitted));
             record("APPLIED");
             PrepatcherLog.info("APPLIED market overview mutation refresh to " + className
                     + ": exact policy mutators publish one-shot reason/scope context;"
@@ -151,7 +154,7 @@ final class MarketOverviewMutationTransformer implements ClassFileTransformer {
         call.itf = false;
     }
 
-    private static void patchEconomyGuard(MethodNode method) {
+    private static void patchEconomyGuard(MethodNode method, String marketField) {
         MethodInsnNode triple = uniqueCall(method, ECONOMY_API, "tripleStep", "()V");
         int economyLocal = method.maxLocals;
         method.maxLocals = economyLocal + 1;
@@ -160,7 +163,7 @@ final class MarketOverviewMutationTransformer implements ClassFileTransformer {
         guard.add(new VarInsnNode(Opcodes.ASTORE, economyLocal));
         guard.add(new VarInsnNode(Opcodes.ALOAD, economyLocal));
         guard.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        guard.add(new FieldInsnNode(Opcodes.GETFIELD, TARGET, MARKET_FIELD, MARKET_DESC));
+        guard.add(new FieldInsnNode(Opcodes.GETFIELD, TARGET, marketField, MARKET_DESC));
         guard.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME,
                 ECON_STEP_GUARD, ECON_STEP_GUARD_DESC, false));
         guard.add(new JumpInsnNode(Opcodes.IFNE, afterStep));
@@ -169,13 +172,9 @@ final class MarketOverviewMutationTransformer implements ClassFileTransformer {
         method.instructions.insert(triple, afterStep);
     }
 
-    private static void requireOriginalShape(ClassNode node) {
+    private static void requireOriginalShape(ClassNode node, String marketField) {
         requireNoMarker(field(node, MARKER));
-        FieldNode market = field(node, MARKET_FIELD);
-        if (market == null || !MARKET_DESC.equals(market.desc)
-                || (market.access & Opcodes.ACC_STATIC) != 0) {
-            throw new StructuralMismatch("market identity field changed");
-        }
+        requireResolvedMarketField(node, marketField);
         MethodNode action = requireMethod(node, ACTION, ACTION_DESC);
         MethodNode recreate = requireMethod(node, RECREATE, RECREATE_DESC);
         requireConcreteInstance(action, ACTION);
@@ -255,7 +254,8 @@ final class MarketOverviewMutationTransformer implements ClassFileTransformer {
         }
     }
 
-    private static void requirePatchedShape(ClassNode node) {
+    private static void requirePatchedShape(ClassNode node, String marketField) {
+        requireResolvedMarketField(node, marketField);
         requireMarker(field(node, MARKER));
         MethodNode action = requireMethod(node, ACTION, ACTION_DESC);
         MethodNode recreate = requireMethod(node, RECREATE, RECREATE_DESC);
@@ -286,7 +286,7 @@ final class MarketOverviewMutationTransformer implements ClassFileTransformer {
         AbstractInsnNode economyLoadInsn = previousMeaningful(thisLoadInsn);
         if (!(marketReadInsn instanceof FieldInsnNode marketRead)
                 || marketRead.getOpcode() != Opcodes.GETFIELD
-                || !TARGET.equals(marketRead.owner) || !MARKET_FIELD.equals(marketRead.name)
+                || !TARGET.equals(marketRead.owner) || !marketField.equals(marketRead.name)
                 || !MARKET_DESC.equals(marketRead.desc)
                 || !(thisLoadInsn instanceof VarInsnNode thisLoad)
                 || thisLoad.getOpcode() != Opcodes.ALOAD || thisLoad.var != 0
@@ -369,6 +369,32 @@ final class MarketOverviewMutationTransformer implements ClassFileTransformer {
     private static FieldNode field(ClassNode node, String name) {
         for (FieldNode field : node.fields) if (name.equals(field.name)) return field;
         return null;
+    }
+
+    private static String requireMarketFieldName(ClassNode node) {
+        FieldNode match = null;
+        for (FieldNode candidate : node.fields) {
+            if (!LEGACY_MARKET_FIELD.equals(candidate.name)
+                    && !REPAIRED_MARKET_FIELD.equals(candidate.name)) {
+                continue;
+            }
+            if (match != null) {
+                throw new StructuralMismatch("market field aliases are ambiguous");
+            }
+            match = candidate;
+        }
+        if (match == null || !MARKET_DESC.equals(match.desc)
+                || (match.access & Opcodes.ACC_STATIC) != 0) {
+            throw new StructuralMismatch("market identity field changed");
+        }
+        return match.name;
+    }
+
+    private static void requireResolvedMarketField(ClassNode node, String name) {
+        String resolved = requireMarketFieldName(node);
+        if (!resolved.equals(name)) {
+            throw new StructuralMismatch("market field alias changed during transformation");
+        }
     }
 
     private static void requireNoMarker(FieldNode marker) {

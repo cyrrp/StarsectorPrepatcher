@@ -2,8 +2,8 @@
 package com.starsector.prepatcher.agent;
 
 import java.util.*;
-import jdk.internal.org.objectweb.asm.*;
-import jdk.internal.org.objectweb.asm.tree.*;
+import org.objectweb.asm.*;
+import org.objectweb.asm.tree.*;
 
 /** Structural patch routines for the hyperspace/terrain target classes. */
 final class HyperspacePatches {

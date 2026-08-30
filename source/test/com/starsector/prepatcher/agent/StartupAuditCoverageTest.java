@@ -1,14 +1,14 @@
 package com.starsector.prepatcher.agent;
 
-import jdk.internal.org.objectweb.asm.ClassReader;
-import jdk.internal.org.objectweb.asm.ClassWriter;
-import jdk.internal.org.objectweb.asm.MethodVisitor;
-import jdk.internal.org.objectweb.asm.Opcodes;
-import jdk.internal.org.objectweb.asm.tree.AbstractInsnNode;
-import jdk.internal.org.objectweb.asm.tree.ClassNode;
-import jdk.internal.org.objectweb.asm.tree.MethodInsnNode;
-import jdk.internal.org.objectweb.asm.tree.MethodNode;
-import jdk.internal.org.objectweb.asm.tree.TypeInsnNode;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TypeInsnNode;
 
 import java.io.InputStream;
 import java.lang.instrument.ClassFileTransformer;
@@ -121,24 +121,36 @@ public final class StartupAuditCoverageTest {
             new ClassReader(input).accept(node, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
         }
         MethodNode premain = null;
+        MethodNode pipelineFactory = null;
         for (MethodNode method : node.methods) {
             if (method.name.equals("premain")
                     && method.desc.equals("(Ljava/lang/String;Ljava/lang/instrument/Instrumentation;)V")) {
                 premain = method;
-                break;
+            }
+            if (method.name.equals("createOrderedPipeline")) {
+                require(pipelineFactory == null,
+                        "duplicate createOrderedPipeline method");
+                pipelineFactory = method;
             }
         }
         require(premain != null, "PrepatcherAgent.premain descriptor changed");
+        require(pipelineFactory != null, "ordered pipeline factory is missing");
 
         Set<Class<?>> result = new LinkedHashSet<>();
         int registrationCount = 0;
         ClassLoader loader = StartupAuditCoverageTest.class.getClassLoader();
-        for (AbstractInsnNode instruction : premain.instructions) {
+        for (AbstractInsnNode instruction : pipelineFactory.instructions) {
             if (instruction instanceof TypeInsnNode typeInsn
                     && instruction.getOpcode() == Opcodes.NEW) {
                 Class<?> type = Class.forName(typeInsn.desc.replace('/', '.'), false, loader);
-                if (ClassFileTransformer.class.isAssignableFrom(type)) result.add(type);
+                if (ClassFileTransformer.class.isAssignableFrom(type)
+                        && type != OrderedTransformerPipeline.class
+                        && !type.getName().endsWith("PrepatcherAgent$NoOpTransformer")) {
+                    result.add(type);
+                }
             }
+        }
+        for (AbstractInsnNode instruction : premain.instructions) {
             if (instruction instanceof MethodInsnNode call
                     && call.getOpcode() == Opcodes.INVOKEINTERFACE
                     && call.owner.equals("java/lang/instrument/Instrumentation")
@@ -150,11 +162,10 @@ public final class StartupAuditCoverageTest {
                         "premain registered a transformer without literal canRetransform=false");
             }
         }
-        require(!result.isEmpty(), "premain transformer discovery returned an empty inventory");
-        require(registrationCount == result.size(),
-                "premain transformer registrations are not one-to-one with discoverable"
-                        + " transformer policy owners: registrations=" + registrationCount
-                        + ", owners=" + result);
+        require(!result.isEmpty(), "ordered pipeline discovery returned an empty inventory");
+        require(registrationCount == 1,
+                "premain must register exactly one ordered pipeline; registrations="
+                        + registrationCount + ", stages=" + result);
         return new PremainInventory(Set.copyOf(result), registrationCount);
     }
 

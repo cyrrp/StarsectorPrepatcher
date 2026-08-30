@@ -1,38 +1,38 @@
 package com.starsector.prepatcher.agent;
 
-import jdk.internal.org.objectweb.asm.ClassReader;
-import jdk.internal.org.objectweb.asm.ClassWriter;
-import jdk.internal.org.objectweb.asm.Opcodes;
-import jdk.internal.org.objectweb.asm.Type;
-import jdk.internal.org.objectweb.asm.tree.AbstractInsnNode;
-import jdk.internal.org.objectweb.asm.tree.ClassNode;
-import jdk.internal.org.objectweb.asm.tree.FieldInsnNode;
-import jdk.internal.org.objectweb.asm.tree.FieldNode;
-import jdk.internal.org.objectweb.asm.tree.FrameNode;
-import jdk.internal.org.objectweb.asm.tree.InsnList;
-import jdk.internal.org.objectweb.asm.tree.IntInsnNode;
-import jdk.internal.org.objectweb.asm.tree.InsnNode;
-import jdk.internal.org.objectweb.asm.tree.IincInsnNode;
-import jdk.internal.org.objectweb.asm.tree.InvokeDynamicInsnNode;
-import jdk.internal.org.objectweb.asm.tree.JumpInsnNode;
-import jdk.internal.org.objectweb.asm.tree.LabelNode;
-import jdk.internal.org.objectweb.asm.tree.LdcInsnNode;
-import jdk.internal.org.objectweb.asm.tree.LocalVariableNode;
-import jdk.internal.org.objectweb.asm.tree.LookupSwitchInsnNode;
-import jdk.internal.org.objectweb.asm.tree.MethodInsnNode;
-import jdk.internal.org.objectweb.asm.tree.MethodNode;
-import jdk.internal.org.objectweb.asm.tree.MultiANewArrayInsnNode;
-import jdk.internal.org.objectweb.asm.tree.TableSwitchInsnNode;
-import jdk.internal.org.objectweb.asm.tree.TypeInsnNode;
-import jdk.internal.org.objectweb.asm.tree.TryCatchBlockNode;
-import jdk.internal.org.objectweb.asm.tree.VarInsnNode;
-import jdk.internal.org.objectweb.asm.tree.analysis.Analyzer;
-import jdk.internal.org.objectweb.asm.tree.analysis.AnalyzerException;
-import jdk.internal.org.objectweb.asm.tree.analysis.BasicValue;
-import jdk.internal.org.objectweb.asm.tree.analysis.BasicVerifier;
-import jdk.internal.org.objectweb.asm.tree.analysis.Frame;
-import jdk.internal.org.objectweb.asm.tree.analysis.SourceInterpreter;
-import jdk.internal.org.objectweb.asm.tree.analysis.SourceValue;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.FieldNode;
+import org.objectweb.asm.tree.FrameNode;
+import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.IntInsnNode;
+import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.IincInsnNode;
+import org.objectweb.asm.tree.InvokeDynamicInsnNode;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.LocalVariableNode;
+import org.objectweb.asm.tree.LookupSwitchInsnNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.MultiANewArrayInsnNode;
+import org.objectweb.asm.tree.TableSwitchInsnNode;
+import org.objectweb.asm.tree.TypeInsnNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
+import org.objectweb.asm.tree.VarInsnNode;
+import org.objectweb.asm.tree.analysis.Analyzer;
+import org.objectweb.asm.tree.analysis.AnalyzerException;
+import org.objectweb.asm.tree.analysis.BasicValue;
+import org.objectweb.asm.tree.analysis.BasicVerifier;
+import org.objectweb.asm.tree.analysis.Frame;
+import org.objectweb.asm.tree.analysis.SourceInterpreter;
+import org.objectweb.asm.tree.analysis.SourceValue;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -613,6 +613,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
         PrepatcherLog.info("Patched " + className + " structurally: "
                 + String.join(", ", state.appliedDetails) + ", bytes "
                 + classfileBuffer.length + " -> " + state.bytes.length);
+
         return state.bytes;
     }
 
@@ -7691,6 +7692,10 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
         code.add(new JumpInsnNode(Opcodes.IFEQ, rawFallback));
         code.add(new InsnNode(Opcodes.RETURN));
         code.add(rawFallback);
+        // Java 27 verifies byte arrays returned from ClassFileLoadHook even when
+        // legacy verification flags are disabled.  The wrapper has a branch target,
+        // so it must carry the unchanged-locals/empty-stack frame explicitly.
+        code.add(new FrameNode(Opcodes.F_SAME, 0, null, 0, null));
         code.add(new VarInsnNode(Opcodes.ALOAD, 0));
         code.add(new VarInsnNode(Opcodes.ALOAD, 1));
         code.add(new VarInsnNode(Opcodes.ILOAD, 2));
@@ -7713,6 +7718,23 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
                 countOpcode(wrapper, Opcodes.RETURN), 2);
         requireCount("Local Resources tooltip wrapper branches",
                 countOpcode(wrapper, Opcodes.IFEQ), 1);
+
+        JumpInsnNode fallback = null;
+        for (AbstractInsnNode instruction = wrapper.instructions.getFirst();
+             instruction != null; instruction = instruction.getNext()) {
+            if (instruction.getOpcode() == Opcodes.IFEQ) {
+                fallback = (JumpInsnNode) instruction;
+                break;
+            }
+        }
+        AbstractInsnNode frameInstruction = fallback == null
+                ? null : fallback.label.getNext();
+        if (!(frameInstruction instanceof FrameNode frame)
+                || frame.type != Opcodes.F_SAME
+                || (frame.local != null && !frame.local.isEmpty())
+                || (frame.stack != null && !frame.stack.isEmpty())) {
+            throw mismatch("Local Resources raw fallback must begin with an exact F_SAME frame");
+        }
     }
 
     private PatchReport patchEconomyGroupIndexReachEconomy(ClassNode node) {

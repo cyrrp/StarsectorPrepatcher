@@ -19,6 +19,18 @@ public final class EconomyHotpathActualAgentSmokeTest {
     private EconomyHotpathActualAgentSmokeTest() {}
 
     public static void main(String[] args) throws Exception {
+        String localResources = "com.fs.starfarer.api.impl.campaign.submarkets."
+                + "LocalResourcesSubmarketPlugin";
+        Class.forName(localResources, false, ClassLoader.getSystemClassLoader());
+        require("APPLIED".equals(System.getProperty(
+                        "starsector.prepatcher.patchStatus." + localResources
+                                + ".localResourcesNoColdMarketData")),
+                "Local Resources cold-data patch was not applied");
+        require("APPLIED".equals(System.getProperty(
+                        "starsector.prepatcher.patchStatus." + localResources
+                                + ".localResourcesTooltipSnapshot")),
+                "Local Resources tooltip/frame patch was not applied");
+
         Field stateField = ReachEconomy.class.getDeclaredField("spp$econGroupIndexState");
         stateField.setAccessible(true);
         int modifiers = stateField.getModifiers();

@@ -22,11 +22,21 @@ public final class AoTDForkMarkerScannerTest {
             Files.copy(sourceMod.resolve("jars/AoTDToolboxTheory.jar"),
                     aotd.resolve("jars/AoTDToolboxTheory.jar"),
                     StandardCopyOption.REPLACE_EXISTING);
+            Files.createDirectories(aotd.resolve(".build/diagnostic"));
+            Files.copy(sourceMod.resolve("jars/AoTDToolboxTheory.jar"),
+                    aotd.resolve(".build/diagnostic/AoTDToolboxTheory.jar"),
+                    StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(sourceMod.resolve("jars/AoTDToolboxTheory.jar"),
+                    aotd.resolve("AoTDToolboxTheory-backup.jar"),
+                    StandardCopyOption.REPLACE_EXISTING);
 
             AoTDForkMarkerScanner.Result result = AoTDForkMarkerScanner.scan(prepatcher);
             require(result.status() == AoTDForkMarkerScanner.Status.CANDIDATE_FOUND,
                     "expected candidate, got " + result);
             require(result.markerJar() != null, "marker JAR missing");
+            require(result.markerJar().equals(
+                            aotd.resolve("jars/AoTDToolboxTheory.jar")),
+                    "scanner considered an undeclared diagnostic/archive JAR: " + result);
 
             Files.delete(aotd.resolve("jars/AoTDToolboxTheory.jar"));
             result = AoTDForkMarkerScanner.scan(prepatcher);
