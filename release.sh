@@ -74,15 +74,24 @@ fi
 
 printf '%s  %s\n' "$ZIP_SHA256" "$ZIP_NAME" > "$SHA_PATH"
 
-{
-  cat "$NOTES_FILE"
-  printf '\n## Packaging\n\n'
-  printf 'Agent and bootstrap JARs have been rebuilt using the standard release workflow, and `SHA256SUMS.txt` has been regenerated.\n\n'
-  printf 'GitHub release artifact:\n\n'
-  printf '`%s`\n\n' "$ZIP_NAME"
-  printf 'SHA-256:\n\n'
-  printf '```\n%s\n```\n' "$ZIP_SHA256"
-} > "$BODY_PATH"
+# The notes file is a full release-body template. It may contain placeholders
+# {{ZIP_NAME}} and {{ZIP_SHA256}}, which are substituted with the actual values.
+# When no placeholder is present, a standard Packaging section is appended.
+if grep -q '{{ZIP_NAME}}\|{{ZIP_SHA256}}' "$NOTES_FILE"; then
+  sed -e "s#{{ZIP_NAME}}#$ZIP_NAME#g" \
+      -e "s#{{ZIP_SHA256}}#$ZIP_SHA256#g" \
+      "$NOTES_FILE" > "$BODY_PATH"
+else
+  {
+    cat "$NOTES_FILE"
+    printf '\n## Packaging\n\n'
+    printf 'Agent and bootstrap JARs have been rebuilt using the standard release workflow, and `SHA256SUMS.txt` has been regenerated.\n\n'
+    printf 'GitHub release artifact:\n\n'
+    printf '`%s`\n\n' "$ZIP_NAME"
+    printf 'SHA-256:\n\n'
+    printf '```\n%s\n```\n' "$ZIP_SHA256"
+  } > "$BODY_PATH"
+fi
 
 echo "Version:  $VERSION"
 echo "Tag:      $TAG"
