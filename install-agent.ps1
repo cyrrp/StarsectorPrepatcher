@@ -10,6 +10,10 @@ $modFolder = Split-Path $modRoot -Leaf
 $gameRoot = (Resolve-Path (Join-Path $modRoot '..\..')).Path
 $agentJar = Join-Path $modRoot 'agent\StarsectorPrepatcherAgent.jar'
 $agentArg = "-javaagent:../mods/$modFolder/agent/StarsectorPrepatcherAgent.jar"
+$managedAgentTokenPattern = '-javaagent:"?\.\.[\\/]+mods[\\/]+' +
+        [regex]::Escape($modFolder) +
+        '[\\/]+agent[\\/]+StarsectorPrepatcherAgent\.jar"?'
+$managedAgentLinePattern = '(?i)^\s*' + $managedAgentTokenPattern + '\s*$'
 $frAgentArg = '-javaagent:fr.agent.jar'
 $legacyFrLoaderArg = '-Djava.system.class.loader=com.genir.renderer.loaders.AppClassLoader'
 
@@ -106,8 +110,24 @@ $availableTargets = @(
         RequiresClasspath = $false
     }
 )
+$mikohimeGeneratorSpec = $availableTargets | Where-Object Name -eq 'MikohimeGenerator'
+$modernMikohimeGenerator = $false
+if (Test-Path -LiteralPath $mikohimeGeneratorSpec.Path -PathType Leaf) {
+    $generatorProbe = [IO.File]::ReadAllText($mikohimeGeneratorSpec.Path)
+    $modernMikohimeGenerator = $generatorProbe -match
+            '(?im)^:AppendAgentsAndClasspath[ \t]*\r?$' -and
+            $generatorProbe -match '(?im)^set[ \t]+"?OutputFile='
+}
+$mikohimeTargets = if ($modernMikohimeGenerator) {
+    $availableTargets | Where-Object Name -in @('MikohimeSimple', 'MikohimeGenerator')
+} else {
+    $availableTargets | Where-Object Name -like 'Mikohime*'
+}
 if ($Target -eq 'All') {
-    $selectedTargets = $availableTargets
+    $selectedTargets = $availableTargets | Where-Object {
+        -not $modernMikohimeGenerator -or
+        $_.Name -notin @('MikohimeTemplate', 'MikohimeLauncher')
+    }
 } else {
     $requestedNames = $Target -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
     foreach ($name in $requestedNames) {
@@ -119,7 +139,7 @@ if ($Target -eq 'All') {
         switch ($name) {
             'Vanilla' { $availableTargets | Where-Object Name -eq 'Vanilla' }
             'FasterRendering' { $availableTargets | Where-Object Name -eq 'FasterRendering' }
-            'Mikohime' { $availableTargets | Where-Object Name -like 'Mikohime*' }
+            'Mikohime' { $mikohimeTargets }
         }
     }
 }
@@ -127,7 +147,7 @@ if ($Target -eq 'All') {
 function Normalize-MikohimeTemplate {
     param([string] $Content)
     $working = [regex]::Replace($Content,
-            '(?im)^[ \t]*-javaagent:../mods/StarsectorPrepatcher/agent/StarsectorPrepatcherAgent\.jar[ \t]*(?:\r?\n|$)', '')
+            '(?im)^[ \t]*' + $managedAgentTokenPattern + '[ \t]*(?:\r?\n|$)', '')
     $working = [regex]::Replace($working,
             '(?im)^[ \t]*-Dspp\.dump\.campaignState=.*(?:\r?\n|$)', '')
     return $working.TrimEnd("`r", "`n") + "`r`n"
@@ -139,7 +159,9 @@ function Normalize-MikohimeSimple {
     $lines = [Collections.Generic.List[string]]::new()
     foreach ($line in ($Content -split '\r?\n')) {
         if ($line -match '(?i)^\s*-Dspp\.dump\.campaignState=') { continue }
-        if ($line.Trim().Equals($agentArg, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        if ($line -match $managedAgentLinePattern) { continue }
+        if ($line -match '(?i)^\s*--patch-module=java\.base="?\.\.[\\/]+Java28PrepatcherCompat[\\/]+prepatcher-java-base-asm\.jar"?\s*$') { continue }
+        if ($line -match '(?i)^\s*-javaagent:"?\.\.[\\/]+Java28PrepatcherCompat[\\/]+prepatcher-java28-frame-repair-agent\.jar"?\s*$') { continue }
         if ($line.Trim().Equals($frAgentArg, [StringComparison]::OrdinalIgnoreCase)) { continue }
         if ($fasterRenderingLayout -eq 'Agent' -and
                 $line.Trim().Equals($legacyFrLoaderArg, [StringComparison]::OrdinalIgnoreCase)) { continue }
@@ -183,8 +205,15 @@ function Normalize-MikohimeSimple {
 function Update-MikohimeGenerator {
     param([string] $Content)
     $lineBreak = if ($Content.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $isModernGenerator = $Content -match '(?im)^:AppendAgentsAndClasspath[ \t]*\r?$' -and
+            $Content -match '(?im)^set[ \t]+"?OutputFile='
+    $hasObsoleteCompat = $Content -match '(?i)Java28PrepatcherCompat|PrepatcherFrameRepairAgent'
     $working = [regex]::Replace($Content,
             '(?im)^set SPP_AGENT=.*(?:\r?\n|$)', '')
+    $working = [regex]::Replace($working,
+            '(?im)^[ \t]*echo[ \t]+%SPP_AGENT%[ \t]*>>[ \t]*(?:"?Miko_Simple\.txt"?|"?%OutputFile%"?)[ \t]*(?:\r?\n|$)', '')
+    $working = [regex]::Replace($working,
+            '(?im)^[ \t]*if[ \t]+defined[ \t]+SPP_AGENT[ \t]+exit[ \t]+/b[ \t]+0[ \t]*(?:\r?\n|$)', '')
     $working = [regex]::Replace($working,
             '(?im)^IF EXIST "starsector-core\\fr\.agent\.jar" set FR1=.*(?:\r?\n|$)', '')
     $frGeneratorArg = switch ($fasterRenderingLayout) {
@@ -202,21 +231,117 @@ function Update-MikohimeGenerator {
     if ($working -notmatch '(?im)^set SPP_AGENT=') {
         throw 'Could not update the Faster Rendering variables in Configure_Me.cmd.'
     }
-    $setupPattern = '(?ims)^IF %FR_status% == Enabled \(\s*echo Addons : Fast Rendering>>Miko_Info\.txt\s*echo %FR1%>>Miko_Simple\.txt\s*echo %FR2%>>Miko_Simple\.txt\s*\) else \(\s*echo %A46%>>Miko_Simple\.txt\s*\)'
-    $setupReplacement = 'IF %FR_status% == Enabled (' + $lineBreak +
-            'echo Addons : Fast Rendering>>Miko_Info.txt' + $lineBreak +
-            'echo %FR1%>>Miko_Simple.txt' + $lineBreak +
-            'echo %SPP_AGENT%>>Miko_Simple.txt' + $lineBreak +
-            'echo %FR2%>>Miko_Simple.txt' + $lineBreak +
-            ') else (' + $lineBreak +
-            'echo %SPP_AGENT%>>Miko_Simple.txt' + $lineBreak +
-            'echo %A46%>>Miko_Simple.txt' + $lineBreak + ')'
-    $updated = [regex]::Replace($working, $setupPattern,
-            [Text.RegularExpressions.MatchEvaluator]{ param($match) $setupReplacement }, 1)
-    if ($updated -eq $working -and $working -notmatch 'echo %SPP_AGENT%>>Miko_Simple\.txt') {
+
+    if ($isModernGenerator) {
+        # OutputFile-based generators may have an optional integration for the
+        # retired Java28PrepatcherCompat two-agent package. Keep that path
+        # dormant while this installer is active and emit the current single
+        # agent directly. Detection is structural and has no version gate.
+        $appendAnchor = '(?im)^(?<indent>[ \t]*)if[ \t]+/I[ \t]+"?%FR_status%"?[ \t]*==[ \t]*"?Enabled"?[ \t]+echo[ \t]+%FR1%[ \t]*>>[ \t]*"?%OutputFile%"?[ \t]*\r?$'
+        $appendMatches = [regex]::Matches($working, $appendAnchor)
+        if ($appendMatches.Count -ne 1) {
+            throw 'Could not update agent ordering in Configure_Me.cmd.'
+        }
+        $append = $appendMatches[0]
+        $appendReplacement = $append.Value.TrimEnd("`r") + $lineBreak + $append.Groups['indent'].Value +
+                'echo %SPP_AGENT%>>"%OutputFile%"'
+        $working = $working.Substring(0, $append.Index) + $appendReplacement +
+                $working.Substring($append.Index + $append.Length)
+
+        $choiceLabel = [regex]::Matches($working, '(?im)^:ChoosePrepatcher[ \t]*\r?$')
+        if ($choiceLabel.Count -gt 1 -or
+                ($choiceLabel.Count -eq 0 -and $hasObsoleteCompat)) {
+            throw 'Could not disable the obsolete Prepatcher compatibility prompt in Configure_Me.cmd.'
+        }
+        if ($choiceLabel.Count -eq 1) {
+            $choice = $choiceLabel[0]
+            $choiceReplacement = $choice.Value.TrimEnd("`r") + $lineBreak +
+                    'if defined SPP_AGENT exit /b 0'
+            $working = $working.Substring(0, $choice.Index) + $choiceReplacement +
+                    $working.Substring($choice.Index + $choice.Length)
+        }
+
+        $launcherPattern = '(?im)^(?<indent>[ \t]*)echo[ \t]+"?\.\.\\%JavaPath%\\bin\\java\.exe"?[ \t]+@\.\.\\Miko_Simple\.txt[ \t]*>>[ \t]*"?%LauncherOutputFile%"?[ \t]*\r?\n[ \t]*echo[ \t]+if[ \t]+(?:%errorlevel%[ \t]+neq[ \t]+0|errorlevel[ \t]+1)[ \t]+pause[ \t]*>>[ \t]*"?%LauncherOutputFile%"?[ \t]*\r?$'
+        $launcherMatches = [regex]::Matches($working, $launcherPattern)
+        if ($launcherMatches.Count -eq 1) {
+            $launcher = $launcherMatches[0]
+            $indent = $launcher.Groups['indent'].Value
+            $launcherReplacement = $indent + 'echo "..\%JavaPath%\bin\java.exe" @..\Miko_Simple.txt>>"%LauncherOutputFile%"' + $lineBreak +
+                    $indent + 'echo set "MIKO_JAVA_EXIT=%%ERRORLEVEL%%">>"%LauncherOutputFile%"' + $lineBreak +
+                    $indent + 'echo if not "%%MIKO_JAVA_EXIT%%"=="0" pause>>"%LauncherOutputFile%"' + $lineBreak +
+                    $indent + 'echo exit /b %%MIKO_JAVA_EXIT%%>>"%LauncherOutputFile%"'
+            $working = $working.Substring(0, $launcher.Index) + $launcherReplacement +
+                    $working.Substring($launcher.Index + $launcher.Length)
+        } elseif ($launcherMatches.Count -ne 0 -or $working -notmatch '(?im)MIKO_JAVA_EXIT') {
+            throw 'Could not update Miko_Rouge.bat generation in Configure_Me.cmd.'
+        }
+
+        $managedOutputEchoes = [regex]::Matches($working,
+                '(?im)^[ \t]*echo[ \t]+%SPP_AGENT%[ \t]*>>[ \t]*"?%OutputFile%"?[ \t]*\r?$')
+        $managedGuards = [regex]::Matches($working,
+                '(?im)^[ \t]*if[ \t]+defined[ \t]+SPP_AGENT[ \t]+exit[ \t]+/b[ \t]+0[ \t]*\r?$')
+        $expectedGuardCount = if ($choiceLabel.Count -eq 1) { 1 } else { 0 }
+        $appendSections = [regex]::Matches($working,
+                '(?ims)^:AppendAgentsAndClasspath[ \t]*\r?\n(?<body>.*?)^exit[ \t]+/b[ \t]*\r?$')
+        $appendBody = if ($appendSections.Count -eq 1) {
+            $appendSections[0].Groups['body'].Value
+        } else { '' }
+        $frIndex = $appendBody.IndexOf('%FR1%', [StringComparison]::OrdinalIgnoreCase)
+        $sppIndex = $appendBody.IndexOf('%SPP_AGENT%', [StringComparison]::OrdinalIgnoreCase)
+        $frClasspathIndex = $appendBody.IndexOf('%FR2%', [StringComparison]::OrdinalIgnoreCase)
+        $plainClasspathIndex = $appendBody.IndexOf('%A46%', [StringComparison]::OrdinalIgnoreCase)
+        if ($managedOutputEchoes.Count -ne 1 -or
+                $managedGuards.Count -ne $expectedGuardCount -or
+                $frIndex -lt 0 -or $sppIndex -le $frIndex -or
+                $frClasspathIndex -le $sppIndex -or $plainClasspathIndex -le $sppIndex -or
+                $working -notmatch '(?im)^[ \t]*echo exit /b %%MIKO_JAVA_EXIT%%>>"%LauncherOutputFile%"[ \t]*\r?$') {
+            throw 'Could not validate the modern Configure_Me.cmd integration.'
+        }
+        return $working.TrimEnd("`r", "`n") + $lineBreak
+    }
+
+    # Mikohime releases differ in whitespace, quoting and the extra commands in
+    # these branches. Match the control-flow boundary and its semantic output
+    # anchors instead of replacing one complete release-specific block.
+    $setupPattern = '(?ims)^(?<if>[ \t]*IF[ \t]+(?:/I[ \t]+)?(?:"?%FR_status%"?[ \t]*==[ \t]*"?Enabled"?|"?Enabled"?[ \t]*==[ \t]*"?%FR_status%"?)[ \t]*\([ \t]*\r?\n)(?<enabled>.*?)(?<else>^[ \t]*\)[ \t]*else[ \t]*\([ \t]*\r?\n)(?<disabled>.*?)(?<end>^[ \t]*\)[ \t]*\r?$)'
+    $setupMatches = [regex]::Matches($working, $setupPattern)
+    if ($setupMatches.Count -ne 1) {
         throw 'Could not update agent ordering in Configure_Me.cmd.'
     }
-    $working = $updated
+    $setupMatch = $setupMatches[0]
+    $echoPattern = '(?im)^(?<indent>[ \t]*)echo[ \t]+%{0}%[ \t]*>>[ \t]*"?Miko_Simple\.txt"?[ \t]*\r?$'
+    $fr1Matches = [regex]::Matches($setupMatch.Groups['enabled'].Value,
+            ($echoPattern -f 'FR1'))
+    $fr2Matches = [regex]::Matches($setupMatch.Groups['enabled'].Value,
+            ($echoPattern -f 'FR2'))
+    $a46Matches = [regex]::Matches($setupMatch.Groups['disabled'].Value,
+            ($echoPattern -f 'A46'))
+    if ($fr1Matches.Count -ne 1 -or $fr2Matches.Count -ne 1 -or
+            $a46Matches.Count -ne 1 -or
+            $fr1Matches[0].Index -ge $fr2Matches[0].Index) {
+        throw 'Could not update agent ordering in Configure_Me.cmd.'
+    }
+    $enabled = $setupMatch.Groups['enabled'].Value
+    $fr2 = $fr2Matches[0]
+    $enabled = $enabled.Substring(0, $fr2.Index) +
+            $fr2.Groups['indent'].Value + 'echo %SPP_AGENT%>>Miko_Simple.txt' +
+            $lineBreak + $enabled.Substring($fr2.Index)
+    $disabled = $setupMatch.Groups['disabled'].Value
+    $a46 = $a46Matches[0]
+    $disabled = $disabled.Substring(0, $a46.Index) +
+            $a46.Groups['indent'].Value + 'echo %SPP_AGENT%>>Miko_Simple.txt' +
+            $lineBreak + $disabled.Substring($a46.Index)
+    $setupReplacement = $setupMatch.Groups['if'].Value + $enabled +
+            $setupMatch.Groups['else'].Value + $disabled +
+            $setupMatch.Groups['end'].Value
+    $working = $working.Substring(0, $setupMatch.Index) + $setupReplacement +
+            $working.Substring($setupMatch.Index + $setupMatch.Length)
+
+    $managedEchoes = [regex]::Matches($working,
+            '(?im)^[ \t]*echo[ \t]+%SPP_AGENT%[ \t]*>>[ \t]*"?Miko_Simple\.txt"?[ \t]*\r?$')
+    if ($managedEchoes.Count -ne 2) {
+        throw 'Could not update agent ordering in Configure_Me.cmd.'
+    }
     $launcherPattern = '(?im)^echo \.\.\\%JavaPath%\\bin\\java\.exe @\.\.\\Miko_Simple\.txt>>Miko_Rouge\.bat\s*\r?\necho if .*?pause>>Miko_Rouge\.bat'
     $launcherReplacement = 'echo ..\%JavaPath%\bin\java.exe @..\Miko_Simple.txt>>Miko_Rouge.bat' + $lineBreak +
             'echo set "MIKO_JAVA_EXIT=%%ERRORLEVEL%%">>Miko_Rouge.bat' + $lineBreak +
@@ -239,7 +364,7 @@ function Update-MikohimeLauncher {
             '(?im)^if (?:not )?.*pause[ \t]*(?:\r?\n|$)', '')
     $working = [regex]::Replace($working,
             '(?im)^exit /b (?:%MIKO_JAVA_EXIT%|%ERRORLEVEL%)[ \t]*(?:\r?\n|$)', '')
-    $javaPattern = '(?im)^(.*\\bin\\java\.exe @\.\.\\Miko_Simple\.txt)[ \t]*\r?$'
+    $javaPattern = '(?im)^(.*\\bin\\java\.exe"?[ \t]+@\.\.\\Miko_Simple\.txt)[ \t]*\r?$'
     $match = [regex]::Match($working, $javaPattern)
     if (-not $match.Success) { throw 'Could not find the Java invocation in Miko_Rouge.bat.' }
     $replacement = $match.Groups[1].Value + $lineBreak +

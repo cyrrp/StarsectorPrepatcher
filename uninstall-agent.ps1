@@ -9,6 +9,10 @@ $modRoot = (Resolve-Path $PSScriptRoot).Path
 $modFolder = Split-Path $modRoot -Leaf
 $gameRoot = (Resolve-Path (Join-Path $modRoot '..\..')).Path
 $agentArg = "-javaagent:../mods/$modFolder/agent/StarsectorPrepatcherAgent.jar"
+$managedAgentTokenPattern = '-javaagent:"?\.\.[\\/]+mods[\\/]+' +
+        [regex]::Escape($modFolder) +
+        '[\\/]+agent[\\/]+StarsectorPrepatcherAgent\.jar"?'
+$managedAgentLinePattern = '(?i)^\s*' + $managedAgentTokenPattern + '\s*$'
 $availableTargets = @(
     [pscustomobject]@{
         Name = 'Vanilla'
@@ -36,8 +40,23 @@ $availableTargets = @(
         IsArgumentFile = $false
     }
 )
+$mikohimeGeneratorSpec = $availableTargets | Where-Object Name -eq 'MikohimeGenerator'
+$modernMikohimeGenerator = $false
+if (Test-Path -LiteralPath $mikohimeGeneratorSpec.Path -PathType Leaf) {
+    $generatorProbe = [IO.File]::ReadAllText($mikohimeGeneratorSpec.Path)
+    $modernMikohimeGenerator = $generatorProbe -match
+            '(?im)^:AppendAgentsAndClasspath[ \t]*\r?$' -and
+            $generatorProbe -match '(?im)^set[ \t]+"?OutputFile='
+}
+$mikohimeTargets = if ($modernMikohimeGenerator) {
+    $availableTargets | Where-Object Name -in @('MikohimeSimple', 'MikohimeGenerator')
+} else {
+    $availableTargets | Where-Object Name -like 'Mikohime*'
+}
 if ($Target -eq 'All') {
-    $selectedTargets = $availableTargets
+    $selectedTargets = $availableTargets | Where-Object {
+        -not $modernMikohimeGenerator -or $_.Name -ne 'MikohimeTemplate'
+    }
 } else {
     $requestedNames = $Target -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
     foreach ($name in $requestedNames) {
@@ -49,7 +68,7 @@ if ($Target -eq 'All') {
         switch ($name) {
             'Vanilla' { $availableTargets | Where-Object Name -eq 'Vanilla' }
             'FasterRendering' { $availableTargets | Where-Object Name -eq 'FasterRendering' }
-            'Mikohime' { $availableTargets | Where-Object Name -like 'Mikohime*' }
+            'Mikohime' { $mikohimeTargets }
         }
     }
 }
@@ -64,7 +83,9 @@ $plans = foreach ($targetSpec in $selectedTargets) {
         $newContent = [regex]::Replace($content,
                 '(?im)^set SPP_AGENT=.*(?:\r?\n|$)', '')
         $newContent = [regex]::Replace($newContent,
-                '(?im)^echo %SPP_AGENT%>>Miko_Simple\.txt[ \t]*(?:\r?\n|$)', '')
+                '(?im)^[ \t]*echo[ \t]+%SPP_AGENT%[ \t]*>>[ \t]*(?:"?Miko_Simple\.txt"?|"?%OutputFile%"?)[ \t]*(?:\r?\n|$)', '')
+        $newContent = [regex]::Replace($newContent,
+                '(?im)^[ \t]*if[ \t]+defined[ \t]+SPP_AGENT[ \t]+exit[ \t]+/b[ \t]+0[ \t]*(?:\r?\n|$)', '')
         $newContent = $newContent.TrimEnd("`r", "`n") + "`r`n"
         [pscustomobject]@{
             TargetSpec = $targetSpec
@@ -75,7 +96,8 @@ $plans = foreach ($targetSpec in $selectedTargets) {
     }
     $pattern = '(?i)(?<!\S)' + [regex]::Escape($agentArg) + '(?=\s|$)[ \t]*'
     if ($targetSpec.IsArgumentFile) {
-        $managedLinePattern = '(?im)^[ \t]*' + [regex]::Escape($agentArg) + '[ \t]*(?:\r?\n|$)'
+        $managedLinePattern = '(?im)^[ \t]*' +
+                $managedAgentTokenPattern + '[ \t]*(?:\r?\n|$)'
         $newContent = [regex]::Replace($content, $managedLinePattern, '')
         $newContent = [regex]::Replace($newContent, $pattern, '')
     } else {

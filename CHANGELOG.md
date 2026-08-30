@@ -43,7 +43,10 @@
   совместимой с Java 17.
 - Установщик Miko различает FR по структуре JAR, сохраняет порядок agents/classpath, удаляет
   временный `spp.dump.campaignState`, обновляет генератор и сохраняет настоящий exit code Java в
-  `Miko_Rouge.bat`.
+  `Miko_Rouge.bat`. Поддерживаются как варианты старого блока `FR_status`, так и новые генераторы
+  с `%OutputFile%` без привязки к номеру версии; путь устаревшего двух-agent пакета
+  `Java28PrepatcherCompat` остаётся выключен, а его старые `--patch-module` и frame-repair agent
+  удаляются из `Miko_Simple.txt`.
 - AoTD marker scanner читает только JAR, объявленные `mod_info.json`, и игнорирует `.build`,
   diagnostic и архивные копии.
 
