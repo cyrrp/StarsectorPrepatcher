@@ -104,7 +104,7 @@ fi
   cd "$MOD_ROOT"
   shopt -s nullglob
   for top_level in * .[!.]* ..?*; do
-    if [[ -f "$top_level" && "$top_level" != 'SHA256SUMS.txt' ]]; then
+    if [[ -f "$top_level" && "$top_level" != 'SHA256SUMS.txt' && "$top_level" != '.git' ]]; then
       printf '%s\n' "$top_level"
     fi
   done

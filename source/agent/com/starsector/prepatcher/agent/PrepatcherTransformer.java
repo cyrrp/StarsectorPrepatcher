@@ -339,7 +339,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       }
       case BASE_CAMPAIGN_ENTITY -> {
         apply(state, "entityScriptSnapshotReuse", config.entityScriptSnapshotReuse,
-            this::patchEntityScriptSnapshotReuse);
+            structured(new EntityScriptSnapshotReuse()));
         apply(state, "marketScheduler", config.marketScheduler, this::patchMarketSchedulerEntitySource);
       }
       case MEMORY -> apply(state, "emptyMemoryAdvanceFastPath", config.emptyMemoryAdvanceFastPath,
@@ -377,7 +377,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       case BASE_INDUSTRY -> {
         apply(state, AOTD_DEFICIT_PATCH_ID, config.aotdCleanDeficitPath, this::patchAoTDCleanDeficitPath);
         apply(state, "marketNoOpCallbacks", config.marketNoOpCallbacks && config.marketNoOpIndustryAuditFrames > 0,
-            this::patchBaseIndustryDormantFastPath);
+            structured(new BaseIndustryDormantFastPath(config.marketNoOpIndustryAuditFrames)));
         apply(state, "marketConstructionMutationBarriers", config.marketScheduler,
             this::patchBaseIndustryConstructionMutationBarriers);
       }
@@ -399,26 +399,39 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
         apply(state, "commRelaySystemIndex", config.commRelaySystemIndex, this::patchCommRelaySystemIndex);
       case SHIP -> apply(state, "shipAdvanceScratch", config.shipAdvanceScratch, this::patchShipAdvanceScratch);
       case DYNAMIC_PARTICLE_GROUP ->
-        apply(state, "particleCleanup", config.particleCleanup, this::patchDynamicParticleCleanup);
+        apply(state, "particleCleanup", config.particleCleanup, structured(new DynamicParticleCleanup()));
       case LOADING_UTILS -> {
-        apply(state, "loadingTextReader", config.loadingTextReader, this::patchLoadingTextReader);
-        apply(state, "startupLogAggregation", config.startupLogAggregation, this::patchLoadingUtilsStartupLogs);
+        apply(state, "loadingTextReader", config.loadingTextReader, structured(new LoadingTextReader()));
+        apply(state, "startupLogAggregation", config.startupLogAggregation, structured(new LoadingUtilsStartupLogs()));
       }
       case SCRIPT_STORE_RUNNER ->
-        apply(state, "startupLogAggregation", config.startupLogAggregation, this::patchScriptStoreStartupLogs);
+        apply(state, "startupLogAggregation", config.startupLogAggregation, structured(new StartupInfoBlockSuppression(
+            "] already loaded (perhaps from jar file, or due to a reference from another class), skipping compilation.",
+            1, 2, true, "alreadyLoadedScriptInfo")));
       case RULES -> {
-        apply(state, "startupLogAggregation", config.startupLogAggregation, this::patchRulesStartupLogs);
+        apply(state, "startupLogAggregation", config.startupLogAggregation,
+            structured(new StartupInfoBlockSuppression("Loading rule: ", 1, 3, true, "perRuleInfo")));
         apply(state, "rulesLiteralParser", config.rulesLiteralParser, this::patchRulesLiteralParser);
       }
       case SPEC_STORE ->
-        apply(state, "startupLogAggregation", config.startupLogAggregation, this::patchSpecStoreStartupLogs);
-      case TEXTURE_LOADER ->
-        apply(state, "startupLogAggregation", config.startupLogAggregation, this::patchTextureStartupLogs);
-      case SOUND -> apply(state, "startupLogAggregation", config.startupLogAggregation, this::patchSoundStartupLogs);
+        apply(state, "startupLogAggregation", config.startupLogAggregation, structured(new SpecStoreStartupLogs()));
+      case TEXTURE_LOADER -> apply(state, "startupLogAggregation", config.startupLogAggregation,
+          structured(new StartupInfoBlockSuppression("Cleaned buffer for texture %s (using reflection)", 1, 5, true,
+              "textureCleanupInfo")));
+      case SOUND -> {
+        // sound.Sound is parent-loaded by Faster Rendering and cannot resolve
+        // the typed runtime installed in FR's child system loader. Removing
+        // this pure INFO block inline preserves the optimization without a
+        // cross-loader helper call. The structural marker remains the source
+        // of ownership/idempotency truth; only the optional runtime counter is
+        // intentionally absent for this one parent-owned target.
+        apply(state, "startupLogAggregation", config.startupLogAggregation,
+            structured(new StartupInfoBlockSuppression("Loading sound [", 1, 6, false, "soundLoadInfo")));
+      }
       case PROGRESS_INPUT -> apply(state, "saveLoadProgressThrottle", config.saveLoadProgressThrottle,
-          node -> patchSaveLoadProgressThrottle(node, "super"));
+          structured(new SaveLoadProgressThrottle("super")));
       case PROGRESS_OUTPUT -> apply(state, "saveLoadProgressThrottle", config.saveLoadProgressThrottle,
-          node -> patchSaveLoadProgressThrottle(node, "o00000"));
+          structured(new SaveLoadProgressThrottle("o00000")));
       case CAMPAIGN_GAME_MANAGER -> {
         apply(state, SAVE_METHOD_PLAN_PATCH_ID, saveMethodPlanEnabled(), this::patchSaveMethodPlan);
         // The output-chain allocation rewrite is optional and deliberately
@@ -789,127 +802,206 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
   // Startup loading and save/load
   // ---------------------------------------------------------------------
 
-  private PatchReport patchLoadingTextReader(ClassNode node) {
-    MethodNode method = requireMethod(node, "super", "(Ljava/io/InputStream;)Ljava/lang/String;");
-    int hooks = countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "readUtf8Normalized",
-        "(Ljava/io/InputStream;)Ljava/lang/String;");
-    int buffers = 0;
-    int oneMiB = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof IntInsnNode array && array.getOpcode() == Opcodes.NEWARRAY && array.operand == Opcodes.T_BYTE)
-        buffers++;
-      if (insn instanceof LdcInsnNode ldc && Integer.valueOf(1_048_576).equals(ldc.cst)) oneMiB++;
+  private static final class LoadingTextReader implements StructuredPatch<LoadingTextReader.Plan> {
+    private record Plan(MethodNode method) {
     }
-    int stringBuffers = countCalls(method, Opcodes.INVOKESPECIAL, "java/lang/StringBuffer", "<init>", "()V");
-    int replaceAll = countCalls(method, Opcodes.INVOKEVIRTUAL, "java/lang/String", "replaceAll",
-        "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
-    if (hooks == 1 && buffers == 0 && oneMiB == 0 && stringBuffers == 0 && replaceAll == 0) {
-      throw already("streaming UTF-8 text reader postcondition matches");
+
+    @Override
+    public Match<Plan> match(ClassNode node) {
+      MethodNode method = requireMethod(node, "super", "(Ljava/io/InputStream;)Ljava/lang/String;");
+      int hooks = countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "readUtf8Normalized",
+          "(Ljava/io/InputStream;)Ljava/lang/String;");
+      int buffers = 0;
+      int oneMiB = 0;
+      for (AbstractInsnNode insn : method.instructions.toArray()) {
+        if (insn instanceof IntInsnNode array && array.getOpcode() == Opcodes.NEWARRAY
+            && array.operand == Opcodes.T_BYTE)
+          buffers++;
+        if (insn instanceof LdcInsnNode ldc && Integer.valueOf(1_048_576).equals(ldc.cst)) oneMiB++;
+      }
+      int stringBuffers = countCalls(method, Opcodes.INVOKESPECIAL, "java/lang/StringBuffer", "<init>", "()V");
+      int replaceAll = countCalls(method, Opcodes.INVOKEVIRTUAL, "java/lang/String", "replaceAll",
+          "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+      if (hooks == 1 && buffers == 0 && oneMiB == 0 && stringBuffers == 0 && replaceAll == 0) {
+        return Match.alreadyApplied("streaming UTF-8 text reader postcondition matches");
+      }
+      requireCount("text reader hook", hooks, 0);
+      requireCount("text reader byte-array allocation", buffers, 1);
+      requireCount("text reader 1 MiB constant", oneMiB, 1);
+      requireCount("text reader StringBuffer", stringBuffers, 1);
+      requireCount("text reader CR regex", replaceAll, 1);
+      requireOriginalLoadingTextReaderShape(method);
+      return Match.plan(new Plan(method));
     }
-    requireCount("text reader hook", hooks, 0);
-    requireCount("text reader byte-array allocation", buffers, 1);
-    requireCount("text reader 1 MiB constant", oneMiB, 1);
-    requireCount("text reader StringBuffer", stringBuffers, 1);
-    requireCount("text reader CR regex", replaceAll, 1);
-    requireOriginalLoadingTextReaderShape(method);
 
-    method.instructions.clear();
-    method.tryCatchBlocks.clear();
-    if (method.localVariables != null) method.localVariables.clear();
-    if (method.visibleLocalVariableAnnotations != null) method.visibleLocalVariableAnnotations.clear();
-    if (method.invisibleLocalVariableAnnotations != null) method.invisibleLocalVariableAnnotations.clear();
-    method.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
-    method.instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "readUtf8Normalized",
-        "(Ljava/io/InputStream;)Ljava/lang/String;", false));
-    method.instructions.add(new InsnNode(Opcodes.ARETURN));
-    method.maxLocals = 1;
-    method.maxStack = 1;
+    @Override
+    public PatchReport mutate(Plan plan) {
+      MethodNode method = plan.method();
+      method.instructions.clear();
+      method.tryCatchBlocks.clear();
+      if (method.localVariables != null) method.localVariables.clear();
+      if (method.visibleLocalVariableAnnotations != null) method.visibleLocalVariableAnnotations.clear();
+      if (method.invisibleLocalVariableAnnotations != null) method.invisibleLocalVariableAnnotations.clear();
+      method.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+      method.instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "readUtf8Normalized",
+          "(Ljava/io/InputStream;)Ljava/lang/String;", false));
+      method.instructions.add(new InsnNode(Opcodes.ARETURN));
+      method.maxLocals = 1;
+      method.maxStack = 1;
 
-    PatchReport report = new PatchReport();
-    report.add("streamingUtf8Reader", 1);
-    return report;
-  }
-
-  private PatchReport patchLoadingUtilsStartupLogs(ClassNode node) {
-    int jsonSites = countStringConstants(node, "Loading JSON from [");
-    int csvSites = countStringConstants(node, "Loading CSV data from [");
-    int jsonHooks = countCategoryHooks(node, "startupLogSuppressed", "(I)V", 0);
-    int csvHooks = countCategoryHooks(node, "startupLogSuppressed", "(I)V", 1);
-    if (jsonSites == 0 && csvSites == 0 && jsonHooks == 2 && csvHooks == 3) {
-      throw already("LoadingUtils startup INFO suppression postcondition matches");
+      PatchReport report = new PatchReport();
+      report.add("streamingUtf8Reader", 1);
+      return report;
     }
-    requireCount("LoadingUtils JSON INFO literals", jsonSites, 2);
-    requireCount("LoadingUtils CSV INFO literals", csvSites, 3);
-    requireCount("LoadingUtils JSON suppression hooks", jsonHooks, 0);
-    requireCount("LoadingUtils CSV suppression hooks", csvHooks, 0);
-    int json = suppressExactInfoBlocks(node, "Loading JSON from [", 2, 0);
-    int csv = suppressExactInfoBlocks(node, "Loading CSV data from [", 3, 1);
-    PatchReport report = new PatchReport();
-    report.add("jsonInfoBlocks", json);
-    report.add("csvInfoBlocks", csv);
-    return report;
-  }
 
-  private PatchReport patchScriptStoreStartupLogs(ClassNode node) {
-    int count = suppressExactInfoBlocks(node,
-        "] already loaded (perhaps from jar file, or due to a reference from another class), skipping compilation.", 1,
-        2);
-    PatchReport report = new PatchReport();
-    report.add("alreadyLoadedScriptInfo", count);
-    return report;
-  }
-
-  private PatchReport patchRulesStartupLogs(ClassNode node) {
-    int count = suppressExactInfoBlocks(node, "Loading rule: ", 1, 3);
-    PatchReport report = new PatchReport();
-    report.add("perRuleInfo", count);
-    return report;
-  }
-
-  private PatchReport patchSpecStoreStartupLogs(ClassNode node) {
-    List<MethodInsnNode> originals = new ArrayList<>();
-    for (MethodNode method : node.methods) {
-      originals
-          .addAll(calls(method, Opcodes.INVOKEVIRTUAL, "org/apache/log4j/Logger", "info", "(Ljava/lang/Object;)V"));
+    @Override
+    public void verify(Plan plan, ClassNode node) {
+      requireCount("text reader hook", countCalls(plan.method(), Opcodes.INVOKESTATIC, HOOKS, "readUtf8Normalized",
+          "(Ljava/io/InputStream;)Ljava/lang/String;"), 1);
     }
-    int hooks = countCategoryHooks(node, "suppressStartupInfo", "(Ljava/lang/Object;Ljava/lang/Object;I)V", 4);
-    if (originals.isEmpty() && hooks == 53) { throw already("SpecStore INFO suppression postcondition matches"); }
-    requireCount("SpecStore Logger.info sites", originals.size(), 53);
-    requireCount("SpecStore suppression hooks", hooks, 0);
-    for (MethodInsnNode call : originals) {
-      MethodNode owner = findMethod(node, call);
-      // The logger receiver and already-built message remain on the stack.
-      // Add only the category argument immediately before the replacement call.
-      owner.instructions.insertBefore(call, new LdcInsnNode(4));
-      call.owner = HOOKS;
-      call.name = "suppressStartupInfo";
-      call.desc = "(Ljava/lang/Object;Ljava/lang/Object;I)V";
-      call.setOpcode(Opcodes.INVOKESTATIC);
-      call.itf = false;
+  }
+
+  private static final class LoadingUtilsStartupLogs implements StructuredPatch<LoadingUtilsStartupLogs.Plan> {
+    private record Plan(List<LogBlock> jsonBlocks, List<LogBlock> csvBlocks) {
     }
-    PatchReport report = new PatchReport();
-    report.add("specInfoCalls", originals.size());
-    return report;
+
+    @Override
+    public Match<Plan> match(ClassNode node) {
+      int jsonSites = countStringConstants(node, "Loading JSON from [");
+      int csvSites = countStringConstants(node, "Loading CSV data from [");
+      int jsonHooks = countCategoryHooks(node, "startupLogSuppressed", "(I)V", 0);
+      int csvHooks = countCategoryHooks(node, "startupLogSuppressed", "(I)V", 1);
+      if (jsonSites == 0 && csvSites == 0 && jsonHooks == 2 && csvHooks == 3) {
+        return Match.alreadyApplied("LoadingUtils startup INFO suppression postcondition matches");
+      }
+      requireCount("LoadingUtils JSON INFO literals", jsonSites, 2);
+      requireCount("LoadingUtils CSV INFO literals", csvSites, 3);
+      requireCount("LoadingUtils JSON suppression hooks", jsonHooks, 0);
+      requireCount("LoadingUtils CSV suppression hooks", csvHooks, 0);
+      List<LogBlock> json = startupInfoBlockPlans(node, "Loading JSON from [");
+      List<LogBlock> csv = startupInfoBlockPlans(node, "Loading CSV data from [");
+      requireCount("startup INFO blocks for Loading JSON from [", json.size(), 2);
+      requireCount("startup INFO blocks for Loading CSV data from [", csv.size(), 3);
+      return Match.plan(new Plan(json, csv));
+    }
+
+    @Override
+    public PatchReport mutate(Plan plan) {
+      suppressStartupInfoBlocks(plan.jsonBlocks(), 0, true);
+      suppressStartupInfoBlocks(plan.csvBlocks(), 1, true);
+      PatchReport report = new PatchReport();
+      report.add("jsonInfoBlocks", plan.jsonBlocks().size());
+      report.add("csvInfoBlocks", plan.csvBlocks().size());
+      return report;
+    }
+
+    @Override
+    public void verify(Plan plan, ClassNode node) {
+      requireCount("LoadingUtils JSON INFO literals", countStringConstants(node, "Loading JSON from ["), 0);
+      requireCount("LoadingUtils CSV INFO literals", countStringConstants(node, "Loading CSV data from ["), 0);
+      requireCount("LoadingUtils JSON suppression hooks", countCategoryHooks(node, "startupLogSuppressed", "(I)V", 0),
+          2);
+      requireCount("LoadingUtils CSV suppression hooks", countCategoryHooks(node, "startupLogSuppressed", "(I)V", 1),
+          3);
+    }
   }
 
-  private PatchReport patchTextureStartupLogs(ClassNode node) {
-    int count = suppressExactInfoBlocks(node, "Cleaned buffer for texture %s (using reflection)", 1, 5);
-    PatchReport report = new PatchReport();
-    report.add("textureCleanupInfo", count);
-    return report;
+  private static final class StartupInfoBlockSuppression implements StructuredPatch<StartupInfoBlockSuppression.Plan> {
+    private final String literal;
+    private final int expected;
+    private final int category;
+    private final boolean emitRuntimeCounter;
+    private final String reportLabel;
+
+    StartupInfoBlockSuppression(String literal, int expected, int category, boolean emitRuntimeCounter,
+        String reportLabel) {
+      this.literal = literal;
+      this.expected = expected;
+      this.category = category;
+      this.emitRuntimeCounter = emitRuntimeCounter;
+      this.reportLabel = reportLabel;
+    }
+
+    private record Plan(List<LogBlock> blocks) {
+    }
+
+    @Override
+    public Match<Plan> match(ClassNode node) {
+      List<LogBlock> blocks = startupInfoBlockPlans(node, literal);
+      int hooks = countCategoryHooks(node, "startupLogSuppressed", "(I)V", category);
+      int expectedHooks = emitRuntimeCounter ? expected : 0;
+      if (blocks.isEmpty() && hooks == expectedHooks) {
+        return Match.alreadyApplied("startup INFO suppression postcondition matches for " + literal);
+      }
+      requireCount("startup INFO blocks for " + literal, blocks.size(), expected);
+      requireCount("startup suppression hooks for category " + category, hooks, 0);
+      return Match.plan(new Plan(blocks));
+    }
+
+    @Override
+    public PatchReport mutate(Plan plan) {
+      suppressStartupInfoBlocks(plan.blocks(), category, emitRuntimeCounter);
+      PatchReport report = new PatchReport();
+      report.add(reportLabel, plan.blocks().size());
+      return report;
+    }
+
+    @Override
+    public void verify(Plan plan, ClassNode node) {
+      int expectedHooks = emitRuntimeCounter ? expected : 0;
+      requireCount("startup INFO blocks for " + literal, countStringConstants(node, literal), 0);
+      requireCount("startup suppression hooks for category " + category,
+          countCategoryHooks(node, "startupLogSuppressed", "(I)V", category), expectedHooks);
+    }
   }
 
-  private PatchReport patchSoundStartupLogs(ClassNode node) {
-    // sound.Sound is parent-loaded by Faster Rendering and cannot resolve
-    // the typed runtime installed in FR's child system loader. Removing
-    // this pure INFO block inline preserves the optimization without a
-    // cross-loader helper call. The structural marker remains the source
-    // of ownership/idempotency truth; only the optional runtime counter is
-    // intentionally absent for this one parent-owned target.
-    int count = suppressExactInfoBlocks(node, "Loading sound [", 1, 6, false);
-    PatchReport report = new PatchReport();
-    report.add("soundLoadInfo", count);
-    return report;
+  private static final class SpecStoreStartupLogs implements StructuredPatch<SpecStoreStartupLogs.Plan> {
+    private record Site(MethodNode method, MethodInsnNode call) {
+    }
+
+    private record Plan(List<Site> sites) {
+    }
+
+    @Override
+    public Match<Plan> match(ClassNode node) {
+      List<Site> sites = new ArrayList<>();
+      for (MethodNode method : node.methods) {
+        for (MethodInsnNode call : calls(method, Opcodes.INVOKEVIRTUAL, "org/apache/log4j/Logger", "info",
+            "(Ljava/lang/Object;)V")) {
+          sites.add(new Site(method, call));
+        }
+      }
+      int hooks = countCategoryHooks(node, "suppressStartupInfo", "(Ljava/lang/Object;Ljava/lang/Object;I)V", 4);
+      if (sites.isEmpty() && hooks == 53) {
+        return Match.alreadyApplied("SpecStore INFO suppression postcondition matches");
+      }
+      requireCount("SpecStore Logger.info sites", sites.size(), 53);
+      requireCount("SpecStore suppression hooks", hooks, 0);
+      return Match.plan(new Plan(sites));
+    }
+
+    @Override
+    public PatchReport mutate(Plan plan) {
+      for (Site site : plan.sites()) {
+        // The logger receiver and already-built message remain on the stack.
+        // Add only the category argument immediately before the replacement call.
+        site.method().instructions.insertBefore(site.call(), new LdcInsnNode(4));
+        site.call().owner = HOOKS;
+        site.call().name = "suppressStartupInfo";
+        site.call().desc = "(Ljava/lang/Object;Ljava/lang/Object;I)V";
+        site.call().setOpcode(Opcodes.INVOKESTATIC);
+        site.call().itf = false;
+      }
+      PatchReport report = new PatchReport();
+      report.add("specInfoCalls", plan.sites().size());
+      return report;
+    }
+
+    @Override
+    public void verify(Plan plan, ClassNode node) {
+      requireCount("SpecStore suppression hooks",
+          countCategoryHooks(node, "suppressStartupInfo", "(Ljava/lang/Object;Ljava/lang/Object;I)V", 4), 53);
+    }
   }
 
   private PatchReport patchRulesLiteralParser(ClassNode node) {
@@ -1009,21 +1101,46 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return report;
   }
 
-  private PatchReport patchSaveLoadProgressThrottle(ClassNode node, String methodName) {
-    MethodNode method = requireMethod(node, methodName, "(Z)V");
-    List<LdcInsnNode> originals = new ArrayList<>();
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof LdcInsnNode ldc && isFloat(ldc, 1f / 60f)) originals.add(ldc);
+  private static final class SaveLoadProgressThrottle implements StructuredPatch<SaveLoadProgressThrottle.Plan> {
+    private final String methodName;
+
+    SaveLoadProgressThrottle(String methodName) {
+      this.methodName = methodName;
     }
-    int hooks = countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "saveLoadProgressMinIntervalSeconds", "()F");
-    if (originals.isEmpty() && hooks == 1) { throw already("save/load progress throttle postcondition matches"); }
-    requireCount("save/load progress 60 Hz constants", originals.size(), 1);
-    requireCount("save/load progress hooks", hooks, 0);
-    method.instructions.set(originals.get(0),
-        new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "saveLoadProgressMinIntervalSeconds", "()F", false));
-    PatchReport report = new PatchReport();
-    report.add("progressInterval", 1);
-    return report;
+
+    private record Plan(MethodNode method, LdcInsnNode constant) {
+    }
+
+    @Override
+    public Match<Plan> match(ClassNode node) {
+      MethodNode method = requireMethod(node, methodName, "(Z)V");
+      List<LdcInsnNode> originals = new ArrayList<>();
+      for (AbstractInsnNode insn : method.instructions.toArray()) {
+        if (insn instanceof LdcInsnNode ldc && isFloat(ldc, 1f / 60f)) originals.add(ldc);
+      }
+      int hooks = countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "saveLoadProgressMinIntervalSeconds", "()F");
+      if (originals.isEmpty() && hooks == 1) {
+        return Match.alreadyApplied("save/load progress throttle postcondition matches");
+      }
+      requireCount("save/load progress 60 Hz constants", originals.size(), 1);
+      requireCount("save/load progress hooks", hooks, 0);
+      return Match.plan(new Plan(method, originals.get(0)));
+    }
+
+    @Override
+    public PatchReport mutate(Plan plan) {
+      plan.method().instructions.set(plan.constant(),
+          new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "saveLoadProgressMinIntervalSeconds", "()F", false));
+      PatchReport report = new PatchReport();
+      report.add("progressInterval", 1);
+      return report;
+    }
+
+    @Override
+    public void verify(Plan plan, ClassNode node) {
+      requireCount("save/load progress hooks",
+          countCalls(plan.method(), Opcodes.INVOKESTATIC, HOOKS, "saveLoadProgressMinIntervalSeconds", "()F"), 1);
+    }
   }
 
   /**
@@ -1249,12 +1366,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return report;
   }
 
-  private static int suppressExactInfoBlocks(ClassNode node, String literal, int expected, int category) {
-    return suppressExactInfoBlocks(node, literal, expected, category, true);
-  }
-
-  private static int suppressExactInfoBlocks(ClassNode node, String literal, int expected, int category,
-      boolean emitRuntimeCounter) {
+  private static List<LogBlock> startupInfoBlockPlans(ClassNode node, String literal) {
     List<LogBlock> plans = new ArrayList<>();
     for (MethodNode method : node.methods) {
       for (AbstractInsnNode insn : method.instructions.toArray()) {
@@ -1286,13 +1398,10 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
         plans.add(new LogBlock(method, logger, info));
       }
     }
-    int hooks = countCategoryHooks(node, "startupLogSuppressed", "(I)V", category);
-    int expectedHooks = emitRuntimeCounter ? expected : 0;
-    if (plans.isEmpty() && hooks == expectedHooks) {
-      throw already("startup INFO suppression postcondition matches for " + literal);
-    }
-    requireCount("startup INFO blocks for " + literal, plans.size(), expected);
-    requireCount("startup suppression hooks for category " + category, hooks, 0);
+    return plans;
+  }
+
+  private static void suppressStartupInfoBlocks(List<LogBlock> plans, int category, boolean emitRuntimeCounter) {
     for (LogBlock plan : plans) {
       if (emitRuntimeCounter) {
         InsnList replacement = new InsnList();
@@ -1302,7 +1411,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       }
       removeRange(plan.method, plan.start, plan.end);
     }
-    return plans.size();
   }
 
   private static String loaderName(ClassLoader loader) {
@@ -3732,61 +3840,75 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return report;
   }
 
-  private PatchReport patchEntityScriptSnapshotReuse(ClassNode node) {
-    MethodNode runScripts = requireMethod(node, "runScripts", "(F)V");
-    List<MethodInsnNode> empties = calls(runScripts, Opcodes.INVOKEINTERFACE, "java/util/List", "isEmpty", "()Z");
-    AllocationSpec spec = new AllocationSpec("java/util/ArrayList", "(Ljava/util/Collection;)V",
-        "borrowEntityScriptSnapshot", "(Ljava/util/Collection;)Ljava/util/List;", 1);
-    List<SnapshotAllocationPlan> plans = snapshotAllocationPlans(node.name, runScripts, spec);
-    requireCount("BaseCampaignEntity.runScripts defensive snapshot", plans.size(), 1);
-    requireCount("BaseCampaignEntity.runScripts retired snapshot hook",
-        countCalls(runScripts, Opcodes.INVOKESTATIC, HOOKS, spec.hookName, spec.hookDesc), 0);
-
-    SnapshotAllocationPlan plan = plans.get(0);
-    MethodInsnNode snapshot = plan.constructor;
-    Frame<SourceValue>[] frames = sourceFrames(node.name, runScripts);
-    FieldInsnNode scriptsField = requireSourceField(argumentSource(runScripts, snapshot, frames, 0), Opcodes.GETFIELD,
-        node.name, LIST_DESC, "BaseCampaignEntity.runScripts scripts field");
-    if (!scriptsField.name.equals("scripts")) {
-      throw mismatch("BaseCampaignEntity.runScripts snapshot no longer reads scripts");
+  private static final class EntityScriptSnapshotReuse implements StructuredPatch<EntityScriptSnapshotReuse.Plan> {
+    private record Plan(String owner, MethodNode runScripts, SnapshotAllocationPlan snapshot, String scriptsField) {
     }
-    requireSnapshotUseContract(node.name, runScripts, plan.store, 1,
-        "BaseCampaignEntity.runScripts defensive snapshot");
 
-    boolean guarded = empties.size() == 1 && hasEntityScriptEmptyGuard(node.name, runScripts, scriptsField.name);
-    if (!empties.isEmpty() && !guarded) {
-      throw mismatch("BaseCampaignEntity.runScripts has a foreign/partial empty guard");
+    @Override
+    public Match<Plan> match(ClassNode node) {
+      MethodNode runScripts = requireMethod(node, "runScripts", "(F)V");
+      List<MethodInsnNode> empties = calls(runScripts, Opcodes.INVOKEINTERFACE, "java/util/List", "isEmpty", "()Z");
+      AllocationSpec spec = new AllocationSpec("java/util/ArrayList", "(Ljava/util/Collection;)V",
+          "borrowEntityScriptSnapshot", "(Ljava/util/Collection;)Ljava/util/List;", 1);
+      List<SnapshotAllocationPlan> plans = snapshotAllocationPlans(node.name, runScripts, spec);
+      requireCount("BaseCampaignEntity.runScripts defensive snapshot", plans.size(), 1);
+      requireCount("BaseCampaignEntity.runScripts retired snapshot hook",
+          countCalls(runScripts, Opcodes.INVOKESTATIC, HOOKS, spec.hookName, spec.hookDesc), 0);
+
+      SnapshotAllocationPlan snapshot = plans.get(0);
+      MethodInsnNode constructor = snapshot.constructor;
+      Frame<SourceValue>[] frames = sourceFrames(node.name, runScripts);
+      FieldInsnNode scriptsField = requireSourceField(argumentSource(runScripts, constructor, frames, 0),
+          Opcodes.GETFIELD, node.name, LIST_DESC, "BaseCampaignEntity.runScripts scripts field");
+      if (!scriptsField.name.equals("scripts")) {
+        return Match.incompatible("BaseCampaignEntity.runScripts snapshot no longer reads scripts");
+      }
+      requireSnapshotUseContract(node.name, runScripts, snapshot.store, 1,
+          "BaseCampaignEntity.runScripts defensive snapshot");
+
+      boolean guarded = empties.size() == 1 && hasEntityScriptEmptyGuard(node.name, runScripts, scriptsField.name);
+      if (!empties.isEmpty() && !guarded) {
+        return Match.incompatible("BaseCampaignEntity.runScripts has a foreign/partial empty guard");
+      }
+      requireEntityScriptEmptyPathShape(node.name, runScripts, snapshot, scriptsField.name, guarded);
+      if (guarded) { return Match.alreadyApplied("BaseCampaignEntity.runScripts empty fast path is already present"); }
+      return Match.plan(new Plan(node.name, runScripts, snapshot, scriptsField.name));
     }
-    requireEntityScriptEmptyPathShape(node.name, runScripts, plan, scriptsField.name, guarded);
-    if (guarded) { throw already("BaseCampaignEntity.runScripts empty fast path is already present"); }
 
-    // Most campaign entities have no scripts. The previous reusable-snapshot
-    // implementation still opened and cleared a large generic scratch frame for
-    // every one of those entities. Return before any scope/allocation instead;
-    // the uncommon non-empty path is left byte-for-byte vanilla and therefore
-    // keeps a fresh mutation-safe ArrayList snapshot.
-    AbstractInsnNode oldFirst = runScripts.instructions.getFirst();
-    LabelNode nonEmpty = new LabelNode();
-    InsnList guard = new InsnList();
-    guard.add(new VarInsnNode(Opcodes.ALOAD, 0));
-    guard.add(new FieldInsnNode(Opcodes.GETFIELD, node.name, scriptsField.name, LIST_DESC));
-    guard.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, "java/util/List", "isEmpty", "()Z", true));
-    guard.add(new JumpInsnNode(Opcodes.IFEQ, nonEmpty));
-    guard.add(new InsnNode(Opcodes.RETURN));
-    guard.add(nonEmpty);
-    guard.add(new FrameNode(Opcodes.F_SAME, 0, null, 0, null));
-    runScripts.instructions.insertBefore(oldFirst, guard);
+    @Override
+    public PatchReport mutate(Plan plan) {
+      // Most campaign entities have no scripts. The previous reusable-snapshot
+      // implementation still opened and cleared a large generic scratch frame for
+      // every one of those entities. Return before any scope/allocation instead;
+      // the uncommon non-empty path is left byte-for-byte vanilla and therefore
+      // keeps a fresh mutation-safe ArrayList snapshot.
+      MethodNode runScripts = plan.runScripts();
+      AbstractInsnNode oldFirst = runScripts.instructions.getFirst();
+      LabelNode nonEmpty = new LabelNode();
+      InsnList guard = new InsnList();
+      guard.add(new VarInsnNode(Opcodes.ALOAD, 0));
+      guard.add(new FieldInsnNode(Opcodes.GETFIELD, plan.owner(), plan.scriptsField(), LIST_DESC));
+      guard.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE, "java/util/List", "isEmpty", "()Z", true));
+      guard.add(new JumpInsnNode(Opcodes.IFEQ, nonEmpty));
+      guard.add(new InsnNode(Opcodes.RETURN));
+      guard.add(nonEmpty);
+      guard.add(new FrameNode(Opcodes.F_SAME, 0, null, 0, null));
+      runScripts.instructions.insertBefore(oldFirst, guard);
 
-    requireCount("BaseCampaignEntity.runScripts empty guard",
-        countCalls(runScripts, Opcodes.INVOKEINTERFACE, "java/util/List", "isEmpty", "()Z"), 1);
-    if (!hasEntityScriptEmptyGuard(node.name, runScripts, scriptsField.name)) {
-      throw mismatch("BaseCampaignEntity.runScripts empty guard postcondition failed");
+      PatchReport report = new PatchReport();
+      report.add("empty entity-script fast path", 1);
+      return report;
     }
-    requireEntityScriptEmptyPathShape(node.name, runScripts, plan, scriptsField.name, true);
 
-    PatchReport report = new PatchReport();
-    report.add("empty entity-script fast path", 1);
-    return report;
+    @Override
+    public void verify(Plan plan, ClassNode node) {
+      requireCount("BaseCampaignEntity.runScripts empty guard",
+          countCalls(plan.runScripts(), Opcodes.INVOKEINTERFACE, "java/util/List", "isEmpty", "()Z"), 1);
+      if (!hasEntityScriptEmptyGuard(plan.owner(), plan.runScripts(), plan.scriptsField())) {
+        throw mismatch("BaseCampaignEntity.runScripts empty guard postcondition failed");
+      }
+      requireEntityScriptEmptyPathShape(plan.owner(), plan.runScripts(), plan.snapshot(), plan.scriptsField(), true);
+    }
   }
 
   private static boolean hasEntityScriptEmptyGuard(String owner, MethodNode method, String fieldName) {
@@ -7605,52 +7727,76 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
    * virtual callback itself. The complete original BaseIndustry method is
    * retained and periodically audited.
    */
-  private PatchReport patchBaseIndustryDormantFastPath(ClassNode node) {
-    final int fieldAccess = Opcodes.ACC_PRIVATE | Opcodes.ACC_TRANSIENT | Opcodes.ACC_SYNTHETIC;
-    int fieldsPresent = 0;
-    for (String fieldName : List.of(BASE_INDUSTRY_STATE_FIELD, BASE_INDUSTRY_COUNTDOWN_FIELD)) {
-      List<FieldNode> matches = node.fields.stream().filter(field -> field.name.equals(fieldName)).toList();
-      if (!matches.isEmpty()) {
-        fieldsPresent++;
-        requireCount("BaseIndustry dormant field " + fieldName, matches.size(), 1);
-        FieldNode field = matches.get(0);
-        if (!field.desc.equals("I") || field.access != fieldAccess || field.signature != null || field.value != null) {
-          throw mismatch("foreign BaseIndustry dormant field " + fieldName);
+  private static final class BaseIndustryDormantFastPath implements StructuredPatch<BaseIndustryDormantFastPath.Plan> {
+    private static final int FIELD_ACCESS = Opcodes.ACC_PRIVATE | Opcodes.ACC_TRANSIENT | Opcodes.ACC_SYNTHETIC;
+    private final int auditFrames;
+
+    BaseIndustryDormantFastPath(int auditFrames) {
+      this.auditFrames = auditFrames;
+    }
+
+    private record Plan(String owner, List<FieldNode> classFields, List<MethodNode> classMethods, MethodNode advance,
+        MethodNode setDisrupted, AbstractInsnNode setDisruptedFirst, ClassNode template) {
+    }
+
+    @Override
+    public Match<Plan> match(ClassNode node) {
+      int fieldsPresent = 0;
+      for (String fieldName : List.of(BASE_INDUSTRY_STATE_FIELD, BASE_INDUSTRY_COUNTDOWN_FIELD)) {
+        List<FieldNode> matches = node.fields.stream().filter(field -> field.name.equals(fieldName)).toList();
+        if (!matches.isEmpty()) {
+          fieldsPresent++;
+          requireCount("BaseIndustry dormant field " + fieldName, matches.size(), 1);
+          FieldNode field = matches.get(0);
+          if (!field.desc.equals("I") || field.access != FIELD_ACCESS || field.signature != null
+              || field.value != null) {
+            return Match.incompatible("foreign BaseIndustry dormant field " + fieldName);
+          }
         }
       }
+      if (fieldsPresent != 0) {
+        requireCount("complete BaseIndustry dormant field set", fieldsPresent, 2);
+        requireOptimizedBaseIndustryDormantShape(node);
+        return Match.alreadyApplied("direct dormant BaseIndustry fast path postcondition matches");
+      }
+
+      requireOriginalBaseIndustryDormantShape(node);
+      MethodNode advance = requireMethod(node, "advance", "(F)V");
+      MethodNode setDisrupted = requireMethod(node, "setDisrupted", "(FZ)V");
+      AbstractInsnNode first = firstMeaningful(setDisrupted);
+      if (first == null) return Match.incompatible("BaseIndustry.setDisrupted has no code");
+      ClassNode template = loadBaseIndustryDormantTemplate();
+      return Match.plan(new Plan(node.name, node.fields, node.methods, advance, setDisrupted, first, template));
     }
-    if (fieldsPresent != 0) {
-      requireCount("complete BaseIndustry dormant field set", fieldsPresent, 2);
+
+    @Override
+    public PatchReport mutate(Plan plan) {
+      plan.classFields().add(new FieldNode(Opcodes.ASM8, FIELD_ACCESS, BASE_INDUSTRY_STATE_FIELD, "I", null, null));
+      plan.classFields().add(new FieldNode(Opcodes.ASM8, FIELD_ACCESS, BASE_INDUSTRY_COUNTDOWN_FIELD, "I", null, null));
+
+      MethodNode wrapper =
+          renameForPrivateOriginal(plan.owner(), plan.classMethods(), plan.advance(), BASE_INDUSTRY_RAW_ADVANCE);
+      installBaseIndustryTemplateBody(plan.template(), plan.owner(), wrapper);
+      replaceBaseIndustryAuditPlaceholder(wrapper, auditFrames);
+
+      InsnList wake = new InsnList();
+      wake.add(new VarInsnNode(Opcodes.ALOAD, 0));
+      wake.add(new InsnNode(Opcodes.ICONST_0));
+      wake.add(new FieldInsnNode(Opcodes.PUTFIELD, plan.owner(), BASE_INDUSTRY_STATE_FIELD, "I"));
+      wake.add(new VarInsnNode(Opcodes.ALOAD, 0));
+      wake.add(new InsnNode(Opcodes.ICONST_0));
+      wake.add(new FieldInsnNode(Opcodes.PUTFIELD, plan.owner(), BASE_INDUSTRY_COUNTDOWN_FIELD, "I"));
+      plan.setDisrupted().instructions.insertBefore(plan.setDisruptedFirst(), wake);
+
+      PatchReport report = new PatchReport();
+      report.add("direct dormant inherited BaseIndustry fast path", 1);
+      return report;
+    }
+
+    @Override
+    public void verify(Plan plan, ClassNode node) {
       requireOptimizedBaseIndustryDormantShape(node);
-      throw already("direct dormant BaseIndustry fast path postcondition matches");
     }
-
-    requireOriginalBaseIndustryDormantShape(node);
-    node.fields.add(new FieldNode(Opcodes.ASM8, fieldAccess, BASE_INDUSTRY_STATE_FIELD, "I", null, null));
-    node.fields.add(new FieldNode(Opcodes.ASM8, fieldAccess, BASE_INDUSTRY_COUNTDOWN_FIELD, "I", null, null));
-
-    MethodNode original = requireMethod(node, "advance", "(F)V");
-    MethodNode wrapper = renameForPrivateOriginal(node, original, BASE_INDUSTRY_RAW_ADVANCE);
-    ClassNode template = loadBaseIndustryDormantTemplate();
-    installBaseIndustryTemplateBody(template, node.name, wrapper);
-    replaceBaseIndustryAuditPlaceholder(wrapper, config.marketNoOpIndustryAuditFrames);
-
-    MethodNode setDisrupted = requireMethod(node, "setDisrupted", "(FZ)V");
-    AbstractInsnNode first = firstMeaningful(setDisrupted);
-    if (first == null) throw mismatch("BaseIndustry.setDisrupted has no code");
-    InsnList wake = new InsnList();
-    wake.add(new VarInsnNode(Opcodes.ALOAD, 0));
-    wake.add(new InsnNode(Opcodes.ICONST_0));
-    wake.add(new FieldInsnNode(Opcodes.PUTFIELD, node.name, BASE_INDUSTRY_STATE_FIELD, "I"));
-    wake.add(new VarInsnNode(Opcodes.ALOAD, 0));
-    wake.add(new InsnNode(Opcodes.ICONST_0));
-    wake.add(new FieldInsnNode(Opcodes.PUTFIELD, node.name, BASE_INDUSTRY_COUNTDOWN_FIELD, "I"));
-    setDisrupted.instructions.insertBefore(first, wake);
-
-    requireOptimizedBaseIndustryDormantShape(node);
-    PatchReport report = new PatchReport();
-    report.add("direct dormant inherited BaseIndustry fast path", 1);
-    return report;
   }
 
   private static void requireOriginalBaseIndustryDormantShape(ClassNode node) {
@@ -8123,13 +8269,18 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
   }
 
   private static MethodNode renameForPrivateOriginal(ClassNode node, MethodNode original, String rawName) {
+    return renameForPrivateOriginal(node.name, node.methods, original, rawName);
+  }
+
+  private static MethodNode renameForPrivateOriginal(String owner, List<MethodNode> methods, MethodNode original,
+      String rawName) {
     String wrapperName = original.name;
     MethodNode wrapper = new MethodNode(Opcodes.ASM8, original.access, wrapperName, original.desc, original.signature,
         exceptions(original));
-    moveWrapperMetadata(original, wrapper, node.name + "." + wrapperName + original.desc);
+    moveWrapperMetadata(original, wrapper, owner + "." + wrapperName + original.desc);
     original.name = rawName;
     makePrivateSynthetic(original);
-    node.methods.add(wrapper);
+    methods.add(wrapper);
     return wrapper;
   }
 
@@ -8693,42 +8844,49 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return 1;
   }
 
-  private PatchReport patchDynamicParticleCleanup(ClassNode node) {
-    MethodNode advance = requireMethod(node, "advance", "(F)V");
-    PatchState state = uniformPatchState("DynamicParticleGroup cleanup",
-        scratchScopeState(node.name, advance, "DynamicParticleGroup.advance"),
-        storedSimpleAllocationState(advance, "java/util/ArrayList", "()V", "borrowParticleRemovalList",
-            "()Ljava/util/ArrayList;", 1, "DynamicParticleGroup expired list"),
-        particleCleanupState(advance), particleScratchMutationState(advance));
-    if (state == PatchState.PATCHED) {
-      throw already("all DynamicParticleGroup cleanup hooks and scope postconditions match");
+  private static final class DynamicParticleCleanup implements StructuredPatch<DynamicParticleCleanup.Plan> {
+    private record Plan(String owner, MethodNode advance, MethodInsnNode removeAll) {
     }
-    boolean scopeInstalled = ensureScratchScope(node.name, advance, "DynamicParticleGroup.advance");
-    int changed = replaceStoredSimpleAllocations(node.name, advance, "java/util/ArrayList", "()V",
-        "borrowParticleRemovalList", "()Ljava/util/ArrayList;", 1, scopeInstalled, "DynamicParticleGroup expired list");
-    changed += replaceParticleScratchMutation(node.name, advance);
 
-    String hookDesc = "(Ljava/util/LinkedList;Ljava/util/Collection;)Z";
-    List<MethodInsnNode> raw =
-        calls(advance, Opcodes.INVOKEVIRTUAL, "java/util/LinkedList", "removeAll", "(Ljava/util/Collection;)Z");
-    int hooks = countCalls(advance, Opcodes.INVOKESTATIC, HOOKS, "removeExpiredParticles", hookDesc);
-    boolean original = raw.size() == 1 && hooks == 0;
-    boolean patched = raw.isEmpty() && hooks == 1;
-    if (patched) {
-      if (changed != 0) throw mismatch("DynamicParticleGroup cleanup is partially patched");
-      throw already("DynamicParticleGroup cleanup hook is already present");
+    @Override
+    public Match<Plan> match(ClassNode node) {
+      MethodNode advance = requireMethod(node, "advance", "(F)V");
+      PatchState state = uniformPatchState("DynamicParticleGroup cleanup",
+          scratchScopeState(node.name, advance, "DynamicParticleGroup.advance"),
+          storedSimpleAllocationState(advance, "java/util/ArrayList", "()V", "borrowParticleRemovalList",
+              "()Ljava/util/ArrayList;", 1, "DynamicParticleGroup expired list"),
+          particleCleanupState(advance), particleScratchMutationState(advance));
+      if (state == PatchState.PATCHED) {
+        return Match.alreadyApplied("all DynamicParticleGroup cleanup hooks and scope postconditions match");
+      }
+      MethodInsnNode removeAll =
+          calls(advance, Opcodes.INVOKEVIRTUAL, "java/util/LinkedList", "removeAll", "(Ljava/util/Collection;)Z")
+              .get(0);
+      return Match.plan(new Plan(node.name, advance, removeAll));
     }
-    if (!original) throw mismatch("DynamicParticleGroup removeAll site changed structurally");
-    MethodInsnNode removeAll = raw.get(0);
-    if (nextMeaningful(removeAll) == null || nextMeaningful(removeAll).getOpcode() != Opcodes.POP) {
-      throw mismatch("DynamicParticleGroup removeAll result is not discarded");
-    }
-    makeStatic(removeAll, HOOKS, "removeExpiredParticles", hookDesc);
-    changed++;
 
-    PatchReport report = new PatchReport();
-    report.add("reusable particle expiry buffer and linear cleanup", changed);
-    return report;
+    @Override
+    public PatchReport mutate(Plan plan) {
+      installScratchScope(plan.owner(), plan.advance(), "DynamicParticleGroup.advance");
+      int changed = replaceStoredSimpleAllocations(plan.owner(), plan.advance(), "java/util/ArrayList", "()V",
+          "borrowParticleRemovalList", "()Ljava/util/ArrayList;", 1, true, "DynamicParticleGroup expired list");
+      changed += replaceParticleScratchMutation(plan.owner(), plan.advance());
+      makeStatic(plan.removeAll(), HOOKS, "removeExpiredParticles", "(Ljava/util/LinkedList;Ljava/util/Collection;)Z");
+      changed++;
+
+      PatchReport report = new PatchReport();
+      report.add("reusable particle expiry buffer and linear cleanup", changed);
+      return report;
+    }
+
+    @Override
+    public void verify(Plan plan, ClassNode node) {
+      uniformPatchState("DynamicParticleGroup cleanup",
+          scratchScopeState(plan.owner(), plan.advance(), "DynamicParticleGroup.advance"),
+          storedSimpleAllocationState(plan.advance(), "java/util/ArrayList", "()V", "borrowParticleRemovalList",
+              "()Ljava/util/ArrayList;", 1, "DynamicParticleGroup expired list"),
+          particleCleanupState(plan.advance()), particleScratchMutationState(plan.advance()));
+    }
   }
 
   private static PatchState particleScratchMutationState(MethodNode method) {
