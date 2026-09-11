@@ -28,9 +28,9 @@
 - [ ] **Единый каталог целей.** `TARGET_CLASSES`, dispatch-switch, config-switch и отдельный
   hyperspace-список сводятся в один источник.
 - [ ] **Hyperspace на общем patch API.** Второй вариант API и дублирующие ASM helpers убираются.
-- [ ] **Formatter и атрибуты репозитория.** Закреплённый `google-java-format --aosp`,
-  `.editorconfig`, `.gitattributes`, mode `100755` для `.sh`. Первый reformat — отдельный
-  механический коммит.
+- [ ] **Атрибуты репозитория.** `.editorconfig`, `.gitattributes`, mode `100755` для `.sh`.
+  Форматтер уже есть: Eclipse JDT 3.41.0 с конфигом `tools/format/eclipse-jdt-format.properties`,
+  библиотеки качаются по требованию с проверкой SHA-256, первый механический reformat выполнен.
 - [ ] **Публичный CI без игровых JAR.** Formatter, line endings, synthetic discovery, installer
   fixtures.
 - [ ] **Воспроизводимый релизный артефакт.** Manifest, фиксированный порядок entries,
