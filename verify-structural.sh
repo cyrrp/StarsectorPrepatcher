@@ -36,6 +36,13 @@ AGGRESSIVE_CONFIG_JAVA="$(java_native_path "$MOD_ROOT/profiles/aggressive.proper
 # after relocating ASM into the private Prepatcher namespace.
 # This array is kept (empty) so the existing "${EXPORTS[@]}" expansions remain valid no-ops.
 EXPORTS=()
+# Only the legacy Faster Rendering layout ships the custom system loader inside fr.jar; the Agent
+# layout keeps the javaagent in fr.agent.jar. The presence of fr.jar alone does not imply the
+# legacy loader, so layout detection mirrors install-agent.ps1 and inspects the entry itself.
+FR_LEGACY_LOADER_ENTRY='com/genir/renderer/loaders/AppClassLoader.class'
+fr_has_legacy_loader() {
+  [[ -f "$CORE/fr.jar" ]] && jar tf "$CORE/fr.jar" | grep -qx "$FR_LEGACY_LOADER_ENTRY"
+}
 
 bash "$MOD_ROOT/build-agent.sh"
 rm -rf "$TEST_CLASSES" "$FR_SMOKE_CLASSES"
@@ -357,7 +364,22 @@ java "${EXPORTS[@]}" -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.agent.StartupAuditCoverageTest \
   2>&1 | tee "$REPORT_DIR/startup-audit-coverage.txt"
 
-JAVA27="$GAME_ROOT/jdk-27+22/bin/java"
+# JavaCompatibilityRoute selects JAVA27_STANDARD for any runtime feature >= 27, so the gate
+# discovers the installed JDK by that contract instead of pinning one exact build directory.
+JAVA27="$GAME_ROOT/jdk-27+/bin/java (no runtime with feature >= 27 installed)"
+for candidate_home in "$GAME_ROOT"/jdk-*; do
+  [[ -d "$candidate_home" ]] || continue
+  candidate="$candidate_home/bin/java.exe"
+  [[ -x "$candidate" ]] || candidate="$candidate_home/bin/java"
+  [[ -x "$candidate" ]] || continue
+  candidate_feature="$("$candidate" -XshowSettings:properties -version 2>&1 \
+    | sed -n 's/.*java\.specification\.version = \([0-9][0-9]*\).*/\1/p' | head -1)"
+  if [[ -n "$candidate_feature" && "$candidate_feature" -ge 27 ]]; then
+    JAVA27="$candidate"
+    echo "Java >= 27 route runtime: $JAVA27 (feature $candidate_feature)"
+    break
+  fi
+done
 if [[ -x "$JAVA27" ]]; then
   "$JAVA27" -Xverify:all \
     "-javaagent:$AGENT_JAR_JAVA" \
@@ -393,17 +415,22 @@ if [[ -x "$JAVA27" ]]; then
 
   REAL_FR_AGENT="$CORE/fr.agent.jar"
   if [[ -f "$REAL_FR_AGENT" ]]; then
-    new_fr_cp="$RUNTIME_CP"
+    # The Faster Rendering agent logs from premain, so log4j must be resolvable before the
+    # game classpath is otherwise touched; without it FR aborts the JVM during -javaagent.
+    new_fr_cp="$CORE/log4j-1.2.9.jar:$RUNTIME_CP"
     if [[ -f "$CORE/fr.jar" ]]; then
       new_fr_cp="$CORE/fr.jar:$new_fr_cp"
     fi
-    "$JAVA27" -Xverify:all \
+    # The Faster Rendering agent hashes starfarer_obf.jar through a relative path, so it only
+    # resolves when the process runs from starsector-core, exactly as the real launcher does.
+    # Every path handed to the JVM below is absolute, so the working directory change is local.
+    ( cd "$CORE" && "$JAVA27" -Xverify:all \
       "-javaagent:$REAL_FR_AGENT" \
       "-javaagent:$AGENT_JAR_JAVA=config=$AGGRESSIVE_CONFIG_JAVA" \
       -cp "$new_fr_cp" \
       com.starsector.prepatcher.runtime.UiEconomyActualAgentSmokeTest \
       "${java27_ui_args[@]}" \
-      2>&1 | tee "$REPORT_DIR/java27-fr-agent-ui-economy.txt"
+      2>&1 ) | tee "$REPORT_DIR/java27-fr-agent-ui-economy.txt"
     grep -q 'Java compatibility route: FR_AGENT_CHAIN' \
       "$REPORT_DIR/java27-fr-agent-ui-economy.txt"
     grep -q 'OK actual-agent UI economy contracts' \
@@ -442,7 +469,11 @@ if [[ -x "$JAVA27" ]]; then
       tee -a "$REPORT_DIR/java27-route-negative-probes.txt"
   done
 
-  if [[ -f "$CORE/fr.jar" ]]; then
+  if ! fr_has_legacy_loader; then
+    printf 'SKIPPED legacy Faster Rendering route probes: %s has no %s\n' \
+      "$CORE/fr.jar" "$FR_LEGACY_LOADER_ENTRY" \
+      | tee "$REPORT_DIR/java27-legacy-fr-route-probes.txt"
+  else
     : > "$REPORT_DIR/java27-legacy-fr-route-probes.txt"
     for route_case in not-preloaded preloaded-retransform; do
       preload=()
@@ -706,6 +737,10 @@ FR_JAR="$CORE/fr.jar"
 FR_SMOKE_REPORT="$REPORT_DIR/faster-rendering-loader-smoke.txt"
 if [[ ! -f "$FR_JAR" ]]; then
   echo "SKIPPED Faster Rendering loader smoke: fr.jar not found at $FR_JAR" | \
+    tee "$FR_SMOKE_REPORT"
+elif ! fr_has_legacy_loader; then
+  echo "SKIPPED Faster Rendering loader smoke: $FR_JAR has no $FR_LEGACY_LOADER_ENTRY;" \
+    "this is the Agent layout, covered by the fr.agent.jar routes" | \
     tee "$FR_SMOKE_REPORT"
 else
   # Agent classes must not appear here. FR must keep the javaagent in its

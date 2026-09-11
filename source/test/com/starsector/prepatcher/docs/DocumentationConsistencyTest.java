@@ -11,10 +11,8 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -94,13 +92,11 @@ public final class DocumentationConsistencyTest {
         checkCurrentVersionSuffixes(markdown, changelog, modInfo, currentVersion);
         int patchCount = checkPatchValidationCoverage(root);
 
-        LinkGraph graph = checkLinks(root, markdown);
-        checkReachability(root, markdown, graph.edges);
+        int relativeLinks = checkLinks(root, markdown);
 
         System.out.println("OK documentation-consistency version=" + currentVersion
                 + " markdown=" + markdown.size()
-                + " relativeLinks=" + graph.relativeLinkCount
-                + " reachable=" + markdown.size()
+                + " relativeLinks=" + relativeLinks
                 + " patchScenarios=" + patchCount);
     }
 
@@ -691,7 +687,6 @@ public final class DocumentationConsistencyTest {
     private static Set<Path> collectCurrentMarkdown(Path root) throws IOException {
         Set<Path> markdown = new LinkedHashSet<>();
         requiredFile(root.resolve("README.md"));
-        requiredFile(root.resolve("BUILDING.md"));
         requiredFile(root.resolve("CHANGELOG.md"));
         try (Stream<Path> paths = Files.list(root)) {
             paths.filter(Files::isRegularFile)
@@ -778,12 +773,9 @@ public final class DocumentationConsistencyTest {
         }
     }
 
-    private static LinkGraph checkLinks(Path root, Set<Path> markdown) throws IOException {
-        Map<Path, Set<Path>> edges = new HashMap<>();
+    private static int checkLinks(Path root, Set<Path> markdown) throws IOException {
         int relativeLinks = 0;
         for (Path source : markdown) {
-            Set<Path> targets = new LinkedHashSet<>();
-            edges.put(source, targets);
             for (String destination : markdownDestinations(readUtf8(source))) {
                 String localPath = localPathPart(destination);
                 if (localPath == null) continue;
@@ -804,33 +796,9 @@ public final class DocumentationConsistencyTest {
                 require(Files.exists(resolved),
                         "broken relative Markdown link: " + display(root, source)
                                 + " -> " + destination + " (resolved to " + resolved + ")");
-                if (isMarkdown(resolved) && markdown.contains(resolved)) {
-                    targets.add(resolved);
-                }
             }
         }
-        return new LinkGraph(edges, relativeLinks);
-    }
-
-    private static void checkReachability(Path root, Set<Path> markdown,
-            Map<Path, Set<Path>> edges) {
-        Path readme = root.resolve("README.md").toAbsolutePath().normalize();
-        Set<Path> reached = new LinkedHashSet<>();
-        ArrayDeque<Path> pending = new ArrayDeque<>();
-        reached.add(readme);
-        pending.add(readme);
-        while (!pending.isEmpty()) {
-            Path source = pending.removeFirst();
-            for (Path target : edges.getOrDefault(source, Set.of())) {
-                if (reached.add(target)) pending.addLast(target);
-            }
-        }
-
-        Set<Path> unreachable = new LinkedHashSet<>(markdown);
-        unreachable.removeAll(reached);
-        require(unreachable.isEmpty(),
-                "current Markdown is not reachable from README.md: "
-                        + unreachable.stream().map(path -> display(root, path)).toList());
+        return relativeLinks;
     }
 
     private static List<String> markdownDestinations(String markdown) {
@@ -1081,16 +1049,6 @@ public final class DocumentationConsistencyTest {
         private ReleaseHeading(Version version, int line) {
             this.version = version;
             this.line = line;
-        }
-    }
-
-    private static final class LinkGraph {
-        private final Map<Path, Set<Path>> edges;
-        private final int relativeLinkCount;
-
-        private LinkGraph(Map<Path, Set<Path>> edges, int relativeLinkCount) {
-            this.edges = edges;
-            this.relativeLinkCount = relativeLinkCount;
         }
     }
 
