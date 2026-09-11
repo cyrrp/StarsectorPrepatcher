@@ -1,7 +1,6 @@
 package com.starsector.prepatcher.agent;
 
 import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
@@ -18,20 +17,13 @@ import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.LocalVariableNode;
-import org.objectweb.asm.tree.LookupSwitchInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.MultiANewArrayInsnNode;
-import org.objectweb.asm.tree.TableSwitchInsnNode;
 import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.TryCatchBlockNode;
 import org.objectweb.asm.tree.VarInsnNode;
-import org.objectweb.asm.tree.analysis.Analyzer;
-import org.objectweb.asm.tree.analysis.AnalyzerException;
-import org.objectweb.asm.tree.analysis.BasicValue;
-import org.objectweb.asm.tree.analysis.BasicVerifier;
 import org.objectweb.asm.tree.analysis.Frame;
-import org.objectweb.asm.tree.analysis.SourceInterpreter;
 import org.objectweb.asm.tree.analysis.SourceValue;
 
 import java.io.IOException;
@@ -49,13 +41,24 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static com.starsector.prepatcher.agent.Allocations.*;
+import static com.starsector.prepatcher.agent.ClassIO.*;
+import static com.starsector.prepatcher.agent.Contract.*;
+import static com.starsector.prepatcher.agent.Flow.*;
+import static com.starsector.prepatcher.agent.Markers.*;
+import static com.starsector.prepatcher.agent.MarketScheduler.*;
+import static com.starsector.prepatcher.agent.Mutations.*;
+import static com.starsector.prepatcher.agent.Names.*;
+import static com.starsector.prepatcher.agent.OwnedTemplates.*;
+import static com.starsector.prepatcher.agent.PersistentState.*;
+import static com.starsector.prepatcher.agent.Queries.*;
+
 /**
  * Applies each optimization only when its local bytecode contract can be proven
  * against the class bytes actually supplied by the JVM. No JAR or class digest is
  * used as a compatibility decision.
  */
 public final class PrepatcherTransformer implements ClassFileTransformer {
-  private static final String HOOKS = "com/fs/starfarer/api/StarsectorPrepatcherHooks";
   private static final String TEMP_MOD_HOOKS = "com/fs/starfarer/api/StarsectorPrepatcherTempModHooks";
   private static final String CORE_WORLDS_RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherCoreWorldsRuntime";
   private static final String CORE_WORLDS_PATCH_ID = "coreWorldsExtentCache";
@@ -157,7 +160,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
   private static final int SAVE_METHOD_FEATURE_CACHE_MAINTENANCE = 1;
   private static final int SAVE_METHOD_FEATURE_MARKET_SCHEDULER_FLUSH = 2;
   private static final String SAVE_OUTPUT_BUFFER_DEDUP_PATCH_ID = "saveOutputBufferDedup";
-  private static final String PERSISTENT_STATE_DESC = "Ljava/lang/Object;";
   static final String MUTABLE_STAT = "com/fs/starfarer/api/combat/MutableStat";
   static final String MUTABLE_STAT_WITH_TEMP_MODS = "com/fs/starfarer/api/combat/MutableStatWithTempMods";
   static final String INTEL_MANAGER = "com/fs/starfarer/campaign/comms/v2/IntelManager";
@@ -219,15 +221,9 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
   private static final String MAP_API_DESC = "Lcom/fs/starfarer/api/ui/SectorMapAPI;";
   private static final String INTEL_DESC = "Lcom/fs/starfarer/api/campaign/comm/IntelInfoPlugin;";
   private static final String LIST_DESC = "Ljava/util/List;";
-  private static final String LINKED_MAP_DESC = "Ljava/util/LinkedHashMap;";
   private static final String STAR_SYSTEM_DESC = "Lcom/fs/starfarer/api/campaign/StarSystemAPI;";
   private static final String LOCATION_DESC = "Lcom/fs/starfarer/api/campaign/LocationAPI;";
   private static final String HYPERSPACE_DESC = "Lcom/fs/starfarer/campaign/Hyperspace;";
-  private static final String PATCH_MARKER_PREFIX = "smo$patched$";
-  private static final String PATCH_MARKER_DESC = "Ljava/lang/String;";
-  // This is a patch-schema identifier, not the release version. Keeping it stable prevents a
-  // routine SemVer bump from changing idempotency/ownership semantics.
-  private static final String PATCH_MARKER_VALUE_PREFIX = "StarsectorPrepatcher:patch-v1:";
   private final PrepatcherConfig config;
   /**
    * Loader that owns the typed runtime hooks. A null value is used only by
@@ -1495,49 +1491,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     requireCount("Logger.info calls in startup block " + literal, infoCalls, 1);
   }
 
-  private static int countStringConstants(MethodNode method, String value) {
-    int count = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (isStringLdc(insn, value)) count++;
-    }
-    return count;
-  }
-
-  private static int countMethodInstructions(MethodNode method) {
-    int count = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof MethodInsnNode) count++;
-    }
-    return count;
-  }
-
-  private static int countFieldInstructions(MethodNode method) {
-    int count = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof FieldInsnNode) count++;
-    }
-    return count;
-  }
-
-  private static int countStringConstants(ClassNode node, String value) {
-    int count = 0;
-    for (MethodNode method : node.methods) {
-      for (AbstractInsnNode insn : method.instructions.toArray()) {
-        if (isStringLdc(insn, value)) count++;
-      }
-    }
-    return count;
-  }
-
-  private static int countCategoryHooks(ClassNode node, String name, String desc, int category) {
-    int count = 0;
-    for (MethodNode method : node.methods) {
-      for (MethodInsnNode call : calls(method, Opcodes.INVOKESTATIC, HOOKS, name, desc)) {
-        if (isIntegerLdc(previousMeaningful(call), category)) count++;
-      }
-    }
-    return count;
-  }
 
   private static MethodNode findMethod(ClassNode node, AbstractInsnNode target) {
     for (MethodNode method : node.methods) {
@@ -1546,42 +1499,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     throw mismatch("instruction is not owned by the target class");
   }
 
-  private static boolean isStringLdc(AbstractInsnNode insn, String value) {
-    return insn instanceof LdcInsnNode ldc && value.equals(ldc.cst);
-  }
-
-  private static boolean isIntegerLdc(AbstractInsnNode insn, int value) {
-    if (insn instanceof LdcInsnNode ldc) return Integer.valueOf(value).equals(ldc.cst);
-    int opcode = insn == null ? -1 : insn.getOpcode();
-    return (value == -1 && opcode == Opcodes.ICONST_M1)
-        || (value >= 0 && value <= 5 && opcode == Opcodes.ICONST_0 + value)
-        || (insn instanceof IntInsnNode integer && integer.operand == value
-            && (integer.getOpcode() == Opcodes.BIPUSH || integer.getOpcode() == Opcodes.SIPUSH));
-  }
-
-  private static boolean sourceIsIntegerConstant(SourceValue value, int expected) {
-    return value != null && value.insns != null && value.insns.size() == 1
-        && isIntegerLdc(value.insns.iterator().next(), expected);
-  }
-
-  private static void requireNoControlBoundary(AbstractInsnNode start, AbstractInsnNode end, String label) {
-    for (AbstractInsnNode cursor = start; cursor != null; cursor = cursor.getNext()) {
-      if (cursor instanceof LabelNode || cursor instanceof FrameNode || cursor instanceof JumpInsnNode) {
-        throw mismatch(label + " contains a control-flow boundary");
-      }
-      if (cursor == end) return;
-    }
-    throw mismatch(label + " end is not reachable from start");
-  }
-
-  private static void removeRange(MethodNode method, AbstractInsnNode start, AbstractInsnNode end) {
-    AbstractInsnNode after = end.getNext();
-    for (AbstractInsnNode cursor = start; cursor != after;) {
-      AbstractInsnNode next = cursor.getNext();
-      method.instructions.remove(cursor);
-      cursor = next;
-    }
-  }
 
   // ---------------------------------------------------------------------
   // H: core map renderer
@@ -1620,8 +1537,8 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     for (AllocationSpec spec : specs) {
       List<AllocationPlan> found = hRenderStuffAllocationPlans(node.name, method, spec);
       List<Integer> locals = storedHookResultLocals(method, spec);
-      allocationsOriginal &= found.size() == spec.expected && locals.isEmpty();
-      allocationsPatched &= found.isEmpty() && locals.size() == spec.expected;
+      allocationsOriginal &= found.size() == spec.expected() && locals.isEmpty();
+      allocationsPatched &= found.isEmpty() && locals.size() == spec.expected();
       plans.add(found);
       hookedLocals.add(locals);
     }
@@ -1645,7 +1562,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     for (int i = 0; i < specs.size(); i++) {
       AllocationSpec spec = specs.get(i);
       for (int j = 0; j < plans.get(i).size(); j++) {
-        requireScratchUseContract(node.name, method, plans.get(i).get(j).local, spec, j, "H.renderStuff");
+        requireScratchUseContract(node.name, method, plans.get(i).get(j).local(), spec, j, "H.renderStuff");
       }
     }
 
@@ -1704,7 +1621,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     List<AllocationPlan> result = new ArrayList<>();
     for (AbstractInsnNode insn : method.instructions.toArray()) {
       if (!(insn instanceof TypeInsnNode allocation) || allocation.getOpcode() != Opcodes.NEW
-          || !allocation.desc.equals(spec.type))
+          || !allocation.desc.equals(spec.type()))
         continue;
       AbstractInsnNode duplicate = nextMeaningful(allocation);
       if (duplicate == null || duplicate.getOpcode() != Opcodes.DUP) continue;
@@ -1712,7 +1629,8 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       MethodInsnNode constructor = null;
       for (AbstractInsnNode cursor = duplicate.getNext(); cursor != null; cursor = cursor.getNext()) {
         if (cursor instanceof MethodInsnNode call && call.getOpcode() == Opcodes.INVOKESPECIAL
-            && call.owner.equals(spec.type) && call.name.equals("<init>") && call.desc.equals(spec.constructorDesc)) {
+            && call.owner.equals(spec.type()) && call.name.equals("<init>")
+            && call.desc.equals(spec.constructorDesc())) {
           SourceValue receiver = receiverSource(method, call, frames);
           if (sourceContains(receiver, duplicate)) constructor = call;
           break;
@@ -1740,12 +1658,12 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     for (int i = 0; i < specs.size(); i++) {
       AllocationSpec spec = specs.get(i);
       for (AllocationPlan plan : plans.get(i)) {
-        method.instructions.remove(plan.allocation);
-        method.instructions.remove(plan.duplicate);
-        makeStatic(plan.constructor, HOOKS, spec.hookName, spec.hookDesc);
+        method.instructions.remove(plan.allocation());
+        method.instructions.remove(plan.duplicate());
+        makeStatic(plan.constructor(), HOOKS, spec.hookName(), spec.hookDesc());
       }
-      requireCount("H.renderStuff postcondition " + spec.hookName,
-          countCalls(method, Opcodes.INVOKESTATIC, HOOKS, spec.hookName, spec.hookDesc), spec.expected);
+      requireCount("H.renderStuff postcondition " + spec.hookName(),
+          countCalls(method, Opcodes.INVOKESTATIC, HOOKS, spec.hookName(), spec.hookDesc()), spec.expected());
     }
   }
 
@@ -2605,14 +2523,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
         method.name + " lifecycle transition token initializer");
   }
 
-  private static List<AbstractInsnNode> campaignReturns(MethodNode method) {
-    ArrayList<AbstractInsnNode> returns = new ArrayList<>();
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn.getOpcode() == Opcodes.RETURN) returns.add(insn);
-    }
-    if (returns.isEmpty()) throw mismatch(method.name + " has no normal return");
-    return returns;
-  }
 
   private static FieldInsnNode requireSingletonWrite(MethodNode method, String owner, String name, String desc,
       String label) {
@@ -3514,16 +3424,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return true;
   }
 
-  private static AbstractInsnNode requireSingleReturn(MethodNode method, String label) {
-    AbstractInsnNode result = null;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn.getOpcode() != Opcodes.RETURN) continue;
-      if (result != null) throw mismatch(label + " has multiple normal returns");
-      result = insn;
-    }
-    if (result == null) throw mismatch(label + " has no normal return");
-    return result;
-  }
 
   private static StrategicJumpCommon inspectStrategicJumpCommon(String owner, MethodNode method) {
     requireCount("StrategicModule hostile-market calls", countCalls(method, Opcodes.INVOKESTATIC,
@@ -3781,24 +3681,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
         "StrategicModule destination containing location");
   }
 
-  private static VarInsnNode requireVar(AbstractInsnNode insn, int opcode, String label) {
-    if (!(insn instanceof VarInsnNode var) || var.getOpcode() != opcode) {
-      throw mismatch(label + " has unexpected instruction");
-    }
-    return var;
-  }
-
-  private static JumpInsnNode requireJump(AbstractInsnNode insn, int opcode, String label) {
-    if (!(insn instanceof JumpInsnNode jump) || jump.getOpcode() != opcode) {
-      throw mismatch(label + " has unexpected instruction");
-    }
-    return jump;
-  }
-
-  private static boolean sourceIsFloatConstant(SourceValue value, float expected) {
-    return value != null && value.insns != null && value.insns.size() == 1
-        && value.insns.iterator().next() instanceof LdcInsnNode ldc && isFloat(ldc, expected);
-  }
 
   private record StrategicJumpCommon(MethodNode method, MethodInsnNode destinations, AbstractInsnNode acceptedEntry,
       AbstractInsnNode candidateStart, int jumpPointLocal, int fleetLocal, int unsafeLocal) {
@@ -3853,17 +3735,17 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       List<SnapshotAllocationPlan> plans = snapshotAllocationPlans(node.name, runScripts, spec);
       requireCount("BaseCampaignEntity.runScripts defensive snapshot", plans.size(), 1);
       requireCount("BaseCampaignEntity.runScripts retired snapshot hook",
-          countCalls(runScripts, Opcodes.INVOKESTATIC, HOOKS, spec.hookName, spec.hookDesc), 0);
+          countCalls(runScripts, Opcodes.INVOKESTATIC, HOOKS, spec.hookName(), spec.hookDesc()), 0);
 
       SnapshotAllocationPlan snapshot = plans.get(0);
-      MethodInsnNode constructor = snapshot.constructor;
+      MethodInsnNode constructor = snapshot.constructor();
       Frame<SourceValue>[] frames = sourceFrames(node.name, runScripts);
       FieldInsnNode scriptsField = requireSourceField(argumentSource(runScripts, constructor, frames, 0),
           Opcodes.GETFIELD, node.name, LIST_DESC, "BaseCampaignEntity.runScripts scripts field");
       if (!scriptsField.name.equals("scripts")) {
         return Match.incompatible("BaseCampaignEntity.runScripts snapshot no longer reads scripts");
       }
-      requireSnapshotUseContract(node.name, runScripts, snapshot.store, 1,
+      requireSnapshotUseContract(node.name, runScripts, snapshot.store(), 1,
           "BaseCampaignEntity.runScripts defensive snapshot");
 
       boolean guarded = empties.size() == 1 && hasEntityScriptEmptyGuard(node.name, runScripts, scriptsField.name);
@@ -3961,23 +3843,23 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       }
     }
 
-    if (bodyStart != plan.allocation || nextMeaningful(plan.allocation) != plan.duplicate) {
+    if (bodyStart != plan.allocation() || nextMeaningful(plan.allocation()) != plan.duplicate()) {
       throw mismatch("BaseCampaignEntity.runScripts has a foreign entry prologue");
     }
-    AbstractInsnNode loadThis = nextMeaningful(plan.duplicate);
+    AbstractInsnNode loadThis = nextMeaningful(plan.duplicate());
     AbstractInsnNode fieldInsn = nextMeaningful(loadThis);
     if (!(loadThis instanceof VarInsnNode load) || load.getOpcode() != Opcodes.ALOAD || load.var != 0
         || !(fieldInsn instanceof FieldInsnNode field) || field.getOpcode() != Opcodes.GETFIELD
         || !field.owner.equals(owner) || !field.name.equals(scriptsFieldName) || !field.desc.equals(LIST_DESC)
-        || nextMeaningful(fieldInsn) != plan.constructor || nextMeaningful(plan.constructor) != plan.store) {
+        || nextMeaningful(fieldInsn) != plan.constructor() || nextMeaningful(plan.constructor()) != plan.store()) {
       throw mismatch("BaseCampaignEntity.runScripts snapshot entry sequence changed");
     }
-    AbstractInsnNode snapshotLoad = nextMeaningful(plan.store);
+    AbstractInsnNode snapshotLoad = nextMeaningful(plan.store());
     AbstractInsnNode iteratorInsn = nextMeaningful(snapshotLoad);
     AbstractInsnNode iteratorStoreInsn = nextMeaningful(iteratorInsn);
     AbstractInsnNode initialJumpInsn = nextMeaningful(iteratorStoreInsn);
     if (!(snapshotLoad instanceof VarInsnNode snapshotVar) || snapshotVar.getOpcode() != Opcodes.ALOAD
-        || snapshotVar.var != plan.store.var || !(iteratorInsn instanceof MethodInsnNode iterator)
+        || snapshotVar.var != plan.store().var || !(iteratorInsn instanceof MethodInsnNode iterator)
         || !callMatches(iterator, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator", "()Ljava/util/Iterator;")
         || !(iteratorStoreInsn instanceof VarInsnNode iteratorStore) || iteratorStore.getOpcode() != Opcodes.ASTORE
         || !(initialJumpInsn instanceof JumpInsnNode initialJump) || initialJump.getOpcode() != Opcodes.GOTO) {
@@ -4501,19 +4383,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     }
   }
 
-  private static AbstractInsnNode onlyInsn(List<AbstractInsnNode> values, String label) {
-    if (values.size() != 1) { throw mismatch(label + " expected exactly 1 site but found " + values.size()); }
-    return values.get(0);
-  }
-
-  private static List<AbstractInsnNode> opcodeReturns(MethodNode method, int opcode, String label) {
-    ArrayList<AbstractInsnNode> returns = new ArrayList<>();
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn.getOpcode() == opcode) returns.add(insn);
-    }
-    if (returns.isEmpty()) throw mismatch(label + " has no expected return");
-    return returns;
-  }
 
   /**
    * Replaces the terminal vanilla core-worlds recomputation only after the
@@ -5388,15 +5257,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_SYNTHETIC;
   }
 
-  private static FieldNode findField(ClassNode node, String name) {
-    FieldNode found = null;
-    for (FieldNode field : node.fields) {
-      if (!field.name.equals(name)) continue;
-      if (found != null) throw mismatch("duplicate field " + node.name + "." + name);
-      found = field;
-    }
-    return found;
-  }
 
   private static void requireMarketAdvancePlanMask(ClassNode node, int expectedMask) {
     FieldNode mask = findField(node, MARKET_ADVANCE_PLAN_MASK_FIELD);
@@ -5486,59 +5346,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return report;
   }
 
-  private static int persistentStateAccess() {
-    return Opcodes.ACC_PRIVATE | Opcodes.ACC_TRANSIENT | Opcodes.ACC_SYNTHETIC;
-  }
-
-  private static boolean hasExactSyntheticField(ClassNode node, String name, String desc, int access) {
-    FieldNode found = null;
-    for (FieldNode field : node.fields) {
-      if (!field.name.equals(name)) continue;
-      if (found != null) throw mismatch("duplicate synthetic field " + node.name + "." + name);
-      found = field;
-    }
-    if (found == null) return false;
-    if (!found.desc.equals(desc) || found.access != access || found.signature != null || found.value != null) {
-      throw mismatch("foreign or malformed synthetic field " + node.name + "." + name);
-    }
-    return true;
-  }
-
-  private static boolean hasExactPersistentAccessor(ClassNode node, String name, String desc, boolean timed,
-      String stateField, int auditValue, int kind) {
-    List<MethodNode> methods = methods(node, name, desc);
-    if (methods.isEmpty()) return false;
-    if (methods.size() != 1) throw mismatch("duplicate persistent accessor " + name + desc);
-    MethodNode method = methods.get(0);
-    int expectedAccess = Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC;
-    if (method.access != expectedAccess || method.signature != null
-        || (method.exceptions != null && !method.exceptions.isEmpty())) {
-      throw mismatch("foreign persistent accessor metadata " + name + desc);
-    }
-    List<AbstractInsnNode> code = meaningfulInstructions(method);
-    int expected = timed ? 8 : 7;
-    requireCount(name + " instruction count", code.size(), expected);
-    requireVar(code.get(0), Opcodes.ALOAD, 0, name + " state owner");
-    requireField(code.get(1), Opcodes.GETFIELD, node.name, stateField, PERSISTENT_STATE_DESC, name + " state field");
-    int cursor = 2;
-    if (timed) {
-      requireVar(code.get(cursor++), Opcodes.ALOAD, 0, name + " source owner");
-      requireCall(asMethod(code.get(cursor++), name + " source call"), Opcodes.INVOKEVIRTUAL, node.name, "getMarkets",
-          "()Ljava/util/List;", name + " source call");
-    } else {
-      requireVar(code.get(cursor++), Opcodes.ALOAD, 1, name + " source argument");
-    }
-    if (!isIntegerLdc(code.get(cursor++), auditValue) || !isIntegerLdc(code.get(cursor++), kind)) {
-      throw mismatch(name + " audit/kind constants changed");
-    }
-    String hookName = timed ? "borrowPersistentSnapshotTimed" : "borrowPersistentSnapshotFrames";
-    requireCall(asMethod(code.get(cursor++), name + " hook"), Opcodes.INVOKESTATIC, HOOKS, hookName,
-        "(Ljava/lang/Object;Ljava/util/Collection;II)Ljava/util/ArrayList;", name + " hook");
-    if (code.get(cursor).getOpcode() != Opcodes.ARETURN) {
-      throw mismatch(name + " no longer returns the persistent snapshot");
-    }
-    return true;
-  }
 
   private MethodNode newEconomyPersistentAccessor(String owner) {
     MethodNode method = new MethodNode(Opcodes.ASM8, Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC,
@@ -5572,12 +5379,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return method;
   }
 
-  private static AbstractInsnNode pushInt(int value) {
-    if (value >= -1 && value <= 5) { return new InsnNode(value == -1 ? Opcodes.ICONST_M1 : Opcodes.ICONST_0 + value); }
-    if (value >= Byte.MIN_VALUE && value <= Byte.MAX_VALUE) { return new IntInsnNode(Opcodes.BIPUSH, value); }
-    if (value >= Short.MIN_VALUE && value <= Short.MAX_VALUE) { return new IntInsnNode(Opcodes.SIPUSH, value); }
-    return new LdcInsnNode(value);
-  }
 
   private static void requireOriginalEconomyMarketSnapshot(MethodNode method, String label) {
     List<MethodInsnNode> calls = calls(method, Opcodes.INVOKEVIRTUAL, ECONOMY, "getMarketsCopy", "()Ljava/util/List;");
@@ -5602,112 +5403,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     call.itf = false;
   }
 
-  private static void initializePersistentStateAfterSuper(ClassNode node, MethodNode constructor, String stateField,
-      String label) {
-    List<MethodInsnNode> supers = calls(constructor, Opcodes.INVOKESPECIAL, node.superName, "<init>", "()V");
-    requireCount(label + " super constructor", supers.size(), 1);
-    initializePersistentStateAfterAnchor(constructor, supers.get(0), node.name, stateField);
-  }
-
-  private static void initializePersistentStateAtEntry(MethodNode method, String owner, String stateField,
-      String label) {
-    AbstractInsnNode first = firstMeaningful(method);
-    if (first == null) throw mismatch(label + " has no executable body");
-    InsnList init = persistentStateInitializer(owner, stateField, 0);
-    method.instructions.insertBefore(first, init);
-  }
-
-  private static void initializePersistentStateAfterAnchor(MethodNode method, AbstractInsnNode anchor, String owner,
-      String stateField) {
-    method.instructions.insert(anchor, persistentStateInitializer(owner, stateField, 0));
-  }
-
-  private static InsnList persistentStateInitializer(String owner, String stateField, int ownerLocal) {
-    InsnList init = new InsnList();
-    init.add(new VarInsnNode(Opcodes.ALOAD, ownerLocal));
-    init.add(
-        new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "newPersistentSnapshotState", "()Ljava/lang/Object;", false));
-    init.add(new FieldInsnNode(Opcodes.PUTFIELD, owner, stateField, PERSISTENT_STATE_DESC));
-    return init;
-  }
-
-  private static FieldInsnNode lastPersistentStateInitializer(MethodNode method, String owner, String stateField) {
-    FieldInsnNode result = null;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof FieldInsnNode field && field.getOpcode() == Opcodes.PUTFIELD && field.owner.equals(owner)
-          && field.name.equals(stateField) && field.desc.equals(PERSISTENT_STATE_DESC))
-        result = field;
-    }
-    if (result == null) throw mismatch("missing persistent state initializer " + stateField);
-    return result;
-  }
-
-  private static int countPersistentStateInitializers(MethodNode method, String owner, String stateField) {
-    int count = 0;
-    for (MethodInsnNode call : calls(method, Opcodes.INVOKESTATIC, HOOKS, "newPersistentSnapshotState",
-        "()Ljava/lang/Object;")) {
-      AbstractInsnNode next = nextMeaningful(call);
-      if (next instanceof FieldInsnNode field && field.getOpcode() == Opcodes.PUTFIELD && field.owner.equals(owner)
-          && field.name.equals(stateField) && field.desc.equals(PERSISTENT_STATE_DESC))
-        count++;
-    }
-    return count;
-  }
-
-  private static void insertPersistentMarkAfterUniqueCall(MethodNode method, int opcode, String callOwner,
-      String callName, String callDesc, String owner, String stateField, String label) {
-    MethodInsnNode call = only(calls(method, opcode, callOwner, callName, callDesc), label);
-    AbstractInsnNode anchor = call;
-    AbstractInsnNode next = nextMeaningful(call);
-    if (next != null && next.getOpcode() == Opcodes.POP) anchor = next;
-    insertPersistentMarkAfter(method, anchor, owner, stateField);
-  }
-
-  private static void insertPersistentMarkAfter(MethodNode method, AbstractInsnNode anchor, String owner,
-      String stateField) {
-    InsnList mark = new InsnList();
-    mark.add(new VarInsnNode(Opcodes.ALOAD, 0));
-    mark.add(new FieldInsnNode(Opcodes.GETFIELD, owner, stateField, PERSISTENT_STATE_DESC));
-    mark.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "markPersistentSnapshotStructure", "(Ljava/lang/Object;)V",
-        false));
-    method.instructions.insert(anchor, mark);
-  }
-
-  private static int countPersistentMarks(MethodNode method, String owner, String stateField) {
-    Frame<SourceValue>[] frames = sourceFrames(owner, method);
-    int count = 0;
-    for (MethodInsnNode call : calls(method, Opcodes.INVOKESTATIC, HOOKS, "markPersistentSnapshotStructure",
-        "(Ljava/lang/Object;)V")) {
-      FieldInsnNode field =
-          optionalSourceField(argumentSource(method, call, frames, 0), Opcodes.GETFIELD, owner, PERSISTENT_STATE_DESC);
-      if (field != null && field.name.equals(stateField)) count++;
-    }
-    return count;
-  }
-
-  private static FieldInsnNode onlyField(MethodNode method, int opcode, String owner, String name, String desc,
-      String label) {
-    List<FieldInsnNode> result = new ArrayList<>();
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof FieldInsnNode field && field.getOpcode() == opcode && field.owner.equals(owner)
-          && field.name.equals(name) && field.desc.equals(desc))
-        result.add(field);
-    }
-    if (result.size() != 1) { throw mismatch(label + " expected once, found " + result.size()); }
-    return result.get(0);
-  }
-
-  private static int countImmediateArrayListIteratorSnapshots(MethodNode method) {
-    int count = 0;
-    for (MethodInsnNode constructor : calls(method, Opcodes.INVOKESPECIAL, "java/util/ArrayList", "<init>",
-        "(Ljava/util/Collection;)V")) {
-      AbstractInsnNode next = nextMeaningful(constructor);
-      if (next instanceof MethodInsnNode iterator
-          && callMatches(iterator, Opcodes.INVOKEVIRTUAL, "java/util/ArrayList", "iterator", "()Ljava/util/Iterator;"))
-        count++;
-    }
-    return count;
-  }
 
   private static void replaceMarketAdvanceSnapshots(MethodNode method, String owner) {
     Frame<SourceValue>[] frames = sourceFrames(owner, method);
@@ -6057,56 +5752,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       int receiverLocal) {
   }
 
-  private static PatchState marketSchedulerRegistrationState(ClassNode node, int component, String label) {
-    List<MethodNode> initializers = methods(node, "<clinit>", "()V");
-    if (initializers.size() > 1) { throw mismatch(label + " has duplicate class initializers"); }
-    if (initializers.isEmpty()) return PatchState.ORIGINAL;
-    MethodNode initializer = initializers.get(0);
-    int returns = 0;
-    int matching = 0;
-    int totalHooks = countCalls(initializer, Opcodes.INVOKESTATIC, HOOKS, "registerMarketSchedulerComponent", "(I)V");
-    for (AbstractInsnNode insn : initializer.instructions.toArray()) {
-      if (insn.getOpcode() != Opcodes.RETURN) continue;
-      returns++;
-      AbstractInsnNode callInsn = previousMeaningful(insn);
-      if (!(callInsn instanceof MethodInsnNode call)
-          || !callMatches(call, Opcodes.INVOKESTATIC, HOOKS, "registerMarketSchedulerComponent", "(I)V"))
-        continue;
-      AbstractInsnNode source = previousMeaningful(call);
-      if (!isIntegerLdc(source, component)) { throw mismatch(label + " registration component changed"); }
-      matching++;
-    }
-    if (totalHooks == 0) return PatchState.ORIGINAL;
-    if (returns > 0 && totalHooks == returns && matching == returns) { return PatchState.PATCHED; }
-    throw mismatch(label + " registration is partial or not on every normal class-init exit");
-  }
-
-  private static void installMarketSchedulerRegistration(ClassNode node, int component, String label) {
-    if (marketSchedulerRegistrationState(node, component, label) != PatchState.ORIGINAL) {
-      throw mismatch(label + " registration is not original");
-    }
-    List<MethodNode> initializers = methods(node, "<clinit>", "()V");
-    MethodNode initializer;
-    if (initializers.isEmpty()) {
-      initializer = new MethodNode(Opcodes.ASM8, Opcodes.ACC_STATIC, "<clinit>", "()V", null, null);
-      initializer.instructions.add(new InsnNode(Opcodes.RETURN));
-      node.methods.add(initializer);
-    } else {
-      initializer = initializers.get(0);
-    }
-    List<AbstractInsnNode> returns = new ArrayList<>();
-    for (AbstractInsnNode insn : initializer.instructions.toArray()) {
-      if (insn.getOpcode() == Opcodes.RETURN) returns.add(insn);
-    }
-    if (returns.isEmpty()) throw mismatch(label + " class initializer has no normal return");
-    for (AbstractInsnNode exit : returns) {
-      InsnList registration = new InsnList();
-      registration.add(pushInt(component));
-      registration
-          .add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "registerMarketSchedulerComponent", "(I)V", false));
-      initializer.instructions.insertBefore(exit, registration);
-    }
-  }
 
   private static void requireEconomyMarketAdvanceOperands(MethodInsnNode call, boolean patched, int expectedSource) {
     AbstractInsnNode source = patched ? previousMeaningful(call) : null;
@@ -6413,22 +6058,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return report;
   }
 
-  private static FieldNode uniqueField(ClassNode node, String name) {
-    FieldNode result = null;
-    for (FieldNode field : node.fields) {
-      if (!field.name.equals(name)) continue;
-      if (result != null) throw mismatch("duplicate field " + name);
-      result = field;
-    }
-    return result;
-  }
-
-  private static void requirePrivateSyntheticField(FieldNode field, String name, String desc, int access) {
-    if (field == null || !field.desc.equals(desc) || field.access != access || field.signature != null
-        || field.value != null) {
-      throw mismatch("foreign or incomplete field " + name);
-    }
-  }
 
   private static void insertCommodityTemporalBaseDirtyPrologue(ClassNode node, MethodNode method,
       TemporalDirtyMethod target, String ownerField, String roleField, String hookName, String hookDesc) {
@@ -6484,43 +6113,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
   private record TemporalDirtyMethod(String name, String desc, int sourceLocal) {
   }
 
-
-  private static AbstractInsnNode firstExecutable(MethodNode method) {
-    AbstractInsnNode first = method.instructions.getFirst();
-    while (first != null && first.getOpcode() < 0) first = first.getNext();
-    return first;
-  }
-
-
-  private static void removeInstructionRange(MethodNode method, AbstractInsnNode start, AbstractInsnNode end,
-      String label) {
-    Set<AbstractInsnNode> removed = new HashSet<>();
-    AbstractInsnNode cursor = start;
-    while (cursor != null) {
-      removed.add(cursor);
-      if (cursor == end) break;
-      cursor = cursor.getNext();
-    }
-    if (cursor == null) throw mismatch(label + " end is not reachable from start");
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (removed.contains(insn)) continue;
-      if (insn instanceof JumpInsnNode jump && removed.contains(jump.label)) {
-        throw mismatch(label + " has an external jump into the removed range");
-      }
-    }
-    for (TryCatchBlockNode block : method.tryCatchBlocks) {
-      if (removed.contains(block.start) || removed.contains(block.end) || removed.contains(block.handler)) {
-        throw mismatch(label + " crosses an exception-handler boundary");
-      }
-    }
-    cursor = start;
-    while (cursor != null) {
-      AbstractInsnNode next = cursor.getNext();
-      method.instructions.remove(cursor);
-      if (cursor == end) break;
-      cursor = next;
-    }
-  }
 
   private record MarketCommodityLoop(AbstractInsnNode start, AbstractInsnNode end, int daysLocal) {
   }
@@ -7396,161 +6988,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       int playerLocal) {
   }
 
-  private static void appendInitializedLocalToExpandedFrames(MethodNode method, int localSlot, String localType) {
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (!(insn instanceof FrameNode frame)) continue;
-      if (frame.type != Opcodes.F_NEW) { throw mismatch("punitive frame expansion did not produce full frames"); }
-      if (frame.local == null) frame.local = new ArrayList<>();
-      int slots = frameLocalSlots(frame.local);
-      if (slots > localSlot) { throw mismatch("punitive frame already extends beyond new cache local"); }
-      while (slots < localSlot) {
-        frame.local.add(Opcodes.TOP);
-        slots++;
-      }
-      frame.local.add(localType);
-    }
-  }
-
-  private static int frameLocalSlots(List<Object> locals) {
-    if (locals == null) return 0;
-    int slots = 0;
-    for (Object value : locals) {
-      slots += (Opcodes.LONG.equals(value) || Opcodes.DOUBLE.equals(value)) ? 2 : 1;
-    }
-    return slots;
-  }
-
-  private static ClassNode readClassExpanded(byte[] bytes) {
-    ClassNode node = new ClassNode(Opcodes.ASM8);
-    new ClassReader(bytes).accept(node, ClassReader.EXPAND_FRAMES);
-    return node;
-  }
-
-  private static ClassNode loadOwnedTemplate(String owner, String resource, String label) {
-    try (InputStream input = PrepatcherTransformer.class.getResourceAsStream(resource)) {
-      if (input == null) throw mismatch("missing " + label + " template resource");
-      ClassNode template = readClass(input.readAllBytes());
-      if (!owner.equals(template.name)) { throw mismatch(label + " template owner changed: " + template.name); }
-      return template;
-    } catch (IOException ex) {
-      throw mismatch("unable to read " + label + " template: " + ex.getMessage());
-    }
-  }
-
-  private static MethodNode cloneAndRemapOwnedTemplateMethod(MethodNode source, String templateOwner,
-      String targetOwner, String label) {
-    MethodNode copy =
-        new MethodNode(Opcodes.ASM8, source.access, source.name, source.desc, source.signature, exceptions(source));
-    source.accept(copy);
-    remapOwnedTemplateMethod(copy, templateOwner, targetOwner, label);
-    return copy;
-  }
-
-  private static void remapOwnedTemplateMethod(MethodNode method, String templateOwner, String targetOwner,
-      String label) {
-    method.desc = remapOwnedTemplateText(method.desc, templateOwner, targetOwner);
-    method.signature = remapOwnedTemplateText(method.signature, templateOwner, targetOwner);
-    if (method.exceptions != null) {
-      for (int i = 0; i < method.exceptions.size(); i++) {
-        method.exceptions.set(i, remapOwnedTemplateText(method.exceptions.get(i), templateOwner, targetOwner));
-      }
-    }
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof FieldInsnNode field) {
-        field.owner = remapOwnedTemplateText(field.owner, templateOwner, targetOwner);
-        field.desc = remapOwnedTemplateText(field.desc, templateOwner, targetOwner);
-      } else if (insn instanceof MethodInsnNode call) {
-        call.owner = remapOwnedTemplateText(call.owner, templateOwner, targetOwner);
-        call.desc = remapOwnedTemplateText(call.desc, templateOwner, targetOwner);
-      } else if (insn instanceof TypeInsnNode type) {
-        type.desc = remapOwnedTemplateText(type.desc, templateOwner, targetOwner);
-      } else if (insn instanceof LdcInsnNode ldc && ldc.cst instanceof Type type) {
-        ldc.cst = Type.getType(remapOwnedTemplateText(type.getDescriptor(), templateOwner, targetOwner));
-      } else if (insn instanceof MultiANewArrayInsnNode array) {
-        array.desc = remapOwnedTemplateText(array.desc, templateOwner, targetOwner);
-      } else if (insn instanceof FrameNode frame) {
-        remapOwnedTemplateFrameValues(frame.local, templateOwner, targetOwner);
-        remapOwnedTemplateFrameValues(frame.stack, templateOwner, targetOwner);
-      } else if (insn instanceof InvokeDynamicInsnNode) {
-        throw mismatch("unexpected invokedynamic in " + label + " template");
-      }
-    }
-    for (TryCatchBlockNode block : method.tryCatchBlocks) {
-      block.type = remapOwnedTemplateText(block.type, templateOwner, targetOwner);
-    }
-    if (method.localVariables != null) {
-      for (LocalVariableNode local : method.localVariables) {
-        local.desc = remapOwnedTemplateText(local.desc, templateOwner, targetOwner);
-        local.signature = remapOwnedTemplateText(local.signature, templateOwner, targetOwner);
-      }
-    }
-  }
-
-  private static void remapOwnedTemplateFrameValues(List<Object> values, String templateOwner, String targetOwner) {
-    if (values == null) return;
-    for (int i = 0; i < values.size(); i++) {
-      Object value = values.get(i);
-      if (value instanceof String text) {
-        values.set(i, remapOwnedTemplateText(text, templateOwner, targetOwner));
-      }
-    }
-  }
-
-  private static String remapOwnedTemplateText(String value, String templateOwner, String targetOwner) {
-    return value == null ? null : value.replace(templateOwner, targetOwner);
-  }
-
-  private static void requireNoOwnedTemplateReferences(ClassNode node, String templateOwner, String label) {
-    for (FieldNode field : node.fields) {
-      if (containsTemplateOwner(field.desc, templateOwner) || containsTemplateOwner(field.signature, templateOwner)) {
-        throw mismatch(label + " template field reference leaked");
-      }
-    }
-    for (MethodNode method : node.methods) {
-      if (containsTemplateOwner(method.desc, templateOwner) || containsTemplateOwner(method.signature, templateOwner)) {
-        throw mismatch(label + " template method signature leaked");
-      }
-      for (AbstractInsnNode insn : method.instructions.toArray()) {
-        if (insn instanceof FieldInsnNode field && (containsTemplateOwner(field.owner, templateOwner)
-            || containsTemplateOwner(field.desc, templateOwner))) {
-          throw mismatch(label + " template field instruction leaked");
-        }
-        if (insn instanceof MethodInsnNode call
-            && (containsTemplateOwner(call.owner, templateOwner) || containsTemplateOwner(call.desc, templateOwner))) {
-          throw mismatch(label + " template method instruction leaked");
-        }
-        if (insn instanceof TypeInsnNode type && containsTemplateOwner(type.desc, templateOwner)) {
-          throw mismatch(label + " template type instruction leaked");
-        }
-        if (insn instanceof LdcInsnNode ldc && ldc.cst instanceof Type type
-            && containsTemplateOwner(type.getDescriptor(), templateOwner)) {
-          throw mismatch(label + " template class literal leaked");
-        }
-      }
-    }
-  }
-
-  private static boolean containsTemplateOwner(String value, String templateOwner) {
-    return value != null && value.contains(templateOwner);
-  }
-
-  private static int countTypeInstructions(MethodNode method, int opcode, String desc) {
-    int count = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof TypeInsnNode type && type.getOpcode() == opcode && type.desc.equals(desc)) count++;
-    }
-    return count;
-  }
-
-  private static int countClassLiterals(MethodNode method, String internalName) {
-    int count = 0;
-    String descriptor = "L" + internalName + ";";
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof LdcInsnNode ldc && ldc.cst instanceof Type type && type.getDescriptor().equals(descriptor))
-        count++;
-    }
-    return count;
-  }
 
   // ---------------------------------------------------------------------
   // ---------------------------------------------------------------------
@@ -8260,29 +7697,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     requireNoTempModTemplateReferences(node);
   }
 
-  private static int countCallsInClass(ClassNode node, String owner, String name, String desc) {
-    int count = 0;
-    for (MethodNode method : node.methods) {
-      count += countCalls(method, -1, owner, name, desc);
-    }
-    return count;
-  }
-
-  private static MethodNode renameForPrivateOriginal(ClassNode node, MethodNode original, String rawName) {
-    return renameForPrivateOriginal(node.name, node.methods, original, rawName);
-  }
-
-  private static MethodNode renameForPrivateOriginal(String owner, List<MethodNode> methods, MethodNode original,
-      String rawName) {
-    String wrapperName = original.name;
-    MethodNode wrapper = new MethodNode(Opcodes.ASM8, original.access, wrapperName, original.desc, original.signature,
-        exceptions(original));
-    moveWrapperMetadata(original, wrapper, owner + "." + wrapperName + original.desc);
-    original.name = rawName;
-    makePrivateSynthetic(original);
-    methods.add(wrapper);
-    return wrapper;
-  }
 
   private static ClassNode loadTempModHybridTemplate() {
     try (InputStream input = PrepatcherTransformer.class.getResourceAsStream(TEMP_MOD_TEMPLATE_RESOURCE)) {
@@ -8415,27 +7829,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     }
   }
 
-
-  private static void replaceMethodBody(MethodNode method, InsnList code, int maxLocals) {
-    method.instructions.clear();
-    method.instructions.add(code);
-    method.tryCatchBlocks.clear();
-    if (method.localVariables != null) method.localVariables.clear();
-    if (method.visibleLocalVariableAnnotations != null) method.visibleLocalVariableAnnotations.clear();
-    if (method.invisibleLocalVariableAnnotations != null) method.invisibleLocalVariableAnnotations.clear();
-    method.maxLocals = maxLocals;
-    method.maxStack = 8;
-  }
-
-  private static int countNew(MethodNode method, String type) {
-    int count = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof TypeInsnNode allocation && allocation.getOpcode() == Opcodes.NEW
-          && allocation.desc.equals(type))
-        count++;
-    }
-    return count;
-  }
 
   /**
    * CommodityOnMarket.reapplyEventMod() normally calls unmodifyFlat("eMod")
@@ -8686,9 +8079,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     }
   }
 
-  private static void requireString(AbstractInsnNode insn, String expected, String label) {
-    if (!(insn instanceof LdcInsnNode ldc) || !expected.equals(ldc.cst)) { throw mismatch(label + " changed"); }
-  }
 
   private PatchReport patchShipAdvanceScratch(ClassNode node) {
     MethodNode advance = requireMethod(node, "advance", "(F)V");
@@ -8773,37 +8163,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return changed;
   }
 
-  private static int replaceStoredSimpleAllocations(String owner, MethodNode method, String type,
-      String constructorDesc, String hookName, String hookDesc, int expected, boolean scopeInstalled, String label) {
-    List<MethodInsnNode> constructors = calls(method, Opcodes.INVOKESPECIAL, type, "<init>", constructorDesc);
-    List<MethodInsnNode> hookCalls = calls(method, Opcodes.INVOKESTATIC, HOOKS, hookName, hookDesc);
-    boolean original = constructors.size() == expected && hookCalls.isEmpty();
-    boolean patched = constructors.isEmpty() && hookCalls.size() == expected;
-    if (patched) {
-      if (scopeInstalled) throw mismatch(label + " hooks exist without their scratch scope");
-      for (MethodInsnNode hook : hookCalls) {
-        AbstractInsnNode stored = nextMeaningful(hook);
-        if (!(stored instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE) {
-          throw mismatch(label + " patched result is not stored directly in a local");
-        }
-      }
-      throw already(label + " hooks are already present");
-    }
-    if (!original) throw mismatch(label + " has mixed, missing, or ambiguous allocations");
-    Frame<SourceValue>[] frames = sourceFrames(owner, method);
-    for (MethodInsnNode constructor : constructors) {
-      AbstractInsnNode stored = nextMeaningful(constructor);
-      if (!(stored instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE) {
-        throw mismatch(label + " allocation result is not stored directly in a local");
-      }
-      AllocationPair pair = constructorDesc.equals("()V") ? immediateNoArgAllocationPair(constructor, type, label)
-          : allocationPair(method, constructor, frames, type, label);
-      method.instructions.remove(pair.allocation);
-      method.instructions.remove(pair.duplicate);
-      makeStatic(constructor, HOOKS, hookName, hookDesc);
-    }
-    return expected;
-  }
 
   private static int replaceShipCommandSnapshot(String owner, MethodNode method) {
     String hookDesc = "(Ljava/util/Collection;)Ljava/util/ArrayList;";
@@ -8838,8 +8197,8 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     MethodInsnNode constructor = directFieldSnapshots.get(0);
     AllocationPair pair =
         allocationPair(method, constructor, frames, "java/util/ArrayList", "Ship.advance command snapshot");
-    method.instructions.remove(pair.allocation);
-    method.instructions.remove(pair.duplicate);
+    method.instructions.remove(pair.allocation());
+    method.instructions.remove(pair.duplicate());
     makeStatic(constructor, HOOKS, "borrowShipListSnapshot", hookDesc);
     return 1;
   }
@@ -8917,25 +8276,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return 1;
   }
 
-  private static PatchState storedSimpleAllocationState(MethodNode method, String type, String constructorDesc,
-      String hookName, String hookDesc, int expected, String label) {
-    List<MethodInsnNode> constructors = calls(method, Opcodes.INVOKESPECIAL, type, "<init>", constructorDesc);
-    List<MethodInsnNode> hooks = calls(method, Opcodes.INVOKESTATIC, HOOKS, hookName, hookDesc);
-    boolean original = constructors.size() == expected && hooks.isEmpty();
-    boolean patched = constructors.isEmpty() && hooks.size() == expected;
-    if (!original && !patched) { throw mismatch(label + " has mixed, missing, or ambiguous allocations"); }
-
-    for (MethodInsnNode result : original ? constructors : hooks) {
-      AbstractInsnNode stored = nextMeaningful(result);
-      if (!(stored instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE) {
-        throw mismatch(label + " result is not stored directly in a local");
-      }
-      if (original && constructorDesc.equals("()V")) {
-        immediateNoArgAllocationPair(result, type, label);
-      }
-    }
-    return original ? PatchState.ORIGINAL : PatchState.PATCHED;
-  }
 
   private static PatchState shipCommandSnapshotState(String owner, MethodNode method) {
     String label = "Ship.advance command snapshot";
@@ -8981,12 +8321,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return original ? PatchState.ORIGINAL : PatchState.PATCHED;
   }
 
-  private static void requireThisFieldReceiver(FieldInsnNode field, String label) {
-    AbstractInsnNode receiver = previousMeaningful(field);
-    if (!(receiver instanceof VarInsnNode load) || load.getOpcode() != Opcodes.ALOAD || load.var != 0) {
-      throw mismatch(label + " field receiver is not this");
-    }
-  }
 
   private static PatchState particleCleanupState(MethodNode method) {
     String label = "DynamicParticleGroup removeAll cleanup";
@@ -9005,20 +8339,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return original ? PatchState.ORIGINAL : PatchState.PATCHED;
   }
 
-  private static PatchState uniformPatchState(String label, PatchState... states) {
-    boolean original = true;
-    boolean patched = true;
-    StringBuilder observed = new StringBuilder();
-    for (PatchState state : states) {
-      original &= state == PatchState.ORIGINAL;
-      patched &= state == PatchState.PATCHED;
-      if (observed.length() > 0) observed.append(',');
-      observed.append(state);
-    }
-    if (original) return PatchState.ORIGINAL;
-    if (patched) return PatchState.PATCHED;
-    throw mismatch(label + " has mixed original/patched postconditions: " + observed);
-  }
 
   private PatchReport patchCommRelaySystemIndex(ClassNode node) {
     String desc = "(" + ENTITY_TOKEN_DESC + ")" + ENTITY_TOKEN_DESC;
@@ -9058,62 +8378,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return report;
   }
 
-  private static void requireStoredLocalProducer(MethodNode method, int local, int storeOpcode, int callOpcode,
-      String callOwner, String callName, String callDesc, AbstractInsnNode before, String label) {
-    int matches = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (!(insn instanceof VarInsnNode store) || store.getOpcode() != storeOpcode || store.var != local
-          || method.instructions.indexOf(store) >= method.instructions.indexOf(before))
-        continue;
-      AbstractInsnNode producer = previousMeaningful(store);
-      if (producer instanceof MethodInsnNode call && callMatches(call, callOpcode, callOwner, callName, callDesc))
-        matches++;
-    }
-    requireCount(label, matches, 1);
-  }
-
-  private static void requireFloatLocalProducer(MethodNode method, int local, AbstractInsnNode before, String label) {
-    int matches = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (!(insn instanceof VarInsnNode store) || store.getOpcode() != Opcodes.FSTORE || store.var != local
-          || method.instructions.indexOf(store) >= method.instructions.indexOf(before))
-        continue;
-      AbstractInsnNode producer = previousMeaningful(store);
-      if (producer instanceof MethodInsnNode call && Type.getReturnType(call.desc).getSort() == Type.FLOAT) matches++;
-    }
-    requireCount(label, matches, 1);
-  }
-
-  private static AllocationPair immediateNoArgAllocationPair(MethodInsnNode constructor, String type, String label) {
-    AbstractInsnNode duplicate = previousMeaningful(constructor);
-    AbstractInsnNode allocation = previousMeaningful(duplicate);
-    if (duplicate == null || duplicate.getOpcode() != Opcodes.DUP || !(allocation instanceof TypeInsnNode typed)
-        || typed.getOpcode() != Opcodes.NEW || !typed.desc.equals(type)) {
-      throw mismatch(label + " no-arg allocation is not NEW/DUP/<init>");
-    }
-    return new AllocationPair(typed, duplicate);
-  }
-
-  private static AllocationPair allocationPair(MethodNode method, MethodInsnNode constructor,
-      Frame<SourceValue>[] frames, String type, String label) {
-    SourceValue receiver = receiverSource(method, constructor, frames);
-    TypeInsnNode allocation = null;
-    AbstractInsnNode duplicate = null;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (!(insn instanceof TypeInsnNode candidate) || candidate.getOpcode() != Opcodes.NEW
-          || !candidate.desc.equals(type))
-        continue;
-      AbstractInsnNode dup = nextMeaningful(candidate);
-      if (dup == null || dup.getOpcode() != Opcodes.DUP
-          || (!sourceContains(receiver, dup) && !sourceContains(receiver, candidate)))
-        continue;
-      if (allocation != null) throw mismatch(label + " has ambiguous allocation ownership");
-      allocation = candidate;
-      duplicate = dup;
-    }
-    if (allocation == null) throw mismatch(label + " allocation owner was not found");
-    return new AllocationPair(allocation, duplicate);
-  }
 
   // ---------------------------------------------------------------------
   // Structural matcher and verifier helpers
@@ -9227,800 +8491,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     }
   }
 
-  private static boolean ensureScratchScope(String owner, MethodNode method, String label) {
-    if (scratchScopeState(owner, method, label) == PatchState.ORIGINAL) {
-      installScratchScope(owner, method, label);
-      return true;
-    }
-    return false;
-  }
-
-  private static PatchState scratchScopeState(String owner, MethodNode method, String label) {
-    String beginDesc = "()V";
-    int begins = countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "beginScratchScope", beginDesc);
-    int ends = countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "endScratchScope", beginDesc);
-    if (begins == 0 && ends == 0) { return PatchState.ORIGINAL; }
-    requireCount(label + " scratch-scope begin hooks", begins, 1);
-    int returns = countReturnOpcodes(method);
-    requireCount(label + " scratch-scope end hooks", ends, returns + 1);
-
-    MethodInsnNode begin =
-        only(calls(method, Opcodes.INVOKESTATIC, HOOKS, "beginScratchScope", beginDesc), label + " scratch begin");
-    AbstractInsnNode first = method.instructions.getFirst();
-    while (first != null && first.getOpcode() < 0) first = first.getNext();
-    if (first != begin) throw mismatch(label + " scratch scope does not begin at method entry");
-
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (!isReturnOpcode(insn.getOpcode())) continue;
-      AbstractInsnNode previous = previousMeaningful(insn);
-      if (!(previous instanceof MethodInsnNode call)
-          || !callMatches(call, Opcodes.INVOKESTATIC, HOOKS, "endScratchScope", beginDesc)) {
-        throw mismatch(label + " return is not protected by endScratchScope");
-      }
-    }
-
-    int handlers = 0;
-    for (TryCatchBlockNode block : method.tryCatchBlocks) {
-      if (block.type != null) continue;
-      AbstractInsnNode handlerStart = nextMeaningful(block.handler);
-      if (!(handlerStart instanceof MethodInsnNode call)
-          || !callMatches(call, Opcodes.INVOKESTATIC, HOOKS, "endScratchScope", beginDesc))
-        continue;
-      AbstractInsnNode rethrow = nextMeaningful(call);
-      if (rethrow != null && rethrow.getOpcode() == Opcodes.ATHROW) handlers++;
-    }
-    requireCount(label + " scratch-scope catch-all", handlers, 1);
-    return PatchState.PATCHED;
-  }
-
-  private static boolean hasExternalControlFlowEntry(MethodNode method, AbstractInsnNode start, AbstractInsnNode end) {
-    Set<AbstractInsnNode> guarded = Collections.newSetFromMap(new IdentityHashMap<>());
-    AbstractInsnNode cursor = start;
-    while (cursor != null) {
-      guarded.add(cursor);
-      if (cursor == end) break;
-      cursor = nextMeaningful(cursor);
-    }
-    if (cursor == null) return true;
-
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (guarded.contains(insn)) continue;
-      if (insn instanceof JumpInsnNode jump) {
-        AbstractInsnNode entry = nextMeaningful(jump.label);
-        if (entry != start && guarded.contains(entry)) return true;
-      } else if (insn instanceof LookupSwitchInsnNode lookup) {
-        AbstractInsnNode defaultEntry = nextMeaningful(lookup.dflt);
-        if (defaultEntry != start && guarded.contains(defaultEntry)) return true;
-        for (LabelNode label : lookup.labels) {
-          AbstractInsnNode entry = nextMeaningful(label);
-          if (entry != start && guarded.contains(entry)) return true;
-        }
-      } else if (insn instanceof TableSwitchInsnNode table) {
-        AbstractInsnNode defaultEntry = nextMeaningful(table.dflt);
-        if (defaultEntry != start && guarded.contains(defaultEntry)) return true;
-        for (LabelNode label : table.labels) {
-          AbstractInsnNode entry = nextMeaningful(label);
-          if (entry != start && guarded.contains(entry)) return true;
-        }
-      }
-    }
-    for (TryCatchBlockNode block : method.tryCatchBlocks) {
-      AbstractInsnNode entry = nextMeaningful(block.handler);
-      if (entry != start && guarded.contains(entry)) return true;
-    }
-    return false;
-  }
-
-  private static void installScratchScope(String owner, MethodNode method, String label) {
-    if (method.instructions == null || method.instructions.getFirst() == null) {
-      throw mismatch(label + " has no code for a scratch scope");
-    }
-    String desc = "()V";
-    if (method.name.equals("<init>")) throw mismatch(label + " constructor scopes are unsupported");
-    AbstractInsnNode oldFirst = method.instructions.getFirst();
-    LabelNode entry = new LabelNode();
-    LabelNode start = new LabelNode();
-    method.instructions.insertBefore(oldFirst, entry);
-    MethodInsnNode begin = new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "beginScratchScope", desc, false);
-    method.instructions.insert(entry, begin);
-    method.instructions.insert(begin, start);
-
-    int returns = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (!isReturnOpcode(insn.getOpcode())) continue;
-      method.instructions.insertBefore(insn,
-          new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "endScratchScope", desc, false));
-      returns++;
-    }
-    if (returns == 0) throw mismatch(label + " has no normal return");
-
-    LabelNode end = new LabelNode();
-    LabelNode handler = new LabelNode();
-    method.instructions.add(end);
-    method.instructions.add(handler);
-    Object[] initialLocals = initialFrameLocals(owner, method);
-    method.instructions.add(
-        new FrameNode(Opcodes.F_FULL, initialLocals.length, initialLocals, 1, new Object[]{"java/lang/Throwable"}));
-    method.instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "endScratchScope", desc, false));
-    method.instructions.add(new InsnNode(Opcodes.ATHROW));
-    method.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, null));
-    ensureScratchScope(owner, method, label);
-  }
-
-  private static Object[] initialFrameLocals(String owner, MethodNode method) {
-    List<Object> locals = new ArrayList<>();
-    if ((method.access & Opcodes.ACC_STATIC) == 0) locals.add(owner);
-    for (Type argument : Type.getArgumentTypes(method.desc)) {
-      switch (argument.getSort()) {
-        case Type.BOOLEAN, Type.BYTE, Type.CHAR, Type.SHORT, Type.INT -> locals.add(Opcodes.INTEGER);
-        case Type.FLOAT -> locals.add(Opcodes.FLOAT);
-        case Type.LONG -> locals.add(Opcodes.LONG);
-        case Type.DOUBLE -> locals.add(Opcodes.DOUBLE);
-        case Type.ARRAY -> locals.add(argument.getDescriptor());
-        case Type.OBJECT -> locals.add(argument.getInternalName());
-        default -> throw mismatch("unsupported scratch-scope argument type " + argument);
-      }
-    }
-    return locals.toArray();
-  }
-
-  private static int countReturnOpcodes(MethodNode method) {
-    int count = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (isReturnOpcode(insn.getOpcode())) count++;
-    }
-    return count;
-  }
-
-  private static boolean isReturnOpcode(int opcode) {
-    return opcode >= Opcodes.IRETURN && opcode <= Opcodes.RETURN;
-  }
-
-  /**
-   * Replaces defensive-copy allocations whose compiler locals are reused
-   * later in the same large method. The ordinary scratch matcher intentionally
-   * requires a single assignment per local; this variant proves ownership from
-   * the SourceInterpreter value of each individual ASTORE instead.
-   */
-  private static int replaceSnapshotAllocationGroup(String owner, MethodNode method, AllocationSpec spec,
-      boolean scopeInstalled, String label) {
-    List<SnapshotAllocationPlan> original = snapshotAllocationPlans(owner, method, spec);
-    List<SnapshotHookPlan> patched = snapshotHookPlans(method, spec);
-    boolean originalState = original.size() == spec.expected && patched.isEmpty();
-    boolean patchedState = original.isEmpty() && patched.size() == spec.expected;
-    if (patchedState) {
-      if (scopeInstalled) { throw mismatch(label + " hooks exist without their required scratch scope"); }
-      for (int i = 0; i < patched.size(); i++) {
-        requireSnapshotUseContract(owner, method, patched.get(i).store, expectedSnapshotIterators(spec.hookName, i),
-            label);
-      }
-      throw already(label + " hooks and assignment-scoped non-escape contracts are already present");
-    }
-    if (!originalState) { throw mismatch(label + " has mixed, missing, or ambiguous allocation/hook sites"); }
-
-    for (int i = 0; i < original.size(); i++) {
-      SnapshotAllocationPlan plan = original.get(i);
-      requireSnapshotUseContract(owner, method, plan.store, expectedSnapshotIterators(spec.hookName, i), label);
-      method.instructions.remove(plan.allocation);
-      method.instructions.remove(plan.duplicate);
-      makeStatic(plan.constructor, HOOKS, spec.hookName, spec.hookDesc);
-    }
-    requireCount(label + " postcondition " + spec.hookName,
-        countCalls(method, Opcodes.INVOKESTATIC, HOOKS, spec.hookName, spec.hookDesc), spec.expected);
-    return original.size();
-  }
-
-  private static List<SnapshotAllocationPlan> snapshotAllocationPlans(String owner, MethodNode method,
-      AllocationSpec spec) {
-    Frame<SourceValue>[] frames = sourceFrames(owner, method);
-    List<SnapshotAllocationPlan> result = new ArrayList<>();
-    int rawConstructors = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof MethodInsnNode call && call.getOpcode() == Opcodes.INVOKESPECIAL
-          && call.owner.equals(spec.type) && call.name.equals("<init>") && call.desc.equals(spec.constructorDesc))
-        rawConstructors++;
-      if (!(insn instanceof TypeInsnNode allocation) || allocation.getOpcode() != Opcodes.NEW
-          || !allocation.desc.equals(spec.type))
-        continue;
-      AbstractInsnNode duplicate = nextMeaningful(allocation);
-      if (duplicate == null || duplicate.getOpcode() != Opcodes.DUP) continue;
-      MethodInsnNode constructor = null;
-      for (AbstractInsnNode cursor = duplicate.getNext(); cursor != null; cursor = cursor.getNext()) {
-        if (cursor instanceof MethodInsnNode call && call.getOpcode() == Opcodes.INVOKESPECIAL
-            && call.owner.equals(spec.type) && call.name.equals("<init>") && call.desc.equals(spec.constructorDesc)) {
-          SourceValue receiver = receiverSource(method, call, frames);
-          if (sourceContains(receiver, duplicate)) constructor = call;
-          break;
-        }
-        if (cursor.getOpcode() == Opcodes.NEW && cursor != allocation) break;
-      }
-      if (constructor == null) continue;
-      AbstractInsnNode stored = nextMeaningful(constructor);
-      if (!(stored instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE) {
-        throw mismatch(spec.hookName + " snapshot result is not stored in a local");
-      }
-      result.add(new SnapshotAllocationPlan(allocation, duplicate, constructor, store));
-    }
-    if (rawConstructors != result.size()) {
-      throw mismatch(spec.hookName + " has constructors not paired by uninitialized-value data-flow");
-    }
-    return result;
-  }
-
-  private static List<SnapshotHookPlan> snapshotHookPlans(MethodNode method, AllocationSpec spec) {
-    List<SnapshotHookPlan> result = new ArrayList<>();
-    for (MethodInsnNode hook : calls(method, Opcodes.INVOKESTATIC, HOOKS, spec.hookName, spec.hookDesc)) {
-      AbstractInsnNode stored = nextMeaningful(hook);
-      if (!(stored instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE) {
-        throw mismatch(spec.hookName + " result is not stored directly in a local");
-      }
-      result.add(new SnapshotHookPlan(hook, store));
-    }
-    return result;
-  }
-
-  private static int expectedSnapshotIterators(String hookName, int ordinal) {
-    if (hookName.equals("borrowPausedLocationSnapshot") && ordinal == 0) return 2;
-    if (hookName.equals("borrowLocationAdvanceSnapshot") || hookName.equals("borrowPausedLocationSnapshot")
-        || hookName.equals("borrowEntityScriptSnapshot"))
-      return 1;
-    throw mismatch("no snapshot iterator contract for " + hookName);
-  }
-
-  private static void requireSnapshotUseContract(String owner, MethodNode method, VarInsnNode assignment,
-      int expectedIterators, String label) {
-    int local = assignment.var;
-    Frame<SourceValue>[] frames = sourceFrames(owner, method);
-    Set<AbstractInsnNode> accountedLoads = new HashSet<>();
-    List<MethodInsnNode> iterators = new ArrayList<>();
-    Map<String, Integer> observed = new LinkedHashMap<>();
-
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (!(insn instanceof MethodInsnNode call)) continue;
-      if (call.getOpcode() != Opcodes.INVOKESTATIC && recordSnapshotUse(method, receiverSource(method, call, frames),
-          local, assignment, frames, accountedLoads)) {
-        String key = call.getOpcode() + "|" + call.owner + "|" + call.name + "|" + call.desc + "|receiver";
-        observed.merge(key, 1, Integer::sum);
-        if (call.getOpcode() == Opcodes.INVOKEINTERFACE && call.owner.equals("java/util/List")
-            && call.name.equals("iterator") && call.desc.equals("()Ljava/util/Iterator;")) {
-          iterators.add(call);
-        }
-      }
-      Type[] args = Type.getArgumentTypes(call.desc);
-      for (int i = 0; i < args.length; i++) {
-        if (recordSnapshotUse(method, argumentSource(method, call, frames, i), local, assignment, frames,
-            accountedLoads)) {
-          String key = call.getOpcode() + "|" + call.owner + "|" + call.name + "|" + call.desc + "|arg" + i;
-          observed.merge(key, 1, Integer::sum);
-        }
-      }
-    }
-
-    Map<String, Integer> expected = new LinkedHashMap<>();
-    expectUse(expected, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator", "()Ljava/util/Iterator;", -1,
-        expectedIterators);
-    if (!observed.equals(expected)) {
-      throw mismatch(label + " assignment to local " + local + " use contract changed: expected " + expected
-          + ", found " + observed);
-    }
-
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (!(insn instanceof VarInsnNode load) || load.getOpcode() != Opcodes.ALOAD || load.var != local) continue;
-      SourceValue origin = frameBefore(method, load, frames).getLocal(local);
-      if (!sourceContains(origin, assignment)) continue;
-      if (origin.insns.size() != 1) {
-        throw mismatch(label + " local " + local + " merges its snapshot assignment with another value");
-      }
-      if (!accountedLoads.contains(load)) {
-        throw mismatch(label + " local " + local + " has an unclassified alias/escape at instruction "
-            + method.instructions.indexOf(load));
-      }
-    }
-    for (MethodInsnNode iterator : iterators) {
-      requireIteratorLifetime(owner, method, iterator, label + " assignment to local " + local);
-    }
-  }
-
-  private static boolean recordSnapshotUse(MethodNode method, SourceValue source, int local, VarInsnNode assignment,
-      Frame<SourceValue>[] frames, Set<AbstractInsnNode> accountedLoads) {
-    if (source == null || source.insns == null || source.insns.isEmpty()) return false;
-    boolean fromAssignment = false;
-    for (AbstractInsnNode producer : source.insns) {
-      if (!(producer instanceof VarInsnNode load) || load.getOpcode() != Opcodes.ALOAD || load.var != local) continue;
-      SourceValue origin = frameBefore(method, load, frames).getLocal(local);
-      if (!sourceContains(origin, assignment)) continue;
-      if (origin.insns.size() != 1) {
-        throw mismatch("snapshot local " + local + " merges its proven assignment with another value");
-      }
-      accountedLoads.add(load);
-      fromAssignment = true;
-    }
-    return fromAssignment;
-  }
-
-  private static PatchState scratchAllocationGroupState(String owner, MethodNode method, List<AllocationSpec> specs,
-      String label) {
-    boolean allOriginal = true;
-    boolean allPatched = true;
-    List<List<AllocationPlan>> plans = new ArrayList<>();
-    List<List<Integer>> hookedLocals = new ArrayList<>();
-    for (AllocationSpec spec : specs) {
-      List<AllocationPlan> found = allocationPlans(owner, method, spec);
-      List<Integer> locals = storedHookResultLocals(method, spec);
-      allOriginal &= found.size() == spec.expected && locals.isEmpty();
-      allPatched &= found.isEmpty() && locals.size() == spec.expected;
-      plans.add(found);
-      hookedLocals.add(locals);
-    }
-    if (!allOriginal && !allPatched) {
-      throw mismatch(label + " has mixed, missing, or ambiguous allocation/hook sites");
-    }
-    for (int i = 0; i < specs.size(); i++) {
-      AllocationSpec spec = specs.get(i);
-      if (allOriginal) {
-        for (int j = 0; j < plans.get(i).size(); j++) {
-          requireScratchUseContract(owner, method, plans.get(i).get(j).local, spec, j, label);
-        }
-      } else {
-        for (int j = 0; j < hookedLocals.get(i).size(); j++) {
-          requireScratchUseContract(owner, method, hookedLocals.get(i).get(j), spec, j, label);
-        }
-      }
-    }
-    return allOriginal ? PatchState.ORIGINAL : PatchState.PATCHED;
-  }
-
-  private static int replaceAllocationGroup(String owner, MethodNode method, List<AllocationSpec> specs,
-      boolean scopeInstalled, String label) {
-    boolean allOriginal = true;
-    boolean allPatched = true;
-    List<List<AllocationPlan>> plans = new ArrayList<>();
-    List<List<Integer>> hookedLocals = new ArrayList<>();
-    for (AllocationSpec spec : specs) {
-      List<AllocationPlan> found = allocationPlans(owner, method, spec);
-      List<Integer> locals = storedHookResultLocals(method, spec);
-      boolean originalState = found.size() == spec.expected && locals.isEmpty();
-      boolean patchedState = found.isEmpty() && locals.size() == spec.expected;
-      allOriginal &= originalState;
-      allPatched &= patchedState;
-      plans.add(found);
-      hookedLocals.add(locals);
-    }
-    if (allPatched) {
-      if (scopeInstalled) { throw mismatch(label + " hooks exist without their required scratch scope"); }
-      for (int i = 0; i < specs.size(); i++) {
-        for (int j = 0; j < hookedLocals.get(i).size(); j++) {
-          requireScratchUseContract(owner, method, hookedLocals.get(i).get(j), specs.get(i), j, label);
-        }
-      }
-      throw already(label + " hooks and non-escape contracts are already present");
-    }
-    if (!allOriginal) { throw mismatch(label + " has mixed, missing, or ambiguous allocation/hook sites"); }
-
-    int changed = 0;
-    for (int i = 0; i < specs.size(); i++) {
-      AllocationSpec spec = specs.get(i);
-      for (int j = 0; j < plans.get(i).size(); j++) {
-        AllocationPlan plan = plans.get(i).get(j);
-        requireScratchUseContract(owner, method, plan.local, spec, j, label);
-        method.instructions.remove(plan.allocation);
-        method.instructions.remove(plan.duplicate);
-        makeStatic(plan.constructor, HOOKS, spec.hookName, spec.hookDesc);
-        changed++;
-      }
-    }
-    for (AllocationSpec spec : specs) {
-      requireCount(label + " postcondition " + spec.hookName,
-          countCalls(method, Opcodes.INVOKESTATIC, HOOKS, spec.hookName, spec.hookDesc), spec.expected);
-    }
-    return changed;
-  }
-
-  private static List<AllocationPlan> allocationPlans(String owner, MethodNode method, AllocationSpec spec) {
-    Frame<SourceValue>[] frames = sourceFrames(owner, method);
-    List<AllocationPlan> result = new ArrayList<>();
-    int rawConstructors = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof MethodInsnNode call && call.getOpcode() == Opcodes.INVOKESPECIAL
-          && call.owner.equals(spec.type) && call.name.equals("<init>") && call.desc.equals(spec.constructorDesc))
-        rawConstructors++;
-      if (!(insn instanceof TypeInsnNode allocation) || allocation.getOpcode() != Opcodes.NEW
-          || !allocation.desc.equals(spec.type))
-        continue;
-      AbstractInsnNode duplicate = nextMeaningful(allocation);
-      if (duplicate == null || duplicate.getOpcode() != Opcodes.DUP) continue;
-      MethodInsnNode constructor = null;
-      for (AbstractInsnNode cursor = duplicate.getNext(); cursor != null; cursor = cursor.getNext()) {
-        if (cursor instanceof MethodInsnNode call && call.getOpcode() == Opcodes.INVOKESPECIAL
-            && call.owner.equals(spec.type) && call.name.equals("<init>") && call.desc.equals(spec.constructorDesc)) {
-          SourceValue receiver = receiverSource(method, call, frames);
-          if (sourceContains(receiver, duplicate)) constructor = call;
-          break;
-        }
-        if (cursor.getOpcode() == Opcodes.NEW && cursor != allocation) break;
-      }
-      if (constructor == null) continue;
-      AbstractInsnNode storeInsn = nextMeaningful(constructor);
-      if (!(storeInsn instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE) {
-        throw mismatch(spec.hookName + " allocation result is not stored in a local");
-      }
-      if (countStores(method, store.var) != 1) {
-        throw mismatch(spec.hookName + " scratch local " + store.var + " is assigned more than once");
-      }
-      result.add(new AllocationPlan(allocation, duplicate, constructor, store.var));
-    }
-    if (rawConstructors != result.size()) {
-      throw mismatch(spec.hookName + " has constructor calls not paired by uninitialized-value data-flow");
-    }
-    return result;
-  }
-
-  private static List<Integer> storedHookResultLocals(MethodNode method, AllocationSpec spec) {
-    List<Integer> result = new ArrayList<>();
-    for (MethodInsnNode hook : calls(method, Opcodes.INVOKESTATIC, HOOKS, spec.hookName, spec.hookDesc)) {
-      AbstractInsnNode next = nextMeaningful(hook);
-      if (!(next instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE) {
-        throw mismatch(spec.hookName + " result is not stored directly in one local");
-      }
-      if (countStores(method, store.var) != 1) {
-        throw mismatch(spec.hookName + " result local " + store.var + " is reassigned");
-      }
-      result.add(store.var);
-    }
-    return result;
-  }
-
-  /**
-   * Returns the immediate stores for scratch-borrow hooks without requiring the JVM local
-   * slot to remain single-assignment for the entire method. Large vanilla methods such as
-   * Ship.advance reuse local slots after the scratch collection's lifetime. Mutation hooks
-   * therefore use {@link #sourceIsActiveHookLocal} to prove that a call is still inside the
-   * borrow-to-reassignment lease instead of rejecting safe slot reuse.
-   */
-  private static List<VarInsnNode> storedHookResultStoresRelaxed(MethodNode method, AllocationSpec spec) {
-    List<MethodInsnNode> hooks = calls(method, Opcodes.INVOKESTATIC, HOOKS, spec.hookName, spec.hookDesc);
-    if (hooks.size() != spec.expected) {
-      throw mismatch(spec.hookName + " expected " + spec.expected + " stored results but found " + hooks.size());
-    }
-    List<VarInsnNode> result = new ArrayList<>();
-    Set<Integer> locals = new HashSet<>();
-    for (MethodInsnNode hook : hooks) {
-      AbstractInsnNode next = nextMeaningful(hook);
-      if (!(next instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE) {
-        throw mismatch(spec.hookName + " result is not stored directly in one local");
-      }
-      if (!locals.add(store.var)) {
-        throw mismatch(spec.hookName + " stores multiple borrowed values in local " + store.var);
-      }
-      result.add(store);
-    }
-    return result;
-  }
-
-  /**
-   * Proves that the receiver comes from one of the borrowed scratch locals and that no later
-   * ASTORE to that local occurs between the borrow and this call. This keeps observation hooks
-   * inside the exact lifetime of the borrowed collection even when vanilla reuses the slot.
-   */
-  private static boolean sourceIsActiveHookLocal(MethodNode method, MethodInsnNode call, SourceValue receiver,
-      List<VarInsnNode> hookStores) {
-    int callIndex = method.instructions.indexOf(call);
-    for (VarInsnNode store : hookStores) {
-      if (!sourceIsLocal(receiver, Opcodes.ALOAD, store.var)) continue;
-      int storeIndex = method.instructions.indexOf(store);
-      if (storeIndex < 0 || storeIndex >= callIndex) continue;
-      boolean reassigned = false;
-      for (AbstractInsnNode cursor = store.getNext(); cursor != null && cursor != call; cursor = cursor.getNext()) {
-        if (cursor instanceof VarInsnNode var && var.getOpcode() == Opcodes.ASTORE && var.var == store.var) {
-          reassigned = true;
-          break;
-        }
-      }
-      if (!reassigned) return true;
-    }
-    return false;
-  }
-
-  private static void requireScratchUseContract(String owner, MethodNode method, int local, AllocationSpec spec,
-      int ordinal, String label) {
-    Frame<SourceValue>[] frames = sourceFrames(owner, method);
-    Map<String, Integer> observed = new LinkedHashMap<>();
-    Set<AbstractInsnNode> accountedLoads = new HashSet<>();
-    List<MethodInsnNode> iterators = new ArrayList<>();
-
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (!(insn instanceof MethodInsnNode call)) continue;
-      if (call.getOpcode() != Opcodes.INVOKESTATIC) {
-        SourceValue receiver = receiverSource(method, call, frames);
-        if (recordScratchUse(receiver, local, scratchUseKey(spec, call, -1), observed, accountedLoads)
-            && call.owner.equals("java/util/List") && call.name.equals("iterator")
-            && call.desc.equals("()Ljava/util/Iterator;")) {
-          iterators.add(call);
-        }
-      }
-      Type[] args = Type.getArgumentTypes(call.desc);
-      for (int i = 0; i < args.length; i++) {
-        recordScratchUse(argumentSource(method, call, frames, i), local, scratchUseKey(spec, call, i), observed,
-            accountedLoads);
-      }
-    }
-
-    Set<AbstractInsnNode> rmwLoads = validateArrowVectorRmw(method, local, spec, ordinal);
-    accountedLoads.addAll(rmwLoads);
-    Map<String, Integer> expected = expectedScratchUses(owner, spec, ordinal);
-    if (!scratchUsesMatch(expected, observed)) {
-      throw mismatch(label + " local " + local + " use contract changed: expected " + expected + ", found " + observed);
-    }
-
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof VarInsnNode load && load.getOpcode() == Opcodes.ALOAD && load.var == local
-          && !accountedLoads.contains(load)) {
-        throw mismatch(label + " local " + local + " has an unclassified alias/escape at instruction "
-            + method.instructions.indexOf(load));
-      }
-    }
-    for (MethodInsnNode iterator : iterators) {
-      requireIteratorLifetime(owner, method, iterator, label + " local " + local);
-    }
-  }
-
-  private static boolean recordScratchUse(SourceValue source, int local, String key, Map<String, Integer> uses,
-      Set<AbstractInsnNode> accountedLoads) {
-    Integer loaded = optionalLoadedLocal(source, Opcodes.ALOAD);
-    if (loaded == null || loaded != local) return false;
-    uses.merge(key, 1, Integer::sum);
-    for (AbstractInsnNode producer : source.insns) {
-      if (producer instanceof VarInsnNode load && load.getOpcode() == Opcodes.ALOAD && load.var == local) {
-        accountedLoads.add(load);
-      }
-    }
-    return true;
-  }
-
-  private static String scratchUseKey(AllocationSpec spec, MethodInsnNode call, int position) {
-    if (spec.hookName.equals("borrowEntityList")) {
-      boolean collectionOperation = call.getOpcode() == Opcodes.INVOKEINTERFACE && call.owner.equals("java/util/Set")
-          && (call.name.equals("retainAll") || call.name.equals("removeAll"))
-          && call.desc.equals("(Ljava/util/Collection;)Z") && position == 0;
-      boolean optimizedOperation =
-          call.getOpcode() == Opcodes.INVOKESTATIC && call.owner.equals(HOOKS) && call.name.equals("retainAllFast")
-              && call.desc.equals("(Ljava/util/Set;Ljava/util/Collection;Ljava/lang/Object;)Z") && position == 1;
-      if (collectionOperation || optimizedOperation) return "safe-collection-membership-consumer";
-    }
-    if (call.getOpcode() == Opcodes.INVOKESTATIC && call.owner.equals(HOOKS) && position == 0) {
-      if (call.name.equals("scratchListAdd") && call.desc.equals("(Ljava/util/List;Ljava/lang/Object;)Z")) {
-        return Opcodes.INVOKEINTERFACE + "|java/util/List|add|" + "(Ljava/lang/Object;)Z|receiver";
-      }
-      if (call.name.equals("scratchSetAdd") && call.desc.equals("(Ljava/util/Set;Ljava/lang/Object;)Z")) {
-        return Opcodes.INVOKEINTERFACE + "|java/util/Set|add|" + "(Ljava/lang/Object;)Z|receiver";
-      }
-      if (call.name.equals("scratchSetAddAll") && call.desc.equals("(Ljava/util/Set;Ljava/util/Collection;)Z")) {
-        return Opcodes.INVOKEINTERFACE + "|java/util/Set|addAll|" + "(Ljava/util/Collection;)Z|receiver";
-      }
-    }
-    String name = call.name;
-    String vectorDesc = "(Lorg/lwjgl/util/vector/Vector2f;Lorg/lwjgl/util/vector/Vector2f;)F";
-    if (spec.hookName.equals("borrowHitPoint") && call.owner.equals("com/fs/starfarer/prototype/Utils")
-        && call.desc.equals(vectorDesc)) {
-      name = "*";
-    }
-    return call.getOpcode() + "|" + call.owner + "|" + name + "|" + call.desc + "|"
-        + (position < 0 ? "receiver" : "arg" + position);
-  }
-
-  private static Map<String, Integer> expectedScratchUses(String owner, AllocationSpec spec, int ordinal) {
-    Map<String, Integer> expected = new LinkedHashMap<>();
-    switch (spec.hookName) {
-      case "borrowEntityList" -> {
-        expectUse(expected, Opcodes.INVOKEINTERFACE, "java/util/List", "addAll", "(Ljava/util/Collection;)Z", -1, 3);
-        expectUse(expected, Opcodes.INVOKEINTERFACE, "java/util/List", "add", "(Ljava/lang/Object;)Z", -1, 1);
-        expectUse(expected, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator", "()Ljava/util/Iterator;", -1, 1);
-        expected.put("safe-collection-membership-consumer", -1);
-      }
-      case "borrowClassSet" -> {
-        expectUse(expected, Opcodes.INVOKEINTERFACE, "java/util/Set", "add", "(Ljava/lang/Object;)Z", -1, 7);
-        expectUse(expected, Opcodes.INVOKEINTERFACE, "java/util/Set", "contains", "(Ljava/lang/Object;)Z", -1, 1);
-      }
-      case "borrowHitList" -> {
-        expectUse(expected, Opcodes.INVOKEINTERFACE, "java/util/List", "addAll", "(Ljava/util/Collection;)Z", -1, 1);
-        expectUse(expected, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator", "()Ljava/util/Iterator;", -1, 1);
-      }
-      case "borrowLocationAdvanceSnapshot", "borrowEntityScriptSnapshot" ->
-        expectUse(expected, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator", "()Ljava/util/Iterator;", -1, 1);
-      case "borrowPausedLocationSnapshot" -> expectUse(expected, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator",
-          "()Ljava/util/Iterator;", -1, ordinal == 0 ? 2 : 1);
-      case "borrowHitPoint" -> expectUse(expected, Opcodes.INVOKESTATIC, "com/fs/starfarer/prototype/Utils", "*",
-          "(Lorg/lwjgl/util/vector/Vector2f;Lorg/lwjgl/util/vector/Vector2f;)F", 0, 2);
-      case "borrowArrowVector" -> {
-        int position = ordinal;
-        String twoVectors = "(Lorg/lwjgl/util/vector/Vector2f;" + "Lorg/lwjgl/util/vector/Vector2f;)F";
-        expectUse(expected, Opcodes.INVOKESTATIC, "com/fs/starfarer/api/util/Misc", "getDistance", twoVectors, position,
-            1);
-        expectUse(expected, Opcodes.INVOKESTATIC, "com/fs/starfarer/api/util/Misc", "getAngleInDegrees", twoVectors,
-            position, 1);
-        expectUse(expected, Opcodes.INVOKESTATIC, owner, "o00000",
-            "(Lorg/lwjgl/util/vector/Vector2f;Lorg/lwjgl/util/vector/Vector2f;" + "FLjava/awt/Color;F)V", position, 1);
-      }
-      default -> throw mismatch("no scratch use contract for " + spec.hookName);
-    }
-    return expected;
-  }
-
-  private static boolean scratchUsesMatch(Map<String, Integer> expected, Map<String, Integer> observed) {
-    if (!expected.keySet().equals(observed.keySet())) return false;
-    for (Map.Entry<String, Integer> entry : expected.entrySet()) {
-      int actual = observed.getOrDefault(entry.getKey(), 0);
-      if (entry.getValue() < 0) {
-        if (actual < 1) return false;
-      } else if (actual != entry.getValue()) { return false; }
-    }
-    return true;
-  }
-
-  private static void expectUse(Map<String, Integer> expected, int opcode, String owner, String name, String desc,
-      int position, int count) {
-    String key = opcode + "|" + owner + "|" + name + "|" + desc + "|" + (position < 0 ? "receiver" : "arg" + position);
-    expected.put(key, count);
-  }
-
-  private static Set<AbstractInsnNode> validateArrowVectorRmw(MethodNode method, int local, AllocationSpec spec,
-      int ordinal) {
-    Set<AbstractInsnNode> starts = new HashSet<>();
-    if (!spec.hookName.equals("borrowArrowVector")) return starts;
-    Set<String> fields = new HashSet<>();
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (!(insn instanceof FieldInsnNode put) || put.getOpcode() != Opcodes.PUTFIELD
-          || !put.owner.equals("org/lwjgl/util/vector/Vector2f") || !put.desc.equals("F"))
-        continue;
-      AbstractInsnNode start = null;
-      AbstractInsnNode get = null;
-      int seen = 0;
-      for (AbstractInsnNode cursor = put.getPrevious(); cursor != null && seen < 10; cursor = cursor.getPrevious()) {
-        if (cursor.getOpcode() < 0) continue;
-        seen++;
-        if (get == null && cursor instanceof FieldInsnNode field && field.getOpcode() == Opcodes.GETFIELD
-            && field.owner.equals(put.owner) && field.name.equals(put.name) && field.desc.equals(put.desc)) {
-          get = field;
-        }
-        if (cursor instanceof VarInsnNode load && load.getOpcode() == Opcodes.ALOAD && load.var == local
-            && nextMeaningful(load) != null && nextMeaningful(load).getOpcode() == Opcodes.DUP) {
-          start = load;
-          break;
-        }
-      }
-      if (start != null && get != null) {
-        starts.add(start);
-        fields.add(put.name);
-      }
-    }
-    if (starts.size() != 2 || !fields.equals(Set.of("x", "y"))) {
-      throw mismatch("arrow vector local " + local + " (ordinal " + ordinal
-          + ") does not have exactly one self-RMW chain for x and y");
-    }
-    return starts;
-  }
-
-  private static void requireIteratorLifetime(String owner, MethodNode method, MethodInsnNode iteratorCall,
-      String label) {
-    AbstractInsnNode stored = nextMeaningful(iteratorCall);
-    if (!(stored instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE) {
-      throw mismatch(label + " iterator is not stored directly in a local");
-    }
-    AbstractInsnNode boundary = null;
-    for (AbstractInsnNode cursor = store.getNext(); cursor != null; cursor = cursor.getNext()) {
-      if (cursor instanceof VarInsnNode nextStore && nextStore.getOpcode() == Opcodes.ASTORE
-          && nextStore.var == store.var) {
-        boundary = cursor;
-        break;
-      }
-    }
-    Frame<SourceValue>[] frames = sourceFrames(owner, method);
-    Map<String, Integer> observed = new LinkedHashMap<>();
-    Set<AbstractInsnNode> accounted = new HashSet<>();
-    for (AbstractInsnNode insn = store.getNext(); insn != null && insn != boundary; insn = insn.getNext()) {
-      if (!(insn instanceof MethodInsnNode call)) continue;
-      if (call.getOpcode() != Opcodes.INVOKESTATIC) {
-        recordScratchUse(receiverSource(method, call, frames), store.var,
-            call.getOpcode() + "|" + call.owner + "|" + call.name + "|" + call.desc + "|receiver", observed, accounted);
-      }
-      Type[] args = Type.getArgumentTypes(call.desc);
-      for (int i = 0; i < args.length; i++) {
-        recordScratchUse(argumentSource(method, call, frames, i), store.var,
-            call.getOpcode() + "|" + call.owner + "|" + call.name + "|" + call.desc + "|arg" + i, observed, accounted);
-      }
-    }
-    Map<String, Integer> expected = new LinkedHashMap<>();
-    expectUse(expected, Opcodes.INVOKEINTERFACE, "java/util/Iterator", "next", "()Ljava/lang/Object;", -1, 1);
-    expectUse(expected, Opcodes.INVOKEINTERFACE, "java/util/Iterator", "hasNext", "()Z", -1, 1);
-    if (!observed.equals(expected)) {
-      throw mismatch(label + " iterator use contract changed: expected " + expected + ", found " + observed);
-    }
-    for (AbstractInsnNode insn = store.getNext(); insn != null && insn != boundary; insn = insn.getNext()) {
-      if (insn instanceof VarInsnNode load && load.getOpcode() == Opcodes.ALOAD && load.var == store.var
-          && !accounted.contains(load)) {
-        throw mismatch(label + " iterator local has an unclassified escape");
-      }
-    }
-  }
-
-  private static void requireLocalConstructor(MethodNode method, int local, String type, String desc, String label) {
-    int matches = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (!(insn instanceof MethodInsnNode call) || call.getOpcode() != Opcodes.INVOKESPECIAL
-          || !call.owner.equals(type) || !call.name.equals("<init>") || !call.desc.equals(desc))
-        continue;
-      AbstractInsnNode store = nextMeaningful(call);
-      if (store instanceof VarInsnNode var && var.getOpcode() == Opcodes.ASTORE && var.var == local) matches++;
-    }
-    requireCount(label + " constructor assignment", matches, 1);
-  }
-
-  private static MethodNode requireWrapperSource(ClassNode node, String publicName, String desc, String renamedName,
-      String hookName, String hookDesc) {
-    List<MethodNode> publicMethods = methods(node, publicName, desc);
-    List<MethodNode> renamedMethods = methods(node, renamedName, desc);
-    int hookCount = countCalls(node, Opcodes.INVOKESTATIC, HOOKS, hookName, hookDesc);
-    if (publicMethods.size() == 1 && renamedMethods.size() == 1 && hookCount == 1) {
-      MethodNode wrapper = publicMethods.get(0);
-      MethodNode original = renamedMethods.get(0);
-      int expectedOriginalAccess = wrapper.access;
-      expectedOriginalAccess &= ~(Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED);
-      expectedOriginalAccess |= Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC;
-      if (countCalls(wrapper, Opcodes.INVOKESTATIC, HOOKS, hookName, hookDesc) == 1
-          && original.access == expectedOriginalAccess) {
-        requireStraightWrapper(wrapper, hookName, hookDesc, publicName);
-        return original;
-      }
-      throw mismatch(publicName + " has an invalid partial wrapper state");
-    }
-    if (publicMethods.size() != 1 || !renamedMethods.isEmpty() || hookCount != 0) {
-      throw mismatch(publicName + " wrapper collision/mixed state: public=" + publicMethods.size() + ", renamed="
-          + renamedMethods.size() + ", hooks=" + hookCount);
-    }
-    return publicMethods.get(0);
-  }
-
-  private static void requireWrapperPostcondition(ClassNode node, String publicName, String desc, String renamedName,
-      String hookName, String hookDesc) {
-    requireCount(publicName + " wrapper count", methods(node, publicName, desc).size(), 1);
-    List<MethodNode> renamed = methods(node, renamedName, desc);
-    requireCount(renamedName + " original count", renamed.size(), 1);
-    if ((renamed.get(0).access & Opcodes.ACC_PRIVATE) == 0) { throw mismatch(renamedName + " is not private"); }
-    requireCount(publicName + " wrapper hook count",
-        countCalls(methods(node, publicName, desc).get(0), Opcodes.INVOKESTATIC, HOOKS, hookName, hookDesc), 1);
-    requireStraightWrapper(methods(node, publicName, desc).get(0), hookName, hookDesc, publicName);
-  }
-
-  private static void requireStraightWrapper(MethodNode wrapper, String hookName, String hookDesc, String label) {
-    if (wrapper.tryCatchBlocks != null && !wrapper.tryCatchBlocks.isEmpty()) {
-      throw mismatch(label + " wrapper unexpectedly contains exception handlers");
-    }
-    int returns = 0;
-    for (AbstractInsnNode insn : wrapper.instructions.toArray()) {
-      int opcode = insn.getOpcode();
-      if (opcode < 0) continue;
-      if (insn instanceof MethodInsnNode call) {
-        if (!callMatches(call, Opcodes.INVOKESTATIC, HOOKS, hookName, hookDesc)) {
-          throw mismatch(label + " wrapper contains a foreign method call");
-        }
-        continue;
-      }
-      if (opcode == Opcodes.ARETURN || opcode == Opcodes.RETURN) {
-        returns++;
-        continue;
-      }
-      if (opcode != Opcodes.ALOAD && opcode != Opcodes.FLOAD && opcode != Opcodes.GETFIELD
-          && opcode != Opcodes.CHECKCAST) {
-        throw mismatch(label + " wrapper contains unexpected opcode " + opcode);
-      }
-    }
-    requireCount(label + " wrapper returns", returns, 1);
-    AbstractInsnNode tail = wrapper.instructions.getLast();
-    while (tail != null && tail.getOpcode() < 0) tail = tail.getPrevious();
-    if (tail == null || (tail.getOpcode() != Opcodes.ARETURN && tail.getOpcode() != Opcodes.RETURN)) {
-      throw mismatch(label + " wrapper does not end in its only return");
-    }
-  }
 
   private static void requireIntelEntityWrapper(ClassNode node, String desc, String listField, String hookDesc) {
     MethodNode wrapper = requireMethod(node, "getIntelIconEntity", desc);
@@ -10067,93 +8537,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     if (code.get(5).getOpcode() != Opcodes.ARETURN) throw mismatch("hit-test wrapper return changed");
   }
 
-  private static List<AbstractInsnNode> meaningfulInstructions(MethodNode method) {
-    List<AbstractInsnNode> result = new ArrayList<>();
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn.getOpcode() >= 0) result.add(insn);
-    }
-    return result;
-  }
-
-  private static void requireVar(AbstractInsnNode insn, int opcode, int local, String label) {
-    if (!(insn instanceof VarInsnNode var) || var.getOpcode() != opcode || var.var != local) {
-      throw mismatch(label + " changed");
-    }
-  }
-
-  private static void requireField(AbstractInsnNode insn, int opcode, String owner, String name, String desc,
-      String label) {
-    if (!(insn instanceof FieldInsnNode field) || field.getOpcode() != opcode || !field.owner.equals(owner)
-        || !field.name.equals(name) || !field.desc.equals(desc)) {
-      throw mismatch(label + " changed");
-    }
-  }
-
-  private static FieldNode requireField(ClassNode node, String name, String desc) {
-    FieldNode match = null;
-    for (FieldNode field : node.fields) {
-      if (!field.name.equals(name) || !field.desc.equals(desc)) continue;
-      if (match != null) throw mismatch("duplicate field " + node.name + "." + name + desc);
-      match = field;
-    }
-    if (match == null) throw mismatch("missing field " + node.name + "." + name + desc);
-    return match;
-  }
-
-  private static void moveWrapperMetadata(MethodNode original, MethodNode wrapper, String label) {
-    if (original.attrs != null && !original.attrs.isEmpty()) {
-      throw mismatch(label + " has unknown method attributes that cannot be moved safely");
-    }
-    wrapper.parameters = original.parameters;
-    original.parameters = null;
-    wrapper.annotationDefault = original.annotationDefault;
-    original.annotationDefault = null;
-    wrapper.visibleAnnotations = original.visibleAnnotations;
-    original.visibleAnnotations = null;
-    wrapper.invisibleAnnotations = original.invisibleAnnotations;
-    original.invisibleAnnotations = null;
-    wrapper.visibleTypeAnnotations = original.visibleTypeAnnotations;
-    original.visibleTypeAnnotations = null;
-    wrapper.invisibleTypeAnnotations = original.invisibleTypeAnnotations;
-    original.invisibleTypeAnnotations = null;
-    wrapper.visibleAnnotableParameterCount = original.visibleAnnotableParameterCount;
-    original.visibleAnnotableParameterCount = 0;
-    wrapper.visibleParameterAnnotations = original.visibleParameterAnnotations;
-    original.visibleParameterAnnotations = null;
-    wrapper.invisibleAnnotableParameterCount = original.invisibleAnnotableParameterCount;
-    original.invisibleAnnotableParameterCount = 0;
-    wrapper.invisibleParameterAnnotations = original.invisibleParameterAnnotations;
-    original.invisibleParameterAnnotations = null;
-  }
-
-  private static void makePrivateSynthetic(MethodNode method) {
-    method.access &= ~(Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED);
-    method.access |= Opcodes.ACC_PRIVATE | Opcodes.ACC_SYNTHETIC;
-  }
-
-  private static boolean hasPatchMarker(ClassNode node, String patchId) {
-    String name = PATCH_MARKER_PREFIX + patchId;
-    List<FieldNode> matches = new ArrayList<>();
-    for (FieldNode field : node.fields) {
-      if (field.name.equals(name)) matches.add(field);
-    }
-    if (matches.isEmpty()) return false;
-    if (matches.size() != 1) throw mismatch("duplicate optimizer patch marker " + name);
-    FieldNode marker = matches.get(0);
-    int expectedAccess = Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_SYNTHETIC;
-    if (!marker.desc.equals(PATCH_MARKER_DESC) || marker.access != expectedAccess
-        || !PATCH_MARKER_VALUE_PREFIX.concat(patchId).equals(marker.value)) {
-      throw mismatch("foreign or malformed optimizer patch marker " + name);
-    }
-    return true;
-  }
-
-  private static void addPatchMarker(ClassNode node, String patchId) {
-    if (hasPatchMarker(node, patchId)) throw mismatch("patch marker already exists");
-    node.fields.add(new FieldNode(Opcodes.ASM8,
-        Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_SYNTHETIC,
-        PATCH_MARKER_PREFIX + patchId, PATCH_MARKER_DESC, null, PATCH_MARKER_VALUE_PREFIX + patchId));
-  }
 
   private static int findComparedLocationLocal(String owner, MethodNode method, MethodInsnNode from,
       AbstractInsnNode boundary) {
@@ -10228,484 +8611,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     requireCountAtLeast(label + " system-local producers", valid, 1);
   }
 
-  private static int requireStoredCallResultLocal(MethodNode method, int opcode, String owner, String name, String desc,
-      String label) {
-    MethodInsnNode call = only(calls(method, opcode, owner, name, desc), label);
-    AbstractInsnNode next = nextMeaningful(call);
-    if (!(next instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE) {
-      throw mismatch(label + " is not stored in a local");
-    }
-    return store.var;
-  }
-
-  private static void requireStoredCallResult(MethodNode method, int local, int opcode, String owner, String name,
-      String desc, String label) {
-    int matches = 0;
-    for (MethodInsnNode call : calls(method, opcode, owner, name, desc)) {
-      AbstractInsnNode next = nextMeaningful(call);
-      if (next instanceof VarInsnNode store && store.getOpcode() == Opcodes.ASTORE && store.var == local) matches++;
-    }
-    requireCount(label + " assignment", matches, 1);
-  }
-
-  private static int countIdentityComparisons(MethodNode method, Frame<SourceValue>[] frames, AbstractInsnNode after,
-      int local, String owner, String name, String desc) {
-    int count = 0;
-    for (AbstractInsnNode insn = after.getNext(); insn != null; insn = insn.getNext()) {
-      if (!(insn instanceof JumpInsnNode jump)
-          || (jump.getOpcode() != Opcodes.IF_ACMPEQ && jump.getOpcode() != Opcodes.IF_ACMPNE))
-        continue;
-      Frame<SourceValue> frame = frameBefore(method, jump, frames);
-      if (frame.getStackSize() < 2) continue;
-      SourceValue left = frame.getStack(frame.getStackSize() - 2);
-      SourceValue right = frame.getStack(frame.getStackSize() - 1);
-      if ((sourceIsMethod(left, -1, owner, name, desc) && sourceIsLocal(right, Opcodes.ALOAD, local))
-          || (sourceIsMethod(right, -1, owner, name, desc) && sourceIsLocal(left, Opcodes.ALOAD, local)))
-        count++;
-    }
-    return count;
-  }
-
-  private static boolean hasMutatorAfter(String owner, MethodNode method, AbstractInsnNode after, int receiverLocal) {
-    Frame<SourceValue>[] frames = sourceFrames(owner, method);
-    Set<String> mutators = Set.of("add", "addAll", "clear", "remove", "removeAll", "retainAll", "set");
-    for (AbstractInsnNode insn = after.getNext(); insn != null; insn = insn.getNext()) {
-      if (!(insn instanceof MethodInsnNode call) || !mutators.contains(call.name)) continue;
-      if (call.getOpcode() == Opcodes.INVOKESTATIC) continue;
-      if (sourceIsLocal(receiverSource(method, call, frames), Opcodes.ALOAD, receiverLocal)) return true;
-    }
-    return false;
-  }
-
-  private static boolean hasNullGuard(MethodNode method, AbstractInsnNode after, AbstractInsnNode before, int local) {
-    for (AbstractInsnNode insn = after.getNext(); insn != null && insn != before; insn = insn.getNext()) {
-      if (!(insn instanceof VarInsnNode load) || load.getOpcode() != Opcodes.ALOAD || load.var != local) continue;
-      AbstractInsnNode next = nextMeaningful(load);
-      if (next != null && (next.getOpcode() == Opcodes.IFNULL || next.getOpcode() == Opcodes.IFNONNULL)) return true;
-    }
-    return false;
-  }
-
-  private static boolean hasCallImmediatelyBefore(AbstractInsnNode target, int opcode, String owner, String name,
-      String desc, int maxMeaningful) {
-    int seen = 0;
-    for (AbstractInsnNode insn = target.getPrevious(); insn != null && seen < maxMeaningful; insn =
-        insn.getPrevious()) {
-      if (insn.getOpcode() < 0) continue;
-      seen++;
-      if (insn instanceof MethodInsnNode call && callMatches(call, opcode, owner, name, desc)) return true;
-    }
-    return false;
-  }
-
-  private static String uniqueRole(String current, String candidate, String label) {
-    if (current != null && !current.equals(candidate)) throw mismatch("multiple fields match " + label);
-    return candidate;
-  }
-
-  private static int countCallsWithFieldReceiver(String owner, MethodNode method, Frame<SourceValue>[] frames,
-      int opcode, String callOwner, String name, String desc, String fieldName, String fieldDesc) {
-    int count = 0;
-    for (MethodInsnNode call : calls(method, opcode, callOwner, name, desc)) {
-      FieldInsnNode field =
-          optionalSourceField(receiverSource(method, call, frames), Opcodes.GETFIELD, owner, fieldDesc);
-      if (field != null && field.name.equals(fieldName)) count++;
-    }
-    return count;
-  }
-
-  private static void requireIconsGetter(ClassNode node, String fieldName) {
-    MethodNode getter = requireMethod(node, "getIcons", "()Ljava/util/LinkedHashMap;");
-    requireCount("getIcons backing field", countFields(getter, Opcodes.GETFIELD, node.name, fieldName, LINKED_MAP_DESC),
-        1);
-    requireCount("getIcons ARETURN", countOpcode(getter, Opcodes.ARETURN), 1);
-  }
-
-  private static void requireNullReturn(MethodNode method, String label) {
-    int count = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn.getOpcode() == Opcodes.ARETURN && previousMeaningful(insn) != null
-          && previousMeaningful(insn).getOpcode() == Opcodes.ACONST_NULL)
-        count++;
-    }
-    requireCount(label + " null return", count, 1);
-  }
-
-  private static boolean containsWrite(MethodNode method) {
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (isStateWriteOpcode(insn.getOpcode())) return true;
-    }
-    return false;
-  }
-
-  private static boolean containsWriteOrMonitor(MethodNode method) {
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      int opcode = insn.getOpcode();
-      if (isStateWriteOpcode(opcode) || opcode == Opcodes.MONITORENTER || opcode == Opcodes.MONITOREXIT
-          || opcode == Opcodes.INVOKEDYNAMIC)
-        return true;
-    }
-    return false;
-  }
-
-  private static boolean isStateWriteOpcode(int opcode) {
-    return opcode == Opcodes.PUTFIELD || opcode == Opcodes.PUTSTATIC
-        || (opcode >= Opcodes.IASTORE && opcode <= Opcodes.SASTORE);
-  }
-
-  private static int totalMethodCalls(MethodNode method) {
-    int count = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof MethodInsnNode) count++;
-    }
-    return count;
-  }
-
-  private static int argumentLocal(MethodNode method, int argumentIndex) {
-    Type[] args = Type.getArgumentTypes(method.desc);
-    if (argumentIndex < 0 || argumentIndex >= args.length) throw mismatch("invalid argument index " + argumentIndex);
-    int local = (method.access & Opcodes.ACC_STATIC) == 0 ? 1 : 0;
-    for (int i = 0; i < argumentIndex; i++) local += args[i].getSize();
-    return local;
-  }
-
-  private static Frame<SourceValue>[] sourceFrames(String owner, MethodNode method) {
-    try {
-      return new Analyzer<SourceValue>(new SourceInterpreter()).analyze(owner, method);
-    } catch (AnalyzerException ex) {
-      throw mismatch(
-          "data-flow analysis failed for " + owner + "." + method.name + method.desc + ": " + ex.getMessage());
-    }
-  }
-
-  private static Frame<SourceValue> frameBefore(MethodNode method, AbstractInsnNode insn, Frame<SourceValue>[] frames) {
-    int index = method.instructions.indexOf(insn);
-    if (index < 0 || index >= frames.length || frames[index] == null) {
-      throw mismatch("no reachable data-flow frame at " + method.name + method.desc);
-    }
-    return frames[index];
-  }
-
-  private static SourceValue receiverSource(MethodNode method, MethodInsnNode call, Frame<SourceValue>[] frames) {
-    if (call.getOpcode() == Opcodes.INVOKESTATIC) throw mismatch("static call has no receiver: " + call.name);
-    Frame<SourceValue> frame = frameBefore(method, call, frames);
-    int arguments = Type.getArgumentTypes(call.desc).length;
-    int index = frame.getStackSize() - arguments - 1;
-    if (index < 0) throw mismatch("invalid receiver stack for " + call.owner + "." + call.name + call.desc);
-    return frame.getStack(index);
-  }
-
-  private static SourceValue argumentSource(MethodNode method, MethodInsnNode call, Frame<SourceValue>[] frames,
-      int argumentIndex) {
-    Type[] args = Type.getArgumentTypes(call.desc);
-    if (argumentIndex < 0 || argumentIndex >= args.length) throw mismatch("invalid call argument index");
-    Frame<SourceValue> frame = frameBefore(method, call, frames);
-    int index = frame.getStackSize() - args.length + argumentIndex;
-    if (index < 0) throw mismatch("invalid argument stack for " + call.owner + "." + call.name + call.desc);
-    return frame.getStack(index);
-  }
-
-  private static MethodInsnNode requireSourceMethod(SourceValue value, int opcode, String owner, String name,
-      String desc, String label) {
-    if (value == null || value.insns == null || value.insns.size() != 1) {
-      throw mismatch(label + " has ambiguous producer set");
-    }
-    AbstractInsnNode source = value.insns.iterator().next();
-    if (!(source instanceof MethodInsnNode call) || !callMatches(call, opcode, owner, name, desc)) {
-      throw mismatch(label + " is not produced by " + owner + "." + name + desc);
-    }
-    return call;
-  }
-
-  private static FieldInsnNode requireSourceField(SourceValue value, int opcode, String owner, String desc,
-      String label) {
-    FieldInsnNode field = optionalSourceField(value, opcode, owner, desc);
-    if (field == null) throw mismatch(label + " is not produced by the expected field read");
-    return field;
-  }
-
-  private static FieldInsnNode optionalSourceField(SourceValue value, int opcode, String owner, String desc) {
-    if (value == null || value.insns == null || value.insns.size() != 1) return null;
-    AbstractInsnNode source = value.insns.iterator().next();
-    if (source instanceof FieldInsnNode field && field.getOpcode() == opcode && field.owner.equals(owner)
-        && field.desc.equals(desc))
-      return field;
-    return null;
-  }
-
-  private static int requireLoadedLocal(SourceValue value, int opcode, String label) {
-    Integer local = optionalLoadedLocal(value, opcode);
-    if (local == null) throw mismatch(label + " is not loaded unambiguously from one local");
-    return local;
-  }
-
-  private static Integer optionalLoadedLocal(SourceValue value, int opcode) {
-    if (value == null || value.insns == null || value.insns.isEmpty()) return null;
-    Integer local = null;
-    for (AbstractInsnNode source : value.insns) {
-      if (!(source instanceof VarInsnNode var) || var.getOpcode() != opcode) return null;
-      if (local != null && local != var.var) return null;
-      local = var.var;
-    }
-    return local;
-  }
-
-  private static boolean sourceIsLocal(SourceValue value, int opcode, int local) {
-    Integer found = optionalLoadedLocal(value, opcode);
-    return found != null && found == local;
-  }
-
-  private static boolean sourceIsOpcode(SourceValue value, int opcode) {
-    if (value == null || value.insns == null || value.insns.size() != 1) return false;
-    return value.insns.iterator().next().getOpcode() == opcode;
-  }
-
-  private static boolean sourceIsFieldDesc(SourceValue value, String desc) {
-    if (value == null || value.insns == null || value.insns.size() != 1) return false;
-    AbstractInsnNode source = value.insns.iterator().next();
-    return source instanceof FieldInsnNode field && field.getOpcode() == Opcodes.GETFIELD && field.desc.equals(desc);
-  }
-
-  private static boolean sourceIsMethod(SourceValue value, int opcode, String owner, String name, String desc) {
-    if (value == null || value.insns == null || value.insns.size() != 1) return false;
-    AbstractInsnNode source = value.insns.iterator().next();
-    return source instanceof MethodInsnNode call && callMatches(call, opcode, owner, name, desc);
-  }
-
-  private static boolean sourceContains(SourceValue value, AbstractInsnNode source) {
-    return value != null && value.insns != null && value.insns.contains(source);
-  }
-
-  private static MethodNode optionalMethod(ClassNode node, String name, String desc) {
-    MethodNode found = null;
-    for (MethodNode method : node.methods) {
-      if (!method.name.equals(name) || !method.desc.equals(desc)) continue;
-      if (found != null) throw mismatch("duplicate method " + name + desc);
-      found = method;
-    }
-    return found;
-  }
-
-  private static MethodNode requireMethod(ClassNode node, String name, String desc) {
-    List<MethodNode> found = methods(node, name, desc);
-    if (found.size() != 1) {
-      throw mismatch("expected one method " + node.name + "." + name + desc + ", found " + found.size());
-    }
-    return found.get(0);
-  }
-
-  private static List<MethodNode> methods(ClassNode node, String name, String desc) {
-    List<MethodNode> result = new ArrayList<>();
-    for (MethodNode method : node.methods) {
-      if (method.name.equals(name) && method.desc.equals(desc)) result.add(method);
-    }
-    return result;
-  }
-
-  private static List<FieldNode> fields(ClassNode node, String desc) {
-    List<FieldNode> result = new ArrayList<>();
-    for (FieldNode field : node.fields) if (field.desc.equals(desc)) result.add(field);
-    return result;
-  }
-
-  private static List<MethodInsnNode> calls(MethodNode method, int opcode, String owner, String name, String desc) {
-    List<MethodInsnNode> result = new ArrayList<>();
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof MethodInsnNode call && callMatches(call, opcode, owner, name, desc)) result.add(call);
-    }
-    return result;
-  }
-
-  private static boolean callMatches(MethodInsnNode call, int opcode, String owner, String name, String desc) {
-    return (opcode < 0 || call.getOpcode() == opcode) && (owner == null || call.owner.equals(owner))
-        && (name == null || call.name.equals(name)) && (desc == null || call.desc.equals(desc));
-  }
-
-  private static int countCalls(MethodNode method, int opcode, String owner, String name, String desc) {
-    return calls(method, opcode, owner, name, desc).size();
-  }
-
-  private static int countCalls(ClassNode node, int opcode, String owner, String name, String desc) {
-    int count = 0;
-    for (MethodNode method : node.methods) count += countCalls(method, opcode, owner, name, desc);
-    return count;
-  }
-
-  private static int countFields(MethodNode method, int opcode, String owner, String name, String desc) {
-    int count = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof FieldInsnNode field && (opcode < 0 || field.getOpcode() == opcode)
-          && (owner == null || field.owner.equals(owner)) && (name == null || field.name.equals(name))
-          && (desc == null || field.desc.equals(desc)))
-        count++;
-    }
-    return count;
-  }
-
-  private static List<FieldInsnNode> fields(MethodNode method, int opcode, String owner, String name, String desc) {
-    List<FieldInsnNode> result = new ArrayList<>();
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof FieldInsnNode field && (opcode < 0 || field.getOpcode() == opcode)
-          && (owner == null || field.owner.equals(owner)) && (name == null || field.name.equals(name))
-          && (desc == null || field.desc.equals(desc))) {
-        result.add(field);
-      }
-    }
-    return result;
-  }
-
-  private static int countOpcode(MethodNode method, int opcode) {
-    int count = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) if (insn.getOpcode() == opcode) count++;
-    return count;
-  }
-
-  private static int countStores(MethodNode method, int local) {
-    int count = 0;
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof VarInsnNode var && var.getOpcode() == Opcodes.ASTORE && var.var == local) count++;
-    }
-    return count;
-  }
-
-  private static MethodInsnNode asMethod(AbstractInsnNode insn, String label) {
-    if (insn instanceof MethodInsnNode method) return method;
-    throw mismatch(label + " is not a method invocation");
-  }
-
-  private static void requireCall(MethodInsnNode call, int opcode, String owner, String name, String desc,
-      String label) {
-    if (!callMatches(call, opcode, owner, name, desc)) {
-      throw mismatch(label + " does not match " + owner + "." + name + desc);
-    }
-  }
-
-  private static <T> T only(List<T> values, String label) {
-    if (values.size() != 1) throw mismatch(label + ": expected one site, found " + values.size());
-    return values.get(0);
-  }
-
-  private static void requireUnpatchedOrAlready(String label, int originals, int expectedOriginals, int hooks,
-      int expectedHooks) {
-    if (originals == 0 && hooks == expectedHooks) throw already(label + " hook postcondition matches");
-    if (originals != expectedOriginals || hooks != 0) {
-      throw mismatch(label + ": expected original=" + expectedOriginals + ", hooks=0; found original=" + originals
-          + ", hooks=" + hooks);
-    }
-  }
-
-  private static void requireCount(String label, int actual, int expected) {
-    if (actual != expected) throw mismatch(label + ": expected " + expected + ", found " + actual);
-  }
-
-  private static void requireState(String label, PatchState actual, PatchState expected) {
-    if (actual != expected) { throw mismatch(label + ": expected " + expected + ", found " + actual); }
-  }
-
-  private static void requireCountAtLeast(String label, int actual, int minimum) {
-    if (actual < minimum) throw mismatch(label + ": expected at least " + minimum + ", found " + actual);
-  }
-
-  private static void makeStatic(MethodInsnNode call, String owner, String name, String desc) {
-    call.setOpcode(Opcodes.INVOKESTATIC);
-    call.owner = owner;
-    call.name = name;
-    call.desc = desc;
-    call.itf = false;
-  }
-
-  private static AbstractInsnNode nextMeaningful(AbstractInsnNode node) {
-    if (node == null) return null;
-    AbstractInsnNode current = node.getNext();
-    while (current != null && current.getOpcode() < 0) current = current.getNext();
-    return current;
-  }
-
-  private static AbstractInsnNode firstMeaningful(MethodNode method) {
-    AbstractInsnNode current = method.instructions.getFirst();
-    while (current != null && current.getOpcode() < 0) current = current.getNext();
-    return current;
-  }
-
-  private static AbstractInsnNode previousMeaningful(AbstractInsnNode node) {
-    if (node == null) return null;
-    AbstractInsnNode current = node.getPrevious();
-    while (current != null && current.getOpcode() < 0) current = current.getPrevious();
-    return current;
-  }
-
-  private static boolean isFloat(LdcInsnNode ldc, float expected) {
-    return ldc.cst instanceof Float value && Float.floatToIntBits(value) == Float.floatToIntBits(expected);
-  }
-
-  private static <T> List<T> concat(List<T> first, List<T> second) {
-    List<T> result = new ArrayList<>(first.size() + second.size());
-    result.addAll(first);
-    result.addAll(second);
-    return result;
-  }
-
-  private static String[] exceptions(MethodNode method) {
-    if (method.exceptions == null) return null;
-    return method.exceptions.toArray(new String[0]);
-  }
-
-  private static Set<String> publicApi(ClassNode node) {
-    Set<String> api = new HashSet<>();
-    for (FieldNode field : node.fields) {
-      if ((field.access & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED)) != 0) {
-        api.add("F:" + field.name + ":" + field.desc + ":" + (field.access & apiAccessMask()));
-      }
-    }
-    for (MethodNode method : node.methods) {
-      if ((method.access & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED)) != 0) {
-        api.add("M:" + method.name + method.desc + ":" + (method.access & apiAccessMask()));
-      }
-    }
-    return api;
-  }
-
-  private static int apiAccessMask() {
-    return Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_ABSTRACT
-        | Opcodes.ACC_SYNCHRONIZED | Opcodes.ACC_NATIVE | Opcodes.ACC_VARARGS;
-  }
-
-  private static ClassNode readClass(byte[] bytes) {
-    ClassNode node = new ClassNode(Opcodes.ASM8);
-    new ClassReader(bytes).accept(node, 0);
-    return node;
-  }
-
-  private static byte[] writeClass(ClassNode node) {
-    ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
-    node.accept(writer);
-    return writer.toByteArray();
-  }
-
-  private static void verifyClass(byte[] bytes) {
-    ClassNode node = readClass(bytes);
-    for (MethodNode method : node.methods) {
-      if ((method.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) continue;
-      try {
-        new Analyzer<BasicValue>(new BasicVerifier()).analyze(node.name, method);
-      } catch (AnalyzerException ex) {
-        throw mismatch(
-            "BasicVerifier rejected " + node.name + "." + method.name + method.desc + ": " + ex.getMessage());
-      }
-    }
-  }
-
-  private static StructuralMismatchException mismatch(String message) {
-    return new StructuralMismatchException(message);
-  }
-
-  private static AlreadyPatchedException already(String message) {
-    return new AlreadyPatchedException(message);
-  }
-
-  private static CompositionMismatchException composition(String message) {
-    return new CompositionMismatchException(message);
-  }
 
   @FunctionalInterface
   private interface PatchAction {
@@ -10809,21 +8714,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
   private record BufferConstruction(AbstractInsnNode start, AbstractInsnNode end) {
   }
 
-  private record AllocationSpec(String type, String constructorDesc, String hookName, String hookDesc, int expected) {
-  }
 
-  private record AllocationPlan(TypeInsnNode allocation, AbstractInsnNode duplicate, MethodInsnNode constructor,
-      int local) {
-  }
-
-  private record SnapshotAllocationPlan(TypeInsnNode allocation, AbstractInsnNode duplicate, MethodInsnNode constructor,
-      VarInsnNode store) {
-  }
-
-  private record SnapshotHookPlan(MethodInsnNode hook, VarInsnNode store) {
-  }
-  private record AllocationPair(TypeInsnNode allocation, AbstractInsnNode duplicate) {
-  }
   private record PersistentSnapshotPlan(MethodInsnNode constructor, AllocationPair allocation,
       AbstractInsnNode sourceReceiver, String accessor) {
   }
@@ -10837,9 +8728,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
   private record SaveMethodPatchPlan(int featureMask, byte[] plannedBytes, PatchReport report) {
   }
 
-  private enum PatchState {
-    ORIGINAL, PATCHED
-  }
 
   private static final class PatchReport {
     int total;
@@ -10857,21 +8745,5 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     }
   }
 
-  private static final class StructuralMismatchException extends RuntimeException {
-    StructuralMismatchException(String message) {
-      super(message);
-    }
-  }
 
-  private static final class AlreadyPatchedException extends RuntimeException {
-    AlreadyPatchedException(String message) {
-      super(message);
-    }
-  }
-
-  private static final class CompositionMismatchException extends RuntimeException {
-    CompositionMismatchException(String message) {
-      super(message);
-    }
-  }
 }

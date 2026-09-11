@@ -317,9 +317,8 @@ public final class DocumentationConsistencyTest {
       }
     }
 
-    Path transformer =
-        requiredFile(root.resolve("source/agent/com/starsector/prepatcher/agent/PrepatcherTransformer.java"));
-    Matcher patchSchema = PATCH_SCHEMA.matcher(readUtf8(transformer));
+    Path markers = requiredFile(root.resolve("source/agent/com/starsector/prepatcher/agent/Markers.java"));
+    Matcher patchSchema = PATCH_SCHEMA.matcher(readUtf8(markers));
     require(patchSchema.find(), "transformer ownership marker must use a release-independent patch-vN schema");
     require(!patchSchema.find(), "transformer defines multiple patch marker schemas");
 
