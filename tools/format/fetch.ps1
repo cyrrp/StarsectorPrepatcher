@@ -1,4 +1,4 @@
-# Fetch the Eclipse JDT formatter jars into .build\format\lib, verifying every download against
+# Fetch the Eclipse JDT formatter jars into .toolcache/format/lib, verifying every download against
 # SHA256SUMS.txt. These are developer tools only: they are never shipped with the mod, so they are
 # downloaded on demand instead of being committed. Re-running is cheap; files already present with
 # the right checksum are left alone.
@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $modRoot = (Resolve-Path (Join-Path $here '..\..')).Path
-$lib = Join-Path $modRoot '.build\format\lib'
+$lib = Join-Path $modRoot '.toolcache\format\lib'
 $base = if ($env:FORMATTER_MAVEN_BASE) { $env:FORMATTER_MAVEN_BASE } else { 'https://repo1.maven.org/maven2' }
 
 $expected = @{}

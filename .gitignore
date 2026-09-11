@@ -17,3 +17,6 @@ Thumbs.db
 *.bak
 *.tmp
 *.swp
+
+# Tooling downloaded on demand (formatter libraries); never shipped, never committed.
+.toolcache/

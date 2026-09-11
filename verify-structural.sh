@@ -40,8 +40,16 @@ EXPORTS=()
 # layout keeps the javaagent in fr.agent.jar. The presence of fr.jar alone does not imply the
 # legacy loader, so layout detection mirrors install-agent.ps1 and inspects the entry itself.
 FR_LEGACY_LOADER_ENTRY='com/genir/renderer/loaders/AppClassLoader.class'
-fr_has_legacy_loader() {
-  [[ -f "$CORE/fr.jar" ]] && jar tf "$CORE/fr.jar" | grep -qx "$FR_LEGACY_LOADER_ENTRY"
+# 0 = legacy layout present, 1 = readable but not the legacy layout, 2 = no jar or unreadable.
+# A jar we cannot open must not masquerade as "some other layout": that would turn a broken
+# installation into a quiet SKIPPED instead of a gate failure.
+fr_legacy_loader_state() {
+  [[ -f "$CORE/fr.jar" ]] || return 2
+  local listing
+  if ! listing="$(jar tf "$CORE/fr.jar" 2>/dev/null)"; then
+    return 2
+  fi
+  grep -qxF "$FR_LEGACY_LOADER_ENTRY" <<<"$listing"
 }
 
 bash "$MOD_ROOT/build-agent.sh"
@@ -469,7 +477,13 @@ if [[ -x "$JAVA27" ]]; then
       tee -a "$REPORT_DIR/java27-route-negative-probes.txt"
   done
 
-  if ! fr_has_legacy_loader; then
+  fr_legacy_loader_state || legacy_state=$?
+  legacy_state="${legacy_state:-0}"
+  if [[ "$legacy_state" == 2 && -f "$CORE/fr.jar" ]]; then
+    echo "$CORE/fr.jar exists but could not be read; refusing to call that a non-legacy layout." >&2
+    exit 1
+  fi
+  if [[ "$legacy_state" != 0 ]]; then
     printf 'SKIPPED legacy Faster Rendering route probes: %s has no %s\n' \
       "$CORE/fr.jar" "$FR_LEGACY_LOADER_ENTRY" \
       | tee "$REPORT_DIR/java27-legacy-fr-route-probes.txt"
@@ -735,10 +749,16 @@ java \
 
 FR_JAR="$CORE/fr.jar"
 FR_SMOKE_REPORT="$REPORT_DIR/faster-rendering-loader-smoke.txt"
+smoke_legacy_state=0
+fr_legacy_loader_state || smoke_legacy_state=$?
+if [[ "$smoke_legacy_state" == 2 && -f "$FR_JAR" ]]; then
+  echo "$FR_JAR exists but could not be read; refusing to call that a non-legacy layout." >&2
+  exit 1
+fi
 if [[ ! -f "$FR_JAR" ]]; then
   echo "SKIPPED Faster Rendering loader smoke: fr.jar not found at $FR_JAR" | \
     tee "$FR_SMOKE_REPORT"
-elif ! fr_has_legacy_loader; then
+elif [[ "$smoke_legacy_state" != 0 ]]; then
   echo "SKIPPED Faster Rendering loader smoke: $FR_JAR has no $FR_LEGACY_LOADER_ENTRY;" \
     "this is the Agent layout, covered by the fr.agent.jar routes" | \
     tee "$FR_SMOKE_REPORT"

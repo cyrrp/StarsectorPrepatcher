@@ -62,11 +62,22 @@ explicit special policy must fail this gate.
 
 ## Java 17/27 и Faster Rendering
 
-Release gate выполняется на Java 17 и на точной Miko Java `27+22`. Для Java 27 обязательны три
-реальных subprocess-сценария: обычный Prepatcher без FR, `fr.agent.jar → Prepatcher` с новым
-`fr.jar` и legacy `AppClassLoader + Prepatcher` со старым установленным `fr.jar`. Проверяются
-выбранный профиль, порядок единого pipeline, все presentation/structural targets, отсутствие
-нелегальных method names, загрузка `CampaignState` и полная verification-загрузка Local Resources.
+Release gate выполняется на Java 17 и на **любом установленном рантайме с feature ≥ 27** —
+`JavaCompatibilityRoute` разделяет маршруты именно по этому порогу, а не по конкретной сборке, и
+гейт выбирает первый подходящий `jdk-*` в корне игры. Привязка к точной Miko Java `27+22` снята:
+игроки давно на 28, и проверяется то, что у них стоит.
+
+Обязательны два реальных subprocess-сценария: обычный Prepatcher без FR и `fr.agent.jar →
+Prepatcher` с текущим `fr.jar`. Третий, legacy `AppClassLoader + Prepatcher`, выполняется **только
+если legacy-раскладка действительно установлена** — то есть внутри `fr.jar` лежит
+`com/genir/renderer/loaders/AppClassLoader.class`. На современной поставке FR такого класса нет, и
+сценарий печатает `SKIPPED` с указанием причины. Поддержка старого FR не снимается и код её не
+теряет; снимается требование проверять её там, где её нечем проверить. Если на старую раскладку
+пожалуются, сценарий вернётся к обязательным.
+
+Проверяются выбранный профиль, порядок единого pipeline, все presentation/structural targets,
+отсутствие нелегальных method names, загрузка `CampaignState` и полная verification-загрузка
+Local Resources.
 
 No-FR gate использует эффективные JVM arguments без `fr.agent.jar`, legacy system loader и
 `fr.jar` в classpath. Он обязан выбрать `JAVA27_STANDARD`, загрузить все 24 presentation targets и

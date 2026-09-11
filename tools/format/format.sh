@@ -39,13 +39,16 @@ javac_bin="${javahome:+$(cygpath -u "$javahome" 2>/dev/null || echo "$javahome")
 win() { command -v cygpath >/dev/null && cygpath -w "$1" || echo "$1"; }
 sep=":" ; command -v cygpath >/dev/null && sep=";"
 # Formatter jars are developer-only tooling, so they are fetched on demand rather than committed.
-lib="$root/.build/format/lib"
+lib="$root/.toolcache/format/lib"
 if [ ! -d "$lib" ] || [ -z "$(ls -A "$lib" 2>/dev/null)" ]; then
   echo "Formatter libraries are missing. Run tools/format/fetch.sh first." >&2
   exit 2
 fi
-cp="$(win "$lib")\\*"
-out="$root/.build/format/classes"
+# The wildcard separator has to match the platform: a Windows JDK reached through cygpath wants
+# lib\*, a plain POSIX JDK wants lib/*. Using the Windows form unconditionally leaves the classpath
+# unresolvable on Linux.
+if command -v cygpath >/dev/null; then cp="$(win "$lib")\\*"; else cp="$lib/*"; fi
+out="$root/.toolcache/format/classes"
 stamp="$out/JdtFormat.class"
 if [ ! -f "$stamp" ] || [ "$here/JdtFormat.java" -nt "$stamp" ]; then
   mkdir -p "$out"

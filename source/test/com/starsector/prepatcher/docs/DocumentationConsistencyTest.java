@@ -598,6 +598,15 @@ public final class DocumentationConsistencyTest {
       paths.filter(Files::isRegularFile).map(path -> path.toAbsolutePath().normalize())
           .filter(DocumentationConsistencyTest::isMarkdown).sorted().forEach(markdown::add);
     }
+
+    // Resolved design questions are canonical documents too, and they link into docs/ and at each
+    // other; leaving them out let their relative links rot unchecked.
+    Path decisions = root.resolve("decisions");
+    require(Files.isDirectory(decisions), "decisions directory is missing: " + decisions);
+    try (Stream<Path> paths = Files.walk(decisions)) {
+      paths.filter(Files::isRegularFile).map(path -> path.toAbsolutePath().normalize())
+          .filter(DocumentationConsistencyTest::isMarkdown).sorted().forEach(markdown::add);
+    }
     return Collections.unmodifiableSet(markdown);
   }
 

@@ -59,12 +59,17 @@ public class JdtFormat {
         files.sort(null);
 
         int changed = 0;
+        int failed = 0;
         for (Path f : files) {
             String src = Files.readString(f, StandardCharsets.UTF_8);
             TextEdit edit = formatter.format(CodeFormatter.K_COMPILATION_UNIT
                     | CodeFormatter.F_INCLUDE_COMMENTS, src, 0, src.length(), 0, "\n");
             if (edit == null) {
-                System.err.println("no edit: " + f);
+                // JDT returns null when it could not parse the unit. That is a failure to format,
+                // not a formatted file, and reporting it as clean would let check pass on a file
+                // nobody has actually checked.
+                System.err.println("could not format: " + f);
+                failed++;
                 continue;
             }
             Document doc = new Document(src);
@@ -76,6 +81,10 @@ public class JdtFormat {
                 if (check) System.out.println("would reformat: " + f);
                 if (apply) Files.writeString(f, out, StandardCharsets.UTF_8);
             }
+        }
+        if (failed > 0) {
+            System.err.println(failed + " of " + files.size() + " files could not be formatted");
+            System.exit(2);
         }
         if (check && changed > 0) {
             System.out.println(changed + " of " + files.size() + " files would be reformatted");

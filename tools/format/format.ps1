@@ -45,13 +45,13 @@ if ($JavaHome -and (Test-Path (Join-Path $JavaHome 'bin\java.exe'))) {
 }
 
 # Formatter jars are developer-only tooling, so they are fetched on demand rather than committed.
-$lib = Join-Path $root '.build\format\lib'
+$lib = Join-Path $root '.toolcache\format\lib'
 if (-not (Test-Path -LiteralPath $lib) -or -not (Get-ChildItem -LiteralPath $lib -Filter '*.jar' -ErrorAction SilentlyContinue)) {
   Write-Error 'Formatter libraries are missing. Run tools\format\fetch.ps1 first.'
   exit 2
 }
 $cp = Join-Path $lib '*'
-$out = Join-Path $root '.build\format\classes'
+$out = Join-Path $root '.toolcache\format\classes'
 $stamp = Join-Path $out 'JdtFormat.class'
 $driver = Join-Path $here 'JdtFormat.java'
 if (-not (Test-Path $stamp) -or (Get-Item $driver).LastWriteTime -gt (Get-Item $stamp).LastWriteTime) {

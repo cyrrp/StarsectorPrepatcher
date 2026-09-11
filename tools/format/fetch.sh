@@ -7,7 +7,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 mod_root="$(cd "$here/../.." && pwd)"
-lib="$mod_root/.build/format/lib"
+lib="$mod_root/.toolcache/format/lib"
 base="${FORMATTER_MAVEN_BASE:-https://repo1.maven.org/maven2}"
 
 if command -v sha256sum >/dev/null 2>&1; then
