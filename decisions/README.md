@@ -19,6 +19,7 @@
 | [D-OWNED-FORK-FIRST-CLASS.md](D-OWNED-FORK-FIRST-CLASS.md) | Как относиться к собственному форку AoTD | ACTIVE |
 | [D-STRUCTURAL-DISCOVERY.md](D-STRUCTURAL-DISCOVERY.md) | Как находить цели без обфусцированных имён | RESOLVED, не реализовано |
 | [D-TEMPMOD-AGGRESSIVE-SEMANTICS.md](D-TEMPMOD-AGGRESSIVE-SEMANTICS.md) | Допустимое расхождение с vanilla в expiry scheduler | ACTIVE |
+| [D-PATCH-SHAPE.md](D-PATCH-SHAPE.md) | Форма патча: доказательство контракта до мутации | ACTIVE |
 
 ## Шаблон
 

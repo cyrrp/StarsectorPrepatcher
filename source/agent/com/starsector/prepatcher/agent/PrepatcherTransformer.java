@@ -378,14 +378,14 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
                 apply(state, "systemNebulaCache", config.systemNebulaCache, this::patchSystemNebulaCache);
                 apply(state, "sampleCacheClearThrottle", config.sampleCacheClearThrottle,
                         this::patchSampleCacheClearThrottle);
-                apply(state, "gridLineCap", config.gridLineCap, this::patchGridLineCap);
+                apply(state, "gridLineCap", config.gridLineCap, structured(new GridLineCap()));
             }
             case A -> {
                 apply(state, "intelCallbackCache", config.intelCallbackCache,
                         node -> patchIntelMapLocationCalls(node, 1));
                 // The complete hit-test method is one transformation surface. Keep the wrapper last
                 // so independent call-site patches are applied to the preserved original body.
-                apply(state, "mapHitTest", config.mapHitTest, this::patchMapHitTest);
+                apply(state, "mapHitTest", config.mapHitTest, structured(new MapHitTest()));
             }
             case Z -> apply(state, "intelArrowRendering", config.intelArrowRendering,
                     this::patchIntelArrowRendering);
@@ -2258,143 +2258,206 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
         return report;
     }
 
-    private PatchReport patchGridLineCap(ClassNode node) {
-        MethodNode method = requireMethod(node, "null", "(F)V");
-        int hooks = countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "gridSpacing", "()F");
-        List<LdcInsnNode> bounds = new ArrayList<>();
-        List<LdcInsnNode> step = new ArrayList<>();
-        for (AbstractInsnNode insn : method.instructions.toArray()) {
-            if (!(insn instanceof LdcInsnNode ldc) || !isFloat(ldc, 2000f)) continue;
-            AbstractInsnNode n1 = nextMeaningful(ldc);
-            AbstractInsnNode n2 = nextMeaningful(n1);
-            AbstractInsnNode n3 = nextMeaningful(n2);
-            AbstractInsnNode n4 = nextMeaningful(n3);
-            AbstractInsnNode prev = previousMeaningful(ldc);
-            if (prev != null && prev.getOpcode() == Opcodes.FLOAD
-                    && n1 != null && n1.getOpcode() == Opcodes.FDIV
-                    && n2 != null && n2.getOpcode() == Opcodes.F2I
-                    && n3 != null && n3.getOpcode() == Opcodes.ISTORE) {
-                bounds.add(ldc);
-            } else if (n1 instanceof VarInsnNode load && load.getOpcode() == Opcodes.ALOAD && load.var == 0
-                    && n2 instanceof FieldInsnNode field && field.getOpcode() == Opcodes.GETFIELD
-                    && field.owner.equals(node.name) && field.desc.equals("F")
-                    && n3 != null && n3.getOpcode() == Opcodes.FMUL
-                    && n4 != null && n4.getOpcode() == Opcodes.FSTORE) {
-                step.add(ldc);
-            }
-        }
-        if (bounds.isEmpty() && step.isEmpty() && hooks == 5) {
-            throw already("five structurally verified gridSpacing hooks are already present");
-        }
-        if (hooks != 0) throw mismatch("mixed/foreign gridSpacing hook state: " + hooks);
-        requireCount("global-grid bound constants", bounds.size(), 4);
-        requireCount("global-grid step constant", step.size(), 1);
-        List<MethodInsnNode> starscape = calls(method, Opcodes.INVOKEVIRTUAL,
-                node.name, "isStarscapeMode", "()Z");
-        requireCount("grid starscape guard", starscape.size(), 1);
-        int guardIndex = method.instructions.indexOf(starscape.get(0));
-        for (LdcInsnNode ldc : concat(bounds, step)) {
-            if (method.instructions.indexOf(ldc) <= guardIndex) {
-                throw mismatch("a selected grid constant is not dominated by the starscape branch marker");
-            }
-        }
-        for (LdcInsnNode ldc : concat(bounds, step)) {
-            method.instructions.set(ldc, new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS,
-                    "gridSpacing", "()F", false));
-        }
-        requireCount("gridSpacing postcondition",
-                countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "gridSpacing", "()F"), 5);
+    /**
+     * Replaces the fixed 2000f global-grid constants with a scale-aware hook, so that a large
+     * sector no longer draws its grid at the density chosen for a small one.
+     */
+    private static final class GridLineCap implements StructuredPatch<GridLineCap.Plan> {
+        /** The five proven constants, in the method that owns them. */
+        private record Plan(MethodNode method, List<LdcInsnNode> constants) {}
 
-        PatchReport report = new PatchReport();
-        report.add("large-sector grid line cap", 5);
-        return report;
+        @Override
+        public Match<Plan> match(ClassNode node) {
+            MethodNode method = requireMethod(node, "null", "(F)V");
+            int hooks = countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "gridSpacing", "()F");
+            List<LdcInsnNode> bounds = new ArrayList<>();
+            List<LdcInsnNode> step = new ArrayList<>();
+            for (AbstractInsnNode insn : method.instructions.toArray()) {
+                if (!(insn instanceof LdcInsnNode ldc) || !isFloat(ldc, 2000f)) continue;
+                AbstractInsnNode n1 = nextMeaningful(ldc);
+                AbstractInsnNode n2 = nextMeaningful(n1);
+                AbstractInsnNode n3 = nextMeaningful(n2);
+                AbstractInsnNode n4 = nextMeaningful(n3);
+                AbstractInsnNode prev = previousMeaningful(ldc);
+                if (prev != null && prev.getOpcode() == Opcodes.FLOAD
+                        && n1 != null && n1.getOpcode() == Opcodes.FDIV
+                        && n2 != null && n2.getOpcode() == Opcodes.F2I
+                        && n3 != null && n3.getOpcode() == Opcodes.ISTORE) {
+                    bounds.add(ldc);
+                } else if (n1 instanceof VarInsnNode load && load.getOpcode() == Opcodes.ALOAD && load.var == 0
+                        && n2 instanceof FieldInsnNode field && field.getOpcode() == Opcodes.GETFIELD
+                        && field.owner.equals(node.name) && field.desc.equals("F")
+                        && n3 != null && n3.getOpcode() == Opcodes.FMUL
+                        && n4 != null && n4.getOpcode() == Opcodes.FSTORE) {
+                    step.add(ldc);
+                }
+            }
+            if (bounds.isEmpty() && step.isEmpty() && hooks == 5) {
+                return Match.alreadyApplied(
+                        "five structurally verified gridSpacing hooks are already present");
+            }
+            if (hooks != 0) {
+                return Match.incompatible("mixed/foreign gridSpacing hook state: " + hooks);
+            }
+            requireCount("global-grid bound constants", bounds.size(), 4);
+            requireCount("global-grid step constant", step.size(), 1);
+            List<MethodInsnNode> starscape = calls(method, Opcodes.INVOKEVIRTUAL,
+                    node.name, "isStarscapeMode", "()Z");
+            requireCount("grid starscape guard", starscape.size(), 1);
+            int guardIndex = method.instructions.indexOf(starscape.get(0));
+            List<LdcInsnNode> constants = concat(bounds, step);
+            for (LdcInsnNode ldc : constants) {
+                if (method.instructions.indexOf(ldc) <= guardIndex) {
+                    return Match.incompatible(
+                            "a selected grid constant is not dominated by the starscape branch marker");
+                }
+            }
+            return Match.plan(new Plan(method, constants));
+        }
+
+        @Override
+        public PatchReport mutate(Plan plan) {
+            for (LdcInsnNode ldc : plan.constants()) {
+                plan.method().instructions.set(ldc, new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS,
+                        "gridSpacing", "()F", false));
+            }
+            PatchReport report = new PatchReport();
+            report.add("large-sector grid line cap", 5);
+            return report;
+        }
+
+        @Override
+        public void verify(Plan plan, ClassNode node) {
+            requireCount("gridSpacing postcondition",
+                    countCalls(plan.method(), Opcodes.INVOKESTATIC, HOOKS, "gridSpacing", "()F"), 5);
+        }
     }
 
     // ---------------------------------------------------------------------
     // A/Z/EventsPanel: hit tests and Intel map
     // ---------------------------------------------------------------------
 
-    private PatchReport patchMapHitTest(ClassNode node) {
-        String desc = "(FFF)" + ENTITY_TOKEN_DESC;
-        String renamed = "smo$originalHitTest";
-        String hookDesc = "(Ljava/lang/Object;FFF)" + ENTITY_TOKEN_DESC;
-        List<AllocationSpec> specs = List.of(
-                new AllocationSpec("java/util/ArrayList", "(Ljava/util/Collection;)V",
-                        "borrowHitList", "(Ljava/util/Collection;)Ljava/util/ArrayList;", 1),
-                new AllocationSpec("org/lwjgl/util/vector/Vector2f", "(FF)V",
-                        "borrowHitPoint", "(FF)Lorg/lwjgl/util/vector/Vector2f;", 1));
+    /**
+     * Wraps the map hit-test so repeated hovers reuse an exact-result cache, and makes the
+     * preserved original body borrow its list and point from a per-scope scratch pool instead of
+     * allocating them on every test. The whole method is one transformation surface, so the wrapper
+     * is built only after the scope, the allocation group and the semantic contract are all proven.
+     */
+    private static final class MapHitTest implements StructuredPatch<MapHitTest.Plan> {
+        private static final String PUBLIC_NAME = "OO0000";
+        private static final String RENAMED = "smo$originalHitTest";
+        private static final String HOOK = "hitTestCached";
+        private static final String SCOPE = "A.OO0000";
+        private static final String SCRATCH = "A.OO0000 hit-test scratch";
 
-        boolean wrapperAlready = methods(node, renamed, desc).size() == 1;
-        MethodNode original = requireWrapperSource(node, "OO0000", desc, renamed,
-                "hitTestCached", hookDesc);
-        PatchState scopeState = scratchScopeState(node.name, original, "A.OO0000");
-        PatchState allocationState = scratchAllocationGroupState(
-                node.name, original, specs, "A.OO0000 hit-test scratch");
+        /** The proven original body plus the descriptors and scratch specs it was proven against. */
+        private record Plan(String owner, List<MethodNode> classMethods, MethodNode original,
+                            String desc, String hookDesc, List<AllocationSpec> specs) {}
 
-        if (containsWriteOrMonitor(original)) {
-            throw mismatch("hit-test method writes state or uses monitor/invokedynamic operations");
+        private static String desc() {
+            return "(FFF)" + ENTITY_TOKEN_DESC;
         }
-        requireCount("hit-test semantic call count", totalMethodCalls(original),
-                scopeState == PatchState.PATCHED ? 54 : 50);
-        List<FieldNode> mapFields = fields(node, "L" + H + ";");
-        requireCount("A map-handler fields", mapFields.size(), 1);
-        requireCountAtLeast("hit-test H.getLocation", countCalls(original, Opcodes.INVOKEVIRTUAL,
-                H, "getLocation", "()Lcom/fs/starfarer/campaign/BaseLocation;"), 1);
-        requireCountAtLeast("hit-test H.getFactor", countCalls(original, Opcodes.INVOKEVIRTUAL,
-                H, "getFactor", "()F"), 1);
-        requireCountAtLeast("hit-test H.getIcons", countCalls(original, Opcodes.INVOKEVIRTUAL,
-                H, "getIcons", "()Ljava/util/LinkedHashMap;"), 1);
 
-        if (wrapperAlready) {
-            if (scopeState != PatchState.PATCHED || allocationState != PatchState.PATCHED) {
-                throw mismatch("hit-test wrapper exists without the complete scratch allocation group");
+        private static String hookDesc() {
+            return "(Ljava/lang/Object;FFF)" + ENTITY_TOKEN_DESC;
+        }
+
+        private static List<AllocationSpec> specs() {
+            return List.of(
+                    new AllocationSpec("java/util/ArrayList", "(Ljava/util/Collection;)V",
+                            "borrowHitList", "(Ljava/util/Collection;)Ljava/util/ArrayList;", 1),
+                    new AllocationSpec("org/lwjgl/util/vector/Vector2f", "(FF)V",
+                            "borrowHitPoint", "(FF)Lorg/lwjgl/util/vector/Vector2f;", 1));
+        }
+
+        @Override
+        public Match<Plan> match(ClassNode node) {
+            String desc = desc();
+            String hookDesc = hookDesc();
+            List<AllocationSpec> specs = specs();
+
+            boolean wrapperAlready = methods(node, RENAMED, desc).size() == 1;
+            MethodNode original = requireWrapperSource(node, PUBLIC_NAME, desc, RENAMED,
+                    HOOK, hookDesc);
+            PatchState scopeState = scratchScopeState(node.name, original, SCOPE);
+            PatchState allocationState = scratchAllocationGroupState(
+                    node.name, original, specs, SCRATCH);
+
+            if (containsWriteOrMonitor(original)) {
+                return Match.incompatible(
+                        "hit-test method writes state or uses monitor/invokedynamic operations");
             }
-            requireWrapperPostcondition(node, "OO0000", desc, renamed,
-                    "hitTestCached", hookDesc);
-            requireHitTestWrapper(node, desc, hookDesc);
-            throw already("hit-test wrapper, scratch scope, allocation hooks and semantic contract match");
+            requireCount("hit-test semantic call count", totalMethodCalls(original),
+                    scopeState == PatchState.PATCHED ? 54 : 50);
+            List<FieldNode> mapFields = fields(node, "L" + H + ";");
+            requireCount("A map-handler fields", mapFields.size(), 1);
+            requireCountAtLeast("hit-test H.getLocation", countCalls(original, Opcodes.INVOKEVIRTUAL,
+                    H, "getLocation", "()Lcom/fs/starfarer/campaign/BaseLocation;"), 1);
+            requireCountAtLeast("hit-test H.getFactor", countCalls(original, Opcodes.INVOKEVIRTUAL,
+                    H, "getFactor", "()F"), 1);
+            requireCountAtLeast("hit-test H.getIcons", countCalls(original, Opcodes.INVOKEVIRTUAL,
+                    H, "getIcons", "()Ljava/util/LinkedHashMap;"), 1);
+
+            if (wrapperAlready) {
+                if (scopeState != PatchState.PATCHED || allocationState != PatchState.PATCHED) {
+                    return Match.incompatible(
+                            "hit-test wrapper exists without the complete scratch allocation group");
+                }
+                requireWrapperPostcondition(node, PUBLIC_NAME, desc, RENAMED, HOOK, hookDesc);
+                requireHitTestWrapper(node, desc, hookDesc);
+                return Match.alreadyApplied(
+                        "hit-test wrapper, scratch scope, allocation hooks and semantic contract match");
+            }
+            if (scopeState != PatchState.ORIGINAL || allocationState != PatchState.ORIGINAL) {
+                return Match.incompatible("hit-test method has a mixed wrapper/scope/allocation state");
+            }
+            return Match.plan(new Plan(node.name, node.methods, original, desc, hookDesc, specs));
         }
-        if (scopeState != PatchState.ORIGINAL || allocationState != PatchState.ORIGINAL) {
-            throw mismatch("hit-test method has a mixed wrapper/scope/allocation state");
+
+        @Override
+        public PatchReport mutate(Plan plan) {
+            MethodNode original = plan.original();
+            installScratchScope(plan.owner(), original, SCOPE);
+            int changed = replaceAllocationGroup(plan.owner(), original, plan.specs(), true, SCRATCH);
+
+            int originalAccess = original.access;
+            String signature = original.signature;
+            String[] exceptions = exceptions(original);
+            original.name = RENAMED;
+            makePrivateSynthetic(original);
+            MethodNode wrapper = new MethodNode(Opcodes.ASM8, originalAccess, PUBLIC_NAME,
+                    plan.desc(), signature, exceptions);
+            moveWrapperMetadata(original, wrapper, PUBLIC_NAME);
+            wrapper.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            wrapper.instructions.add(new VarInsnNode(Opcodes.FLOAD, argumentLocal(wrapper, 0)));
+            wrapper.instructions.add(new VarInsnNode(Opcodes.FLOAD, argumentLocal(wrapper, 1)));
+            wrapper.instructions.add(new VarInsnNode(Opcodes.FLOAD, argumentLocal(wrapper, 2)));
+            wrapper.instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS,
+                    HOOK, plan.hookDesc(), false));
+            wrapper.instructions.add(new InsnNode(Opcodes.ARETURN));
+            plan.classMethods().add(wrapper);
+
+            PatchReport report = new PatchReport();
+            report.add("hit-test scratch allocations", changed);
+            report.add("bounded exact-result hover cache", 1);
+            return report;
         }
 
-        installScratchScope(node.name, original, "A.OO0000");
-        int changed = replaceAllocationGroup(node.name, original, specs, true,
-                "A.OO0000 hit-test scratch");
-
-        int originalAccess = original.access;
-        String signature = original.signature;
-        String[] exceptions = exceptions(original);
-        original.name = renamed;
-        makePrivateSynthetic(original);
-        MethodNode wrapper = new MethodNode(Opcodes.ASM8, originalAccess, "OO0000",
-                desc, signature, exceptions);
-        moveWrapperMetadata(original, wrapper, "OO0000");
-        wrapper.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        wrapper.instructions.add(new VarInsnNode(Opcodes.FLOAD, argumentLocal(wrapper, 0)));
-        wrapper.instructions.add(new VarInsnNode(Opcodes.FLOAD, argumentLocal(wrapper, 1)));
-        wrapper.instructions.add(new VarInsnNode(Opcodes.FLOAD, argumentLocal(wrapper, 2)));
-        wrapper.instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS,
-                "hitTestCached", hookDesc, false));
-        wrapper.instructions.add(new InsnNode(Opcodes.ARETURN));
-        node.methods.add(wrapper);
-
-        requireWrapperPostcondition(node, "OO0000", desc, renamed,
-                "hitTestCached", hookDesc);
-        requireHitTestWrapper(node, desc, hookDesc);
-        requireCount("hit-test scratch scope",
-                countCalls(original, Opcodes.INVOKESTATIC, HOOKS, "beginScratchScope", "()V"), 1);
-        requireCount("hit-test list hook",
-                countCalls(original, Opcodes.INVOKESTATIC, HOOKS,
-                        "borrowHitList", "(Ljava/util/Collection;)Ljava/util/ArrayList;"), 1);
-        requireCount("hit-test point hook",
-                countCalls(original, Opcodes.INVOKESTATIC, HOOKS,
-                        "borrowHitPoint", "(FF)Lorg/lwjgl/util/vector/Vector2f;"), 1);
-
-        PatchReport report = new PatchReport();
-        report.add("hit-test scratch allocations", changed);
-        report.add("bounded exact-result hover cache", 1);
-        return report;
+        @Override
+        public void verify(Plan plan, ClassNode node) {
+            MethodNode original = plan.original();
+            requireWrapperPostcondition(node, PUBLIC_NAME, plan.desc(), RENAMED,
+                    HOOK, plan.hookDesc());
+            requireHitTestWrapper(node, plan.desc(), plan.hookDesc());
+            requireCount("hit-test scratch scope",
+                    countCalls(original, Opcodes.INVOKESTATIC, HOOKS, "beginScratchScope", "()V"), 1);
+            requireCount("hit-test list hook",
+                    countCalls(original, Opcodes.INVOKESTATIC, HOOKS,
+                            "borrowHitList", "(Ljava/util/Collection;)Ljava/util/ArrayList;"), 1);
+            requireCount("hit-test point hook",
+                    countCalls(original, Opcodes.INVOKESTATIC, HOOKS,
+                            "borrowHitPoint", "(FF)Lorg/lwjgl/util/vector/Vector2f;"), 1);
+        }
     }
 
     private PatchReport patchIntelMapLocationCalls(ClassNode node, int expected) {
@@ -12183,6 +12246,66 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     @FunctionalInterface
     private interface PatchAction {
         PatchReport apply(ClassNode node);
+    }
+
+    /**
+     * A patch that proves its structural contract before it changes anything.
+     *
+     * <p>{@link #match(ClassNode)} may read the whole class but must leave it untouched; it either
+     * returns a proven plan or refuses with a reason. {@link #mutate} receives only that plan and
+     * never sees the {@code ClassNode}, so it cannot search and cannot reach a site the match did
+     * not prove. Callers that only need the question "would this patch apply?" — postcondition
+     * validation and the composition probe — run the match alone.
+     */
+    private interface StructuredPatch<P> {
+        Match<P> match(ClassNode node);
+
+        PatchReport mutate(P plan);
+
+        /** What must hold once the plan has been applied. Runs before the envelope serializes. */
+        default void verify(P plan, ClassNode node) {}
+    }
+
+    /** Outcome of {@link StructuredPatch#match}: a proven plan, or a refusal with its reason. */
+    private static final class Match<P> {
+        private final P plan;
+        private final String reason;
+        private final boolean alreadyApplied;
+
+        private Match(P plan, String reason, boolean alreadyApplied) {
+            this.plan = plan;
+            this.reason = reason;
+            this.alreadyApplied = alreadyApplied;
+        }
+
+        static <P> Match<P> plan(P plan) {
+            return new Match<>(plan, null, false);
+        }
+
+        /** The complete result of this patch is already present and verified. */
+        static <P> Match<P> alreadyApplied(String reason) {
+            return new Match<>(null, reason, true);
+        }
+
+        /** The class does not carry the structure this patch requires. */
+        static <P> Match<P> incompatible(String reason) {
+            return new Match<>(null, reason, false);
+        }
+    }
+
+    /**
+     * Adapts a two-phase patch to the single-call contract the envelope expects, keeping refusal
+     * signalling on the boundary where every other patch already raises it.
+     */
+    private static <P> PatchAction structured(StructuredPatch<P> patch) {
+        return node -> {
+            Match<P> match = patch.match(node);
+            if (match.alreadyApplied) throw already(match.reason);
+            if (match.plan == null) throw mismatch(match.reason);
+            PatchReport report = patch.mutate(match.plan);
+            patch.verify(match.plan, node);
+            return report;
+        };
     }
 
     @FunctionalInterface
