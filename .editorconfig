@@ -1,0 +1,27 @@
+# Editor defaults matching what the repository already contains. The Java settings mirror
+# tools/format/eclipse-jdt-format.properties; that profile, not this file, is the authority for
+# Java, and `tools/format/format.sh check` is what enforces it.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.java]
+max_line_length = 120
+
+[*.bat]
+end_of_line = crlf
+
+# Markdown uses two trailing spaces as a hard line break, so trimming them changes rendering.
+[*.md]
+trim_trailing_whitespace = false
+
+# Generated manifests: content is produced by build-agent, not edited by hand.
+[SHA256SUMS.txt]
+insert_final_newline = true
+trim_trailing_whitespace = false
