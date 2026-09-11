@@ -1,0 +1,13 @@
+# Eclipse JDT formatter 3.41.0 + platform runtime jars (see tools/format/JdtFormat.java).
+
+47bda183cd94a8bdb704f5b35690224f75b7d2fb563c8b8f9bbcfab987c3029b  ecj-3.41.0.jar
+d8a2974f5ec3d7cfb8e3e177aa7303babed0a1565dbe5416084a751044255002  org.eclipse.core.contenttype-3.9.600.jar
+accfc3bd0749e9a603a16366bf8430ae1ed442cf8c172f7abbb4d3355c29f662  org.eclipse.core.jobs-3.15.600.jar
+0d534030b9c76d0f7b8affc3b22d1a772506b64888e44d6b06806dd400792318  org.eclipse.core.resources-3.22.100.jar
+ff59efb6fb7d610d819d44777bd306860ec7926cd31ac95419e729edfb38cc02  org.eclipse.core.runtime-3.33.0.jar
+617c5d7e759276b7e9ed363c56a6714b7f21d4a812d533fcb90e48723cc4c001  org.eclipse.equinox.common-3.20.0.jar
+7f8b452ee5f9d836db8534c6bd1a29a2662352d868ff94856b6b54bc8032a999  org.eclipse.equinox.preferences-3.11.300.jar
+88aff1ec4f6b52105971bdbbb5e1a0636b9046ee1bafc3b25b467172da9a079e  org.eclipse.jdt.core-3.41.0.jar
+e73e2ed1110f18e663dbe6a86048df586ee4d2ad70c38af726a1b5df0fb9f87a  org.eclipse.osgi-3.22.0.jar
+a3e66c15596165de0869da6d18ce0d837eaa0584ff988a27c95618066e55cf04  org.eclipse.text-3.14.300.jar
+43c7c870710e363405d422da653cce0d798a4537f76e4930f79bceadd3a55345  org.osgi.service.prefs-1.1.2.jar
