@@ -48,7 +48,7 @@ bash "$MOD_ROOT/build-agent.sh"
 rm -rf "$TEST_CLASSES" "$FR_SMOKE_CLASSES"
 mkdir -p "$TEST_CLASSES" "$FR_SMOKE_CLASSES" "$REPORT_DIR"
 
-TEST_CP="$AGENT_CLASSES:$MOD_ROOT/lib/asm-9.10.1.jar:$MOD_ROOT/lib/asm-tree-9.10.1.jar:$MOD_ROOT/lib/asm-analysis-9.10.1.jar:$MOD_ROOT/lib/asm-util-9.10.1.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
+TEST_CP="$AGENT_CLASSES:$MOD_ROOT/lib/asm-9.10.1.jar:$MOD_ROOT/lib/asm-tree-9.10.1.jar:$MOD_ROOT/lib/asm-analysis-9.10.1.jar:$MOD_ROOT/lib/asm-util-9.10.1.jar:$MOD_ROOT/lib/asm-commons-9.10.1.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
 FR_SMOKE_SOURCE="$MOD_ROOT/source/test/com/starsector/prepatcher/fr/FasterRenderingLoaderSmokeTest.java"
 find "$MOD_ROOT/source/test" -name '*.java' ! -path "$FR_SMOKE_SOURCE" -print0 | \
   xargs -0 javac -encoding UTF-8 --release 17 \
@@ -297,7 +297,7 @@ java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
   com.starsector.prepatcher.agent.DirectMarketObserveTransformerTest \
   2>&1 | tee "$REPORT_DIR/direct-market-transformer.txt"
 
-RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$MOD_ROOT/lib/asm-9.10.1.jar:$MOD_ROOT/lib/asm-tree-9.10.1.jar:$MOD_ROOT/lib/asm-analysis-9.10.1.jar:$MOD_ROOT/lib/asm-util-9.10.1.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
+RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$MOD_ROOT/lib/asm-9.10.1.jar:$MOD_ROOT/lib/asm-tree-9.10.1.jar:$MOD_ROOT/lib/asm-analysis-9.10.1.jar:$MOD_ROOT/lib/asm-util-9.10.1.jar:$MOD_ROOT/lib/asm-commons-9.10.1.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
 java -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.runtime.AoTDEconomyRestoreRuntimeTest \
   2>&1 | tee "$REPORT_DIR/aotd-economy-restore-runtime.txt"

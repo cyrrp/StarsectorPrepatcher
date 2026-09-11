@@ -1,11 +1,11 @@
-# format.ps1 — check or apply the repo's Java style via vendored Eclipse JDT.
+# format.ps1 — check or apply the repo's Java style via Eclipse JDT.
 #   tools\format\format.ps1 check  [path ...]   exit 1 if any file would change
 #   tools\format\format.ps1 apply  [path ...]   rewrite files in place
 # Options: -Config <file> -JavaHome <jdk dir> (also accepts --config/--java-home).
 # Default path: source\.
 # Exit codes: 0 clean/applied, 1 differences found (check), 2 usage/tool error.
-# Nothing is downloaded: jars come from tools/format/lib/ and the driver is
-# compiled with the local JDK into .build/format/classes (cached).
+# Jars come from the lib folder under .build, populated by fetch.ps1; nothing is
+# downloaded here. The driver is compiled with the local JDK into the classes folder beside them.
 param(
   [Parameter(Position = 0)] [string] $Action,
   [Parameter(Position = 1, ValueFromRemainingArguments = $true)] [string[]] $Paths,
@@ -44,7 +44,13 @@ if ($JavaHome -and (Test-Path (Join-Path $JavaHome 'bin\java.exe'))) {
   exit 2
 }
 
-$cp = Join-Path $here 'lib\*'
+# Formatter jars are developer-only tooling, so they are fetched on demand rather than committed.
+$lib = Join-Path $root '.build\format\lib'
+if (-not (Test-Path -LiteralPath $lib) -or -not (Get-ChildItem -LiteralPath $lib -Filter '*.jar' -ErrorAction SilentlyContinue)) {
+  Write-Error 'Formatter libraries are missing. Run tools\format\fetch.ps1 first.'
+  exit 2
+}
+$cp = Join-Path $lib '*'
 $out = Join-Path $root '.build\format\classes'
 $stamp = Join-Path $out 'JdtFormat.class'
 $driver = Join-Path $here 'JdtFormat.java'

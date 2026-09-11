@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# format.sh — check or apply the repo's Java style via vendored Eclipse JDT.
+# format.sh — check or apply the repo's Java style via Eclipse JDT.
 #   tools/format/format.sh check  [path ...]   exit 1 if any file would change
 #   tools/format/format.sh apply  [path ...]   rewrite files in place
 # Options: --config <file> --java-home <jdk dir>. Default path: source/
 # Exit codes: 0 clean/applied, 1 differences found (check), 2 usage/tool error.
-# Nothing is downloaded: jars come from tools/format/lib/ and the driver is
+# Jars come from .build/format/lib, populated by fetch.sh; nothing is downloaded here. The driver is
 # compiled with the local JDK into .build/format/classes (cached).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -38,7 +38,13 @@ javac_bin="${javahome:+$(cygpath -u "$javahome" 2>/dev/null || echo "$javahome")
 # Windows JDKs need Windows-style classpaths; convert when cygpath exists.
 win() { command -v cygpath >/dev/null && cygpath -w "$1" || echo "$1"; }
 sep=":" ; command -v cygpath >/dev/null && sep=";"
-cp="$(win "$here")\\lib\\*"
+# Formatter jars are developer-only tooling, so they are fetched on demand rather than committed.
+lib="$root/.build/format/lib"
+if [ ! -d "$lib" ] || [ -z "$(ls -A "$lib" 2>/dev/null)" ]; then
+  echo "Formatter libraries are missing. Run tools/format/fetch.sh first." >&2
+  exit 2
+fi
+cp="$(win "$lib")\\*"
 out="$root/.build/format/classes"
 stamp="$out/JdtFormat.class"
 if [ ! -f "$stamp" ] || [ "$here/JdtFormat.java" -nt "$stamp" ]; then
