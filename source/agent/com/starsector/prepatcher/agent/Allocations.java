@@ -158,6 +158,19 @@ final class Allocations {
     return PatchState.PATCHED;
   }
 
+  /**
+   * The pre-mutation guards {@link #installScratchScope} would apply, without the mutation.
+   * A patch whose original flow installed the scope before checking its call sites runs this
+   * inside match so the refusal order is unchanged.
+   */
+  static void requireScratchScopeInstallable(MethodNode method, String label) {
+    if (method.instructions == null || method.instructions.getFirst() == null) {
+      throw mismatch(label + " has no code for a scratch scope");
+    }
+    if (method.name.equals("<init>")) throw mismatch(label + " constructor scopes are unsupported");
+    if (countReturnOpcodes(method) == 0) throw mismatch(label + " has no normal return");
+  }
+
   static void installScratchScope(String owner, MethodNode method, String label) {
     if (method.instructions == null || method.instructions.getFirst() == null) {
       throw mismatch(label + " has no code for a scratch scope");
