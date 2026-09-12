@@ -136,7 +136,7 @@ final class StarsectorPrepatcherCampaignCaches {
     }
     if (clearMismatchedGeneration) clearCampaignCaches();
   }
-  static void clearCampaignCaches() {
+  private static void clearCampaignCaches() {
     // Detach each process-lifetime root instead of waiting for its monitor.
     // In-flight calls retain only their local old map/slot; epoch checks stop
     // them from publishing into a current generation, and the detached roots
@@ -196,7 +196,7 @@ final class StarsectorPrepatcherCampaignCaches {
     return economy != null && campaignCacheGenerationActive && campaignCacheGeneration == generation
         && activeCampaignEngine.get() != null && activeReachEconomy.get() == economy;
   }
-  static ReachEconomy reachEconomyOf(Object engine) {
+  private static ReachEconomy reachEconomyOf(Object engine) {
     try {
       if (!(engine instanceof CampaignEngine campaignEngine)) return null;
       Economy campaignEconomy = campaignEngine.getEconomy();
@@ -262,7 +262,7 @@ final class StarsectorPrepatcherCampaignCaches {
     long value = (long) millis * 1_000_000L;
     return value < 0L ? Long.MAX_VALUE : value;
   }
-  static long saturatedAdd(long value, long increment) {
+  private static long saturatedAdd(long value, long increment) {
     if (increment <= 0L) return value;
     long result = value + increment;
     if (((value ^ result) & (increment ^ result)) < 0L) return Long.MAX_VALUE;
@@ -304,14 +304,14 @@ final class StarsectorPrepatcherCampaignCaches {
     }
     return false;
   }
-  static long ownerLastAccessNanos(Object value) {
+  private static long ownerLastAccessNanos(Object value) {
     if (value instanceof StarsectorPrepatcherIntelRuntime.LabelIndex index) return index.lastAccessNanos;
     if (value instanceof StarsectorPrepatcherIntelRuntime.IntelEntityIndex index) return index.lastAccessNanos;
     if (value instanceof StarsectorPrepatcherMapRuntime.HitCache cache) return cache.lastAccessNanos;
     throw new IllegalArgumentException(
         "Unsupported owner-cache value: " + (value == null ? "null" : value.getClass().getName()));
   }
-  static int ownerActiveUsers(Object value) {
+  private static int ownerActiveUsers(Object value) {
     if (value instanceof StarsectorPrepatcherIntelRuntime.LabelIndex index) return index.activeUsers;
     if (value instanceof StarsectorPrepatcherIntelRuntime.IntelEntityIndex index) return index.activeUsers;
     if (value instanceof StarsectorPrepatcherMapRuntime.HitCache cache) return cache.activeUsers;

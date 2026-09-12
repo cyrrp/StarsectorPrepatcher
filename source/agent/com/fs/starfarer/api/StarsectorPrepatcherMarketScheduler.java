@@ -219,7 +219,7 @@ final class StarsectorPrepatcherMarketScheduler {
     }
     return frame.runRepeats[runIndex];
   }
-  static MarketAdvanceBatchFrame requireCurrentMarketAdvanceBatch(MarketAPI market) {
+  private static MarketAdvanceBatchFrame requireCurrentMarketAdvanceBatch(MarketAPI market) {
     if (!hasCurrentMarketAdvanceBatch(market)) {
       throw new IllegalStateException("No Market.advance batch for the current invocation");
     }
@@ -330,7 +330,7 @@ final class StarsectorPrepatcherMarketScheduler {
     // so the next scheduler input scans the post-mutation structure once.
     markConstructionStateDirty(state);
   }
-  static void markConstructionStateDirty(MarketScheduleState state) {
+  private static void markConstructionStateDirty(MarketScheduleState state) {
     synchronized (state) {
       long next = state.constructionMutationEpoch + 1L;
       state.constructionMutationEpoch = next <= 0L ? 1L : next;
@@ -403,7 +403,7 @@ final class StarsectorPrepatcherMarketScheduler {
       // Observation is strictly fail-open.
     }
   }
-  static void invokeObservedMarketAdvance(MarketAPI market, float amount, int origin) {
+  private static void invokeObservedMarketAdvance(MarketAPI market, float amount, int origin) {
     DirectMarketObserver observer = DIRECT_MARKET_OBSERVER;
     if (observer == null) {
       market.advance(amount);
@@ -429,7 +429,7 @@ final class StarsectorPrepatcherMarketScheduler {
     }
   }
   /** Records only callbacks that actually returned successfully. */
-  static void recordDeliveredMarketAdvance(MarketAPI market, float amount, int origin) {
+  private static void recordDeliveredMarketAdvance(MarketAPI market, float amount, int origin) {
     // Publish only from this post-success path. The runtime owns a separate
     // weak identity generation table, so immediate/fallback callbacks are
     // visible even before a scheduler state exists for the market.
@@ -472,7 +472,7 @@ final class StarsectorPrepatcherMarketScheduler {
     int origin = source == 1 ? MARKET_ORIGIN_PLANET_CONDITION_FALLBACK : MARKET_ORIGIN_SCHEDULER_FALLBACK;
     advanceMarketImmediatelyWithPending(market, amount, origin);
   }
-  static void advanceMarketImmediatelyWithPending(MarketAPI market, float amount, int origin) {
+  private static void advanceMarketImmediatelyWithPending(MarketAPI market, float amount, int origin) {
     if (market == null) throw new NullPointerException("market");
     if (!Float.isFinite(amount) || amount < 0f) {
       invokeObservedMarketAdvance(market, amount, origin);
@@ -518,7 +518,7 @@ final class StarsectorPrepatcherMarketScheduler {
     // deliberately not included in the deferred batch context.
     invokeObservedMarketAdvance(market, amount, origin);
   }
-  static boolean updateConstructionMode(MarketAPI market, MarketScheduleState state) {
+  private static boolean updateConstructionMode(MarketAPI market, MarketScheduleState state) {
     return updateConstructionMode(market, state, false);
   }
   /**
@@ -526,7 +526,7 @@ final class StarsectorPrepatcherMarketScheduler {
    * epoch; the expensive queue/industry scan runs only for a new epoch or a
    * rare safety audit. Save uses forceAudit=true.
    */
-  static boolean updateConstructionMode(MarketAPI market, MarketScheduleState state, boolean forceAudit) {
+  private static boolean updateConstructionMode(MarketAPI market, MarketScheduleState state, boolean forceAudit) {
     PrepatcherConfig c = StarsectorPrepatcherHooks.config;
     long auditBatch = marketSchedulerRenderBatch;
     long observedEpoch;
@@ -608,7 +608,7 @@ final class StarsectorPrepatcherMarketScheduler {
     }
     return active;
   }
-  static int scanConstructionState(MarketAPI market, ConstructionProbe probe) {
+  private static int scanConstructionState(MarketAPI market, ConstructionProbe probe) {
     int reasonMask = 0;
     ConstructionQueue queue = null;
     try {
@@ -710,12 +710,12 @@ final class StarsectorPrepatcherMarketScheduler {
    * BaseIndustry field. A null raw value denotes a non-BaseIndustry
    * implementation, for which the interface signal remains authoritative.
    */
-  static int constructionBuildingReason(boolean reportedBuilding, Boolean rawBuilding) {
+  private static int constructionBuildingReason(boolean reportedBuilding, Boolean rawBuilding) {
     if (rawBuilding == null) { return reportedBuilding ? CONSTRUCTION_REASON_INDUSTRY_BUILDING : 0; }
     if (rawBuilding.booleanValue()) { return CONSTRUCTION_REASON_INDUSTRY_BUILDING; }
     return reportedBuilding ? CONSTRUCTION_REASON_REPORTED_BUILDING_WITHOUT_RAW : 0;
   }
-  static VarHandle baseIndustryBuildingHandle() {
+  private static VarHandle baseIndustryBuildingHandle() {
     if (!baseIndustryBuildingHandleResolved) {
       synchronized (StarsectorPrepatcherHooks.class) {
         if (!baseIndustryBuildingHandleResolved) {
@@ -736,13 +736,13 @@ final class StarsectorPrepatcherMarketScheduler {
    * remains the only available signal. Failure to access the known field is
    * treated as a probe failure so the scheduler fails open.
    */
-  static Boolean rawBaseIndustryBuilding(Industry industry) {
+  private static Boolean rawBaseIndustryBuilding(Industry industry) {
     if (!(industry instanceof BaseIndustry)) return null;
     VarHandle handle = baseIndustryBuildingHandle();
     if (handle == null) { throw new IllegalStateException("BaseIndustry.building field is unavailable"); }
     return (boolean) handle.get(industry);
   }
-  static void recordConstructionReasonCounters(int reasonMask) {
+  private static void recordConstructionReasonCounters(int reasonMask) {
     int semanticReasons = 0;
     if ((reasonMask & CONSTRUCTION_REASON_QUEUE_NON_EMPTY) != 0) {
       StarsectorPrepatcherMetrics.CONSTRUCTION_DETECTED_QUEUE_NON_EMPTY.increment();
@@ -768,17 +768,17 @@ final class StarsectorPrepatcherMarketScheduler {
     if ((reasonMask & CONSTRUCTION_REASON_INDUSTRIES_UNKNOWN) != 0) semanticReasons++;
     if (semanticReasons > 1) StarsectorPrepatcherMetrics.CONSTRUCTION_DETECTED_MULTIPLE_REASONS.increment();
   }
-  static void updateMax(AtomicLong target, long value) {
+  private static void updateMax(AtomicLong target, long value) {
     long current;
     while (value > (current = target.get()) && !target.compareAndSet(current, value)) {
       // Retry only when another observation raised the high-water concurrently.
     }
   }
-  static boolean wouldCreateNewPendingRun(MarketScheduleState state, float amount) {
+  private static boolean wouldCreateNewPendingRun(MarketScheduleState state, float amount) {
     PendingStepRun last = state.pendingRuns == null ? null : state.pendingRuns.peekLast();
     return last == null || Float.floatToRawIntBits(last.amount) != Float.floatToRawIntBits(amount);
   }
-  static boolean appendPendingStepLocked(MarketScheduleState state, float amount) {
+  private static boolean appendPendingStepLocked(MarketScheduleState state, float amount) {
     float total = state.pendingAmount + amount;
     if (!Float.isFinite(total) || total < 0f || state.pendingSteps == Integer.MAX_VALUE) { return false; }
     if (state.pendingRuns == null) state.pendingRuns = new ArrayDeque<>();
@@ -795,14 +795,15 @@ final class StarsectorPrepatcherMarketScheduler {
     updateMaximum(StarsectorPrepatcherMetrics.PENDING_MARKET_RUNS_HIGH_WATER, state.pendingRuns.size());
     return true;
   }
-  static void clearPendingLocked(MarketScheduleState state) {
+  private static void clearPendingLocked(MarketScheduleState state) {
     state.pendingAmount = 0f;
     state.pendingSteps = 0;
     if (state.pendingRuns != null) state.pendingRuns.clear();
     state.debtSequence = 0L;
     state.sourceMask = 0;
   }
-  static MarketAdvanceBatchFrame detachPendingLocked(MarketAPI market, MarketScheduleState state, boolean visible) {
+  private static MarketAdvanceBatchFrame detachPendingLocked(MarketAPI market, MarketScheduleState state,
+      boolean visible) {
     if (state.pendingSteps <= 0) return null;
     MarketAdvanceBatchStack stack = MARKET_ADVANCE_BATCH_STACK.get();
     MarketAdvanceBatchFrame frame = stack.push(market, state, visible);
@@ -811,12 +812,12 @@ final class StarsectorPrepatcherMarketScheduler {
     if (visible) StarsectorPrepatcherMetrics.MARKET_BATCH_CONTEXTS_CREATED.increment();
     return frame;
   }
-  static int originForStateLocked(MarketScheduleState state, int fallbackOrigin) {
+  private static int originForStateLocked(MarketScheduleState state, int fallbackOrigin) {
     if ((state.sourceMask & (1 << 1)) != 0) { return MARKET_ORIGIN_PLANET_CONDITION_SCHEDULED; }
     if ((state.sourceMask & 1) != 0) return MARKET_ORIGIN_SCHEDULED;
     return fallbackOrigin;
   }
-  static int deliverPendingCoalesced(MarketAPI market, MarketScheduleState state, int fallbackOrigin,
+  private static int deliverPendingCoalesced(MarketAPI market, MarketScheduleState state, int fallbackOrigin,
       boolean countFullAdvance, boolean saveFlush) {
     MarketAdvanceBatchFrame frame;
     int origin;
@@ -854,7 +855,8 @@ final class StarsectorPrepatcherMarketScheduler {
       if (!success && saveFlush) StarsectorPrepatcherMetrics.MARKET_SCHEDULER_SAVE_FLUSH_FAILURES.increment();
     }
   }
-  static int deliverPendingExact(MarketAPI market, MarketScheduleState state, int fallbackOrigin, boolean saveFlush) {
+  private static int deliverPendingExact(MarketAPI market, MarketScheduleState state, int fallbackOrigin,
+      boolean saveFlush) {
     MarketAdvanceBatchFrame frame;
     int origin;
     synchronized (state) {
@@ -897,7 +899,7 @@ final class StarsectorPrepatcherMarketScheduler {
       if (!success && saveFlush) StarsectorPrepatcherMetrics.MARKET_SCHEDULER_SAVE_FLUSH_FAILURES.increment();
     }
   }
-  static int deliverPendingForSave(MarketAPI market, MarketScheduleState state, boolean exact) {
+  private static int deliverPendingForSave(MarketAPI market, MarketScheduleState state, boolean exact) {
     MarketAdvanceBatchFrame frame;
     int origin;
     synchronized (state) {
@@ -1066,7 +1068,7 @@ final class StarsectorPrepatcherMarketScheduler {
       finishMarketSchedulerBatch(batch);
     }
   }
-  static long nextMarketSchedulerRenderBatch() {
+  private static long nextMarketSchedulerRenderBatch() {
     long next = marketSchedulerRenderBatch + 1L;
     if (next <= 0L) next = 1L;
     marketSchedulerRenderBatch = next;
@@ -1239,7 +1241,7 @@ final class StarsectorPrepatcherMarketScheduler {
     }
     StarsectorPrepatcherMetrics.MARKET_SCHEDULER_ACCUMULATED_CALLS.increment();
   }
-  static void finishMarketSchedulerBatch(MarketSchedulerBatch batch) {
+  private static void finishMarketSchedulerBatch(MarketSchedulerBatch batch) {
     if (!batch.open || batch.finishing) return;
     batch.open = false;
     batch.finishing = true;
@@ -1260,7 +1262,7 @@ final class StarsectorPrepatcherMarketScheduler {
    * Condition-source markets cache stable policy inputs and are added to the
    * batch list only when due. Economy markets retain exact per-batch policy.
    */
-  static boolean prepareMarketForBatch(MarketSchedulerBatch batch, MarketAPI market, MarketScheduleState state,
+  private static boolean prepareMarketForBatch(MarketSchedulerBatch batch, MarketAPI market, MarketScheduleState state,
       PrepatcherConfig c) {
     if (market == null || state == null || c == null || !c.marketScheduler) return false;
     StarsectorPrepatcherMetrics.MARKET_SCHEDULER_DUE_CHECKS.increment();
@@ -1365,7 +1367,7 @@ final class StarsectorPrepatcherMarketScheduler {
       return true;
     }
   }
-  static void deliverMarketAtBatchEnd(MarketSchedulerBatch batch, MarketAPI market, MarketScheduleState state) {
+  private static void deliverMarketAtBatchEnd(MarketSchedulerBatch batch, MarketAPI market, MarketScheduleState state) {
     if (market == null || state == null) return;
     boolean hot;
     boolean hidden;
@@ -1387,16 +1389,16 @@ final class StarsectorPrepatcherMarketScheduler {
       state.nextDueBatch = nextStableDueBatch(batch.id, phase, interval);
     }
   }
-  static long firstStableDueBatch(long currentBatch, int phase, int interval) {
+  private static long firstStableDueBatch(long currentBatch, int phase, int interval) {
     if (interval <= 1) return currentBatch;
     return currentBatch + Math.floorMod((long) phase - currentBatch, interval);
   }
-  static long nextStableDueBatch(long currentBatch, int phase, int interval) {
+  private static long nextStableDueBatch(long currentBatch, int phase, int interval) {
     if (interval <= 1) return currentBatch + 1L;
     long next = currentBatch + 1L;
     return next + Math.floorMod((long) phase - next, interval);
   }
-  static void updateMaximum(AtomicLong maximum, long value) {
+  private static void updateMaximum(AtomicLong maximum, long value) {
     long current = maximum.get();
     while (value > current && !maximum.compareAndSet(current, value)) {
       current = maximum.get();
@@ -1439,7 +1441,7 @@ final class StarsectorPrepatcherMarketScheduler {
       if (elapsed > 0L) StarsectorPrepatcherMetrics.SAVE_FLUSH_DURATION_NANOS.add(elapsed);
     }
   }
-  static long debtSequence(MarketScheduleState state) {
+  private static long debtSequence(MarketScheduleState state) {
     if (state == null) return Long.MAX_VALUE;
     synchronized (state) {
       return state.debtSequence == 0L ? Long.MAX_VALUE : state.debtSequence;
@@ -1593,11 +1595,11 @@ final class StarsectorPrepatcherMarketScheduler {
       return "";
     }
   }
-  static String baselineCsv(String value) {
+  private static String baselineCsv(String value) {
     String text = value == null ? "" : value;
     return '"' + text.replace("\"", "\"\"") + '"';
   }
-  static String baselineJson(String value) {
+  private static String baselineJson(String value) {
     if (value == null) return "";
     return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\r", "\\r").replace("\n", "\\n");
   }
@@ -1653,7 +1655,7 @@ final class StarsectorPrepatcherMarketScheduler {
       int constructionMarketsIndustryUpgrading, int constructionMarketsReportedBuildingWithoutRaw,
       int constructionMarketsUncertain, int constructionMarketsMultipleReasons) {
   }
-  static int stableMarketPhase(MarketAPI market, int interval) {
+  private static int stableMarketPhase(MarketAPI market, int interval) {
     if (interval <= 1) return 0;
     int hash = System.identityHashCode(market);
     try {
@@ -2255,7 +2257,7 @@ final class StarsectorPrepatcherMarketScheduler {
           .append(DirectMarketObserver.csv(exceptionMessage)).append('\n');
     }
   }
-  static String constructionSampleBucket(int oldReasonMask, int newReasonMask) {
+  private static String constructionSampleBucket(int oldReasonMask, int newReasonMask) {
     if (oldReasonMask != 0 && oldReasonMask != newReasonMask) {
       // Keep the number of quota categories fixed. The exact masks remain
       // available in the transition/old_reason_mask/new_reason_mask columns.
@@ -2272,7 +2274,7 @@ final class StarsectorPrepatcherMarketScheduler {
     }
     return constructionReasonBucket(newReasonMask);
   }
-  static String constructionReasonBucket(int reasonMask) {
+  private static String constructionReasonBucket(int reasonMask) {
     int semantic = reasonMask & CONSTRUCTION_REASON_OBSERVED_MASK;
     if (semantic == CONSTRUCTION_REASON_INDUSTRY_UPGRADING) { return "INDUSTRY_UPGRADING_WITHOUT_BUILDING"; }
     if (semantic == CONSTRUCTION_REASON_REPORTED_BUILDING_WITHOUT_RAW
@@ -2290,7 +2292,7 @@ final class StarsectorPrepatcherMarketScheduler {
     if ((semantic & CONSTRUCTION_REASON_REPORTED_BUILDING_WITHOUT_RAW) != 0) { return "REPORTED_BUILDING_WITHOUT_RAW"; }
     return "INACTIVE";
   }
-  static String constructionReasonText(int reasonMask) {
+  private static String constructionReasonText(int reasonMask) {
     if (reasonMask == 0) return "NONE";
     StringBuilder result = new StringBuilder();
     appendReason(result, reasonMask, CONSTRUCTION_REASON_QUEUE_NON_EMPTY, "QUEUE_NON_EMPTY");
@@ -2304,7 +2306,7 @@ final class StarsectorPrepatcherMarketScheduler {
         "REPORTED_BUILDING_WITHOUT_RAW");
     return result.toString();
   }
-  static void appendReason(StringBuilder output, int mask, int bit, String label) {
+  private static void appendReason(StringBuilder output, int mask, int bit, String label) {
     if ((mask & bit) == 0) return;
     if (output.length() > 0) output.append('|');
     output.append(label);
