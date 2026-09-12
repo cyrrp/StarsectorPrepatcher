@@ -85,6 +85,7 @@ public final class LifecycleGcRegressionTest {
     ReferenceQueue<Object> resetEngineQueue = new ReferenceQueue<>();
     WeakReference<Object> resetEngine = resetEngineAndRelease(begin, complete, resetEngineQueue);
     awaitCollected(resetEngine, resetEngineQueue, "lifecycle tracker retained the reset engine argument");
+    assertOwnerDetachDoesNotWaitForCacheMonitors(begin, complete);
 
     System.out.println("OK lifecycle-gc exact-caches=" + MAP_CACHE_FIELDS.size()
         + " scratch-reentrant-detach/drain identity-idempotence two-phase-boundary" + " engine-change reset-null"
@@ -453,14 +454,70 @@ public final class LifecycleGcRegressionTest {
   }
 
   private static Field staticField(String name) throws Exception {
-    for (Class<?> owner : runtimeClasses()) {
-      try {
-        Field field = owner.getDeclaredField(name);
-        field.setAccessible(true);
-        return field;
-      } catch (NoSuchFieldException ignored) {}
+    String owner = switch (name) {
+      case "INTEL_CACHE", "LABEL_INDEXES", "INTEL_ENTITY_INDEXES", "COMM_RELAY_SYSTEM_INDEXES" -> "IntelRuntime";
+      case "HIT_CACHES", "SAMPLE_CLEAR_TIMES", "nebulaCacheSlot" -> "MapRuntime";
+      case "CAMPAIGN_LISTENER_STATES" -> "CampaignListeners";
+      case "ROUTE_JUMP_INDEXES", "ROUTE_SYSTEM_INDEXES" -> "RouteIndex";
+      case "ECONOMY_LOCATION_STATES" -> "EconomyRuntime";
+      case "MARKET_SCHEDULER_STATES" -> "MarketScheduler";
+      case "SCRATCH" -> "Scratch";
+      case "activeCampaignEngine", "activeReachEconomy", "pendingCampaignEngine", "campaignCacheGeneration",
+          "campaignCacheGenerationActive" ->
+        "CampaignCaches";
+      default -> throw new NoSuchFieldException(name);
+    };
+    Field field = Class.forName("com.fs.starfarer.api.StarsectorPrepatcher" + owner).getDeclaredField(name);
+    field.setAccessible(true);
+    return field;
+  }
+
+  private static void assertOwnerDetachDoesNotWaitForCacheMonitors(Method beginMethod, Method completeMethod)
+      throws Exception {
+    Object[] roots = campaignCacheRoots();
+    var holding = new java.util.concurrent.CountDownLatch(1);
+    var release = new java.util.concurrent.CountDownLatch(1);
+    var workers = java.util.concurrent.Executors.newFixedThreadPool(2);
+    try {
+      var held = workers.submit(() -> holdRoots(roots, 0, holding, release));
+      require(holding.await(10, java.util.concurrent.TimeUnit.SECONDS), "cache monitor fixture did not start");
+      Object engine = new Object();
+      var reset = workers.submit(() -> {
+        long transition = begin(beginMethod, engine);
+        require(transition >= 0L, "owner detachment failed while cache monitors were held");
+        assertGenerationActive(false, "owner reset before publication");
+        assertCampaignRootsDetached(roots, "reset while old roots are locked");
+        complete(completeMethod, engine, transition);
+        return transition;
+      });
+      reset.get(10, java.util.concurrent.TimeUnit.SECONDS);
+      require(!held.isDone(), "cache monitor holder ended before lifecycle reset completed");
+      release.countDown();
+      held.get(10, java.util.concurrent.TimeUnit.SECONDS);
+      change(beginMethod, completeMethod, null);
+    } finally {
+      release.countDown();
+      workers.shutdownNow();
+      require(workers.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS),
+          "lifecycle fixture workers did not stop");
     }
-    throw new NoSuchFieldException(name);
+  }
+
+  private static void holdRoots(Object[] roots, int index, java.util.concurrent.CountDownLatch holding,
+      java.util.concurrent.CountDownLatch release) {
+    if (index < roots.length) {
+      synchronized (roots[index]) {
+        holdRoots(roots, index + 1, holding, release);
+      }
+      return;
+    }
+    holding.countDown();
+    try {
+      require(release.await(30, java.util.concurrent.TimeUnit.SECONDS), "cache monitor fixture timed out");
+    } catch (InterruptedException failure) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError(failure);
+    }
   }
 
   private static Field instanceField(Class<?> type, String name) throws Exception {

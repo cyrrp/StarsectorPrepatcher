@@ -47,7 +47,7 @@ public final class StarsectorPrepatcherHooks {
         StarsectorPrepatcherStrategicJumpHooks.STRATEGIC_JUMP_CAPABILITY_UNKNOWN;
     StarsectorPrepatcherStrategicJumpIndex.reset();
     StarsectorPrepatcherCoreWorldsRuntime.campaignLifecycleReset();
-    StarsectorPrepatcherMarketScheduler.configureDiagnostics(optimizerConfig, root);
+    StarsectorPrepatcherMarketDiagnostics.configureDiagnostics(optimizerConfig, root);
     if (optimizerConfig.statsLogIntervalSeconds > 0) {
       Thread stats = new Thread(StarsectorPrepatcherMetrics::statsLoop, "StarsectorPrepatcher-Stats");
       stats.setDaemon(true);

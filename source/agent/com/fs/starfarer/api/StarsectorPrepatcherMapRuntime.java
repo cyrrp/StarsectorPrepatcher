@@ -26,9 +26,40 @@ import java.util.WeakHashMap;
 /** Map hit-test caches, nebula preprocessing caches, and sample-cache throttling. */
 final class StarsectorPrepatcherMapRuntime {
 
-  static volatile IdentityHashMap<Object, HitCache> HIT_CACHES = new IdentityHashMap<>();
-  static volatile WeakHashMap<Object, Long> SAMPLE_CLEAR_TIMES = new WeakHashMap<>();
-  static volatile NebulaCacheSlot nebulaCacheSlot = new NebulaCacheSlot();
+  static HitGaugeSnapshot gaugeSnapshot() {
+    int hitCurrent = 0;
+    long hitCells = 0L;
+    int hitMax = 0;
+    IdentityHashMap<Object, HitCache> hits = HIT_CACHES;
+    synchronized (hits) {
+      if (hits == HIT_CACHES) {
+        hitCurrent = hits.size();
+        for (HitCache cache : hits.values()) {
+          synchronized (cache) {
+            int cells = cache.cells.size();
+            hitCells += cells;
+            if (cells > hitMax) hitMax = cells;
+          }
+        }
+      }
+    }
+    return new HitGaugeSnapshot(hitCurrent, hitCells, hitMax);
+  }
+  record HitGaugeSnapshot(int owners, long cells, int maxCells) {
+  }
+
+
+  /** Detach campaign roots without taking cache/state monitors or clearing in-flight objects. */
+  static void campaignLifecycleReset() {
+    HIT_CACHES = new IdentityHashMap<>();
+    SAMPLE_CLEAR_TIMES = new WeakHashMap<>();
+    nebulaCacheSlot = new NebulaCacheSlot();
+  }
+
+
+  private static volatile IdentityHashMap<Object, HitCache> HIT_CACHES = new IdentityHashMap<>();
+  private static volatile WeakHashMap<Object, Long> SAMPLE_CLEAR_TIMES = new WeakHashMap<>();
+  private static volatile NebulaCacheSlot nebulaCacheSlot = new NebulaCacheSlot();
   static volatile float cachedGridSpacing = -1f;
   static volatile float cachedGridWidth = Float.NaN;
   static volatile float cachedGridHeight = Float.NaN;
@@ -220,7 +251,13 @@ final class StarsectorPrepatcherMapRuntime {
       this.getLocation = getLocation;
     }
   }
-  static final class HitCache {
+  static final class HitCache implements StarsectorPrepatcherCampaignCaches.CacheOwner {
+    public long lastAccessNanos() {
+      return lastAccessNanos;
+    }
+    public int activeUsers() {
+      return activeUsers;
+    }
     Object location;
     int iconCount = Integer.MIN_VALUE;
     float factor = Float.NaN;

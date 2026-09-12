@@ -87,6 +87,9 @@ public final class DirectMarketObservationRuntimeTest {
       require(observationText.contains("example.Driver"), "caller metadata missing from observations");
       String unknown = Files.readString(unknownFile, StandardCharsets.UTF_8);
       require(dataRows(unknown) >= 3, "unknown-entry stack budget was not renewed per interval");
+      require(!unknown.contains("StarsectorPrepatcherMarketDiagnostics"),
+          "observer implementation leaked into sampled caller stacks");
+      verifyNestedFailureAndRecovery(observations);
 
       System.out.println("OK direct-market-runtime session=" + session + " calls=" + counter.calls
           + " eager-manifest planet-origin interval-stack-budget");
@@ -177,8 +180,76 @@ public final class DirectMarketObservationRuntimeTest {
     waitForContent(unknownFile, "deterministic-race-stack", 2000L);
   }
 
+  private static void verifyNestedFailureAndRecovery(Path observations) throws Exception {
+    RuntimeException original = new IllegalStateException("nested market failure");
+    int[] calls = new int[3];
+    String metadata = String.join("\u001f", "1", "mods/TestMod/test.jar", "example.Nested", "advance", "(F)V", "42",
+        "0", "ARG0", "com.fs.starfarer.api.campaign.econ.MarketAPI", "185");
+    MarketAPI inner = (MarketAPI) Proxy.newProxyInstance(MarketAPI.class.getClassLoader(),
+        new Class<?>[]{MarketAPI.class}, (proxy, method, arguments) -> {
+          if (method.getName().equals("advance")) {
+            calls[1]++;
+            StarsectorPrepatcherHooks.observeMarketAdvanceEntry((MarketAPI) proxy, (Float) arguments[0]);
+            throw original;
+          }
+          return defaultValue(method.getReturnType());
+        });
+    MarketAPI outer = (MarketAPI) Proxy.newProxyInstance(MarketAPI.class.getClassLoader(),
+        new Class<?>[]{MarketAPI.class}, (proxy, method, arguments) -> {
+          if (method.getName().equals("advance")) {
+            calls[0]++;
+            StarsectorPrepatcherHooks.observeMarketAdvanceEntry((MarketAPI) proxy, (Float) arguments[0]);
+            StarsectorPrepatcherHooks.observeDirectMarketAdvance(inner, 0.125f, 0x202L, metadata);
+          }
+          return defaultValue(method.getReturnType());
+        });
+    try {
+      StarsectorPrepatcherHooks.observeDirectMarketAdvance(outer, 0.25f, 0x201L, metadata);
+      throw new AssertionError("observer swallowed a nested market exception");
+    } catch (RuntimeException failure) {
+      require(failure == original, "observer replaced the market exception");
+    }
+    MarketAPI recovered = (MarketAPI) Proxy.newProxyInstance(MarketAPI.class.getClassLoader(),
+        new Class<?>[]{MarketAPI.class}, (proxy, method, arguments) -> {
+          if (method.getName().equals("advance")) {
+            calls[2]++;
+            StarsectorPrepatcherHooks.observeMarketAdvanceEntry((MarketAPI) proxy, (Float) arguments[0]);
+          }
+          return defaultValue(method.getReturnType());
+        });
+    StarsectorPrepatcherHooks.observeDirectMarketAdvance(recovered, 0.5f, 0x203L, metadata);
+    require(calls[0] == 1 && calls[1] == 1 && calls[2] == 1, "observer changed nested callback multiplicity");
+    reportNow();
+    String csv = Files.readString(observations, StandardCharsets.UTF_8);
+    require(
+        observationCounter(csv, "0x201", "exceptions") == 1L && observationCounter(csv, "0x202", "exceptions") == 1L,
+        "nested failure was not attributed to both calls");
+    require(
+        observationCounter(csv, "0x202", "recursive_calls") == 1L
+            && observationCounter(csv, "0x203", "recursive_calls") == 0L,
+        "observer context did not unwind after failure");
+  }
+
+  private static long observationCounter(String csv, String site, String column) {
+    String[] lines = csv.split("\\R");
+    String[] header = lines[0].split(",");
+    int field = java.util.Arrays.asList(header).indexOf(column);
+    require(field >= 0, "missing observer column " + column);
+    long total = 0;
+    boolean found = false;
+    for (int i = 1; i < lines.length; i++) {
+      String[] row = lines[i].split(",", -1);
+      if (row.length > field && row[2].replace("\"", "").equals(site)) {
+        found = true;
+        total += Long.parseLong(row[field].replace("\"", ""));
+      }
+    }
+    require(found, "missing observer row " + site);
+    return total;
+  }
+
   private static Object directMarketObserver() throws Exception {
-    var observerField = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherMarketScheduler")
+    var observerField = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherMarketDiagnostics")
         .getDeclaredField("DIRECT_MARKET_OBSERVER");
     observerField.setAccessible(true);
     Object observer = observerField.get(null);

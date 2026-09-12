@@ -74,6 +74,7 @@ public final class MarketSchedulerRuntimeTest {
       assertConstructionDiagnosticsCsv(sector, remoteLocation);
       assertSaveExactReplayMode(sector, remoteLocation);
       assertSchedulerBaselineDump(remoteLocation);
+      assertSnapshotIsolationAndLifecycleOwnership(remoteLocation);
       assertWeakStateDoesNotRetainMarket(sector, remoteLocation);
       assertDisabledFallback(sector, remoteLocation);
     } finally {
@@ -1082,17 +1083,17 @@ public final class MarketSchedulerRuntimeTest {
       }
     }
 
-    Object upgradingState = schedulerState(upgradingMarket.proxy);
+    Object upgradingState = schedulerSnapshotState(upgradingMarket.proxy);
     require(
         !(Boolean) field(upgradingState, "constructionFullRate")
             && intField(upgradingState, "constructionReasonMask") == 4,
         "upgrade-only diagnostic signal incorrectly enabled full-rate mode");
-    Object reportedWithoutRawState = schedulerState(reportedWithoutRawMarket.proxy);
+    Object reportedWithoutRawState = schedulerSnapshotState(reportedWithoutRawMarket.proxy);
     require(
         !(Boolean) field(reportedWithoutRawState, "constructionFullRate")
             && intField(reportedWithoutRawState, "constructionReasonMask") == 128,
         "reported BaseIndustry building without raw state enabled full-rate mode");
-    Object multipleState = schedulerState(multipleMarket.proxy);
+    Object multipleState = schedulerSnapshotState(multipleMarket.proxy);
     require(
         (Boolean) field(multipleState, "constructionFullRate")
             && intField(multipleState, "constructionReasonMask") == 7,
@@ -1169,7 +1170,7 @@ public final class MarketSchedulerRuntimeTest {
       } finally {
         endSyntheticSchedulerTick();
       }
-      require(!(Boolean) field(schedulerState(transitionMarket.proxy), "constructionFullRate"),
+      require(!(Boolean) field(schedulerSnapshotState(transitionMarket.proxy), "constructionFullRate"),
           "diagnostic upgrade-only market entered full-rate mode");
       StarsectorPrepatcherHooks.flushPendingMarketBeforeMutation(transitionMarket.proxy);
       transitionIndustry.setReportedBuilding(true);
@@ -1179,7 +1180,7 @@ public final class MarketSchedulerRuntimeTest {
       } finally {
         endSyntheticSchedulerTick();
       }
-      require(!(Boolean) field(schedulerState(transitionMarket.proxy), "constructionFullRate"),
+      require(!(Boolean) field(schedulerSnapshotState(transitionMarket.proxy), "constructionFullRate"),
           "reported-building-without-raw transition entered full-rate mode");
 
       MutableMarket rawTransitionMarket = new MutableMarket("diagnostic-raw-transition", remote.proxy, false, false);
@@ -1200,7 +1201,7 @@ public final class MarketSchedulerRuntimeTest {
       } finally {
         endSyntheticSchedulerTick();
       }
-      require((Boolean) field(schedulerState(rawTransitionMarket.proxy), "constructionFullRate"),
+      require((Boolean) field(schedulerSnapshotState(rawTransitionMarket.proxy), "constructionFullRate"),
           "raw BaseIndustry building transition did not enter full-rate mode");
 
       Object diagnostics = staticField("CONSTRUCTION_DIAGNOSTICS");
@@ -1224,6 +1225,7 @@ public final class MarketSchedulerRuntimeTest {
       require(dataRows(csv) == 4, "per-bucket sample limit did not bound diagnostic CSV: " + csv);
       require(metric("CONSTRUCTION_DIAGNOSTIC_SAMPLES_DROPPED") >= droppedBefore + 2L,
           "diagnostic sample overflow was not counted");
+      assertConstructionSnapshotIsolation(rawTransitionMarket.proxy);
     } finally {
       installConfig(original);
       setStaticField("CONSTRUCTION_DIAGNOSTICS", null);
@@ -1264,7 +1266,43 @@ public final class MarketSchedulerRuntimeTest {
     installConfig(config(true));
   }
 
+  private static void assertConstructionSnapshotIsolation(MarketAPI market) throws Exception {
+    Object probe = ((ThreadLocal<?>) schedulerField("CONSTRUCTION_PROBE").get(null)).get();
+    Method capture =
+        runtimeClass("MarketScheduler").getDeclaredMethod("constructionSnapshot", MarketAPI.class, probe.getClass());
+    capture.setAccessible(true);
+    Object snapshot = capture.invoke(null, market, probe);
+    require(snapshot.getClass().isRecord(), "construction diagnostics did not receive a value snapshot");
+    java.util.Map<String, Object> values = new java.util.HashMap<>();
+    for (var component : snapshot.getClass().getRecordComponents()) {
+      require(component.getType().isPrimitive() || component.getType() == String.class,
+          "construction snapshot retains a mutable object: " + component);
+      Object value = field(snapshot, component.getName());
+      values.put(component.getName(), value);
+      if (!component.getName().startsWith("market")) {
+        require(java.util.Objects.equals(value, field(probe, component.getName())),
+            "construction snapshot lost probe field " + component.getName());
+      }
+    }
+    require(
+        values.get("marketId").equals(market.getId()) && values.get("marketName").equals(market.getName())
+            && values.get("marketIdentityHash").equals(System.identityHashCode(market)),
+        "construction market identity changed");
+    Method reset = probe.getClass().getDeclaredMethod("reset");
+    reset.setAccessible(true);
+    reset.invoke(probe);
+    for (var entry : values.entrySet()) {
+      require(java.util.Objects.equals(entry.getValue(), field(snapshot, entry.getKey())),
+          "probe reuse changed published construction data: " + entry.getKey());
+    }
+  }
+
   private static Object field(Object owner, String name) throws Exception {
+    if (owner.getClass().isRecord()) {
+      Method accessor = owner.getClass().getDeclaredMethod(name);
+      accessor.setAccessible(true);
+      return accessor.invoke(owner);
+    }
     Field field = owner.getClass().getDeclaredField(name);
     field.setAccessible(true);
     return field.get(owner);
@@ -1323,6 +1361,82 @@ public final class MarketSchedulerRuntimeTest {
     }
   }
 
+  private static void assertSnapshotIsolationAndLifecycleOwnership(MutableLocation remote) throws Exception {
+    resetSchedulerGeneration();
+    MutableMarket market = new MutableMarket("ownership_$snapshot", remote.proxy, false, false);
+    warmAndDefer(market, 0.25f, 0);
+    Object before = invokePrivateStatic("schedulerSnapshot");
+    List<?> rows = (List<?>) field(before, "markets");
+    Object row = schedulerSnapshotState(market.proxy);
+    require(floatField(row, "pendingAmount") > 0f, "snapshot did not capture pending debt");
+    String history = (String) field(row, "pendingHistory");
+    try {
+      rows.clear();
+      throw new AssertionError("scheduler snapshot exposes a mutable row list");
+    } catch (UnsupportedOperationException expected) {}
+    for (var component : row.getClass().getRecordComponents()) {
+      require(component.getType().isPrimitive() || component.getType() == String.class,
+          "diagnostic row retains a mutable object: " + component);
+    }
+    StarsectorPrepatcherHooks.flushMarketSchedulerBeforeSave();
+    require(pendingAmount(market.proxy) == 0f, "flush did not change current state");
+    require(floatField(row, "pendingAmount") > 0f && history.equals(field(row, "pendingHistory")),
+        "a later delivery changed an already captured snapshot");
+
+    warmAndDefer(market, 0.125f, 0);
+    Object oldState = schedulerState(market.proxy);
+    float oldDebt = floatField(oldState, "pendingAmount");
+    Object oldMap = schedulerField("MARKET_SCHEDULER_STATES").get(null);
+    Object oldQueues = schedulerField("CONSTRUCTION_QUEUE_OWNERS").get(null);
+    String capability = System.getProperty("starsector.prepatcher.marketSchedulerCapabilityMask");
+    long deliveries =
+        ((java.util.concurrent.atomic.AtomicLong) schedulerField("MARKET_DELIVERY_SEQUENCE").get(null)).get();
+    beginSyntheticSchedulerTick();
+    StarsectorPrepatcherHooks.beginMarketAdvanceInvocation(market.proxy);
+    String[] contexts =
+        {"MARKET_SCHEDULER_TICK", "MARKET_SCHEDULER_BATCH", "MARKET_ADVANCE_BATCH_STACK", "MARKET_ADVANCE_INVOCATION"};
+    Object[] detached = new Object[contexts.length];
+    for (int i = 0; i < contexts.length; i++)
+      detached[i] = ((ThreadLocal<?>) schedulerField(contexts[i]).get(null)).get();
+    Object engine = new Object();
+    long transition = StarsectorPrepatcherHooks.beginCampaignEngineChange(engine);
+    require(transition >= 0L, "owner reset failed to open a transition");
+    require(
+        schedulerField("MARKET_SCHEDULER_STATES").get(null) != oldMap
+            && schedulerField("CONSTRUCTION_QUEUE_OWNERS").get(null) != oldQueues,
+        "scheduler did not detach both roots");
+    require(floatField(oldState, "pendingAmount") == oldDebt, "reset mutated an in-flight old state");
+    require(((List<?>) field(invokePrivateStatic("schedulerSnapshot"), "markets")).isEmpty(),
+        "old debt escaped into the replacement state map");
+    for (int i = 0; i < contexts.length; i++) {
+      require(((ThreadLocal<?>) schedulerField(contexts[i]).get(null)).get() != detached[i],
+          "reset retained interrupted context " + contexts[i]);
+    }
+    require(schedulerField("marketSchedulerSimulationTick").getLong(null) == 0L && schedulerFrame() == 0L,
+        "campaign tick/batch counters survived reset");
+    require(((java.util.concurrent.atomic.AtomicLong) schedulerField("MARKET_SCHEDULER_DEBT_SEQUENCE").get(null))
+        .get() == 0L, "campaign debt sequence survived reset");
+    require(((java.util.concurrent.atomic.AtomicLong) schedulerField("MARKET_DELIVERY_SEQUENCE").get(null))
+        .get() == deliveries, "reset erased process-lifetime delivery sequence");
+    require(capability.equals(System.getProperty("starsector.prepatcher.marketSchedulerCapabilityMask")),
+        "reset erased process-lifetime capability registration");
+    // Generated finally hooks from the interrupted invocation must safely drain
+    // the replacement contexts without resurrecting old debt or replay frames.
+    StarsectorPrepatcherHooks.endMarketAdvanceInvocation();
+    endSyntheticSchedulerTick();
+    StarsectorPrepatcherHooks.completeCampaignEngineChange(engine, transition);
+    require(!StarsectorPrepatcherHooks.hasCurrentMarketAdvanceBatch(market.proxy), "old replay frame became visible");
+    require(rows.size() == 1 && floatField(row, "pendingAmount") > 0f, "reset changed detached diagnostic rows");
+    int calls = market.calls;
+    StarsectorPrepatcherHooks.flushMarketSchedulerBeforeSave();
+    require(market.calls == calls, "save replayed debt from the previous campaign");
+  }
+
+  private static Field schedulerField(String name) throws Exception {
+    Field field = runtimeClass("MarketScheduler").getDeclaredField(name);
+    field.setAccessible(true);
+    return field;
+  }
   private static void assertWeakStateDoesNotRetainMarket(SectorContext sector, MutableLocation remote)
       throws Exception {
     resetSchedulerGeneration();
@@ -1388,14 +1502,18 @@ public final class MarketSchedulerRuntimeTest {
     return get.invoke(map, market);
   }
 
-  private static float pendingAmount(MarketAPI market) throws Exception {
-    Object state = schedulerState(market);
-    if (state == null) return 0f;
-    Field field = state.getClass().getDeclaredField("pendingAmount");
-    field.setAccessible(true);
-    return field.getFloat(state);
+  private static Object schedulerSnapshotState(MarketAPI market) throws Exception {
+    Object snapshot = invokePrivateStatic("schedulerSnapshot");
+    for (Object row : (List<?>) field(snapshot, "markets")) {
+      if (intField(row, "identityHash") == System.identityHashCode(market)) return row;
+    }
+    return null;
   }
 
+  private static float pendingAmount(MarketAPI market) throws Exception {
+    Object snapshot = schedulerSnapshotState(market);
+    return snapshot == null ? 0f : floatField(snapshot, "pendingAmount");
+  }
   private static int schedulerStateSize() throws Exception {
     Field field = runtimeClass("MarketScheduler").getDeclaredField("MARKET_SCHEDULER_STATES");
     field.setAccessible(true);
@@ -1492,30 +1610,11 @@ public final class MarketSchedulerRuntimeTest {
     return Class.forName("com.fs.starfarer.api.StarsectorPrepatcher" + simpleName);
   }
 
-  private static Field runtimeField(String name) throws Exception {
-    for (String owner : List.of("Hooks", "CampaignCaches", "CampaignListeners", "CommodityTemporal", "EconomyRuntime",
-        "IntelRuntime", "MapRuntime", "MarketScheduler", "Metrics", "RouteIndex", "Scratch", "StartupRuntime",
-        "StrategicJumpHooks")) {
-      try {
-        return runtimeClass(owner).getDeclaredField(name);
-      } catch (NoSuchFieldException ignored) {}
-    }
-    throw new NoSuchFieldException(name);
-  }
-
   private static Object invokePrivateStatic(String methodName) throws Exception {
-    for (String owner : List.of("Hooks", "CampaignCaches", "CampaignListeners", "CommodityTemporal", "EconomyRuntime",
-        "IntelRuntime", "MapRuntime", "MarketScheduler", "Metrics", "RouteIndex", "Scratch", "StartupRuntime",
-        "StrategicJumpHooks")) {
-      try {
-        Method method = runtimeClass(owner).getDeclaredMethod(methodName);
-        method.setAccessible(true);
-        return method.invoke(null);
-      } catch (NoSuchMethodException ignored) {}
-    }
-    throw new NoSuchMethodException(methodName);
+    Method method = runtimeClass("MarketScheduler").getDeclaredMethod(methodName);
+    method.setAccessible(true);
+    return method.invoke(null);
   }
-
   private static int recordInt(Object record, String accessor) throws Exception {
     Method method = record.getClass().getDeclaredMethod(accessor);
     method.setAccessible(true);
@@ -1523,13 +1622,13 @@ public final class MarketSchedulerRuntimeTest {
   }
 
   private static Object staticField(String fieldName) throws Exception {
-    Field field = runtimeField(fieldName);
+    Field field = runtimeClass("MarketDiagnostics").getDeclaredField(fieldName);
     field.setAccessible(true);
     return field.get(null);
   }
 
   private static void setStaticField(String fieldName, Object value) throws Exception {
-    Field field = runtimeField(fieldName);
+    Field field = runtimeClass("MarketDiagnostics").getDeclaredField(fieldName);
     field.setAccessible(true);
     field.set(null, value);
   }

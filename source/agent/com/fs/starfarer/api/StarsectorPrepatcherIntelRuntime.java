@@ -25,10 +25,53 @@ import java.util.WeakHashMap;
 /** Map label spatial index, intel icon caches, and comm-relay candidate index. */
 final class StarsectorPrepatcherIntelRuntime {
 
-  static volatile Map<IntelInfoPlugin, IntelCache> INTEL_CACHE = Collections.synchronizedMap(new WeakHashMap<>());
-  static volatile IdentityHashMap<LinkedHashMap<?, ?>, LabelIndex> LABEL_INDEXES = new IdentityHashMap<>();
-  static volatile IdentityHashMap<List<?>, IntelEntityIndex> INTEL_ENTITY_INDEXES = new IdentityHashMap<>();
-  static volatile Map<Object, CommRelaySystemIndex> COMM_RELAY_SYSTEM_INDEXES =
+  static IntelGaugeSnapshot gaugeSnapshot() {
+    int labelCurrent = 0;
+    long labelIcons = 0L;
+    long labelBuckets = 0L;
+    IdentityHashMap<LinkedHashMap<?, ?>, LabelIndex> labels = LABEL_INDEXES;
+    synchronized (labels) {
+      if (labels == LABEL_INDEXES) {
+        labelCurrent = labels.size();
+        for (LabelIndex index : labels.values()) {
+          labelIcons += Math.max(0, index.size);
+          labelBuckets += index.buckets.size();
+        }
+      }
+    }
+
+    int intelCurrent = 0;
+    long intelEntries = 0L;
+    IdentityHashMap<List<?>, IntelEntityIndex> intel = INTEL_ENTITY_INDEXES;
+    synchronized (intel) {
+      if (intel == INTEL_ENTITY_INDEXES) {
+        intelCurrent = intel.size();
+        for (IntelEntityIndex index : intel.values()) {
+          intelEntries += index.byPlugin.size();
+        }
+      }
+    }
+
+    return new IntelGaugeSnapshot(labelCurrent, labelIcons, labelBuckets, intelCurrent, intelEntries);
+  }
+  record IntelGaugeSnapshot(int labels, long icons, long buckets, int indexes, long entries) {
+  }
+
+
+  /** Detach campaign roots without taking cache/state monitors or clearing in-flight objects. */
+  static void campaignLifecycleReset() {
+    INTEL_CACHE = Collections.synchronizedMap(new WeakHashMap<>());
+    LABEL_INDEXES = new IdentityHashMap<>();
+    INTEL_ENTITY_INDEXES = new IdentityHashMap<>();
+    COMM_RELAY_SYSTEM_INDEXES = Collections.synchronizedMap(new WeakHashMap<>());
+  }
+
+
+  private static volatile Map<IntelInfoPlugin, IntelCache> INTEL_CACHE =
+      Collections.synchronizedMap(new WeakHashMap<>());
+  private static volatile IdentityHashMap<LinkedHashMap<?, ?>, LabelIndex> LABEL_INDEXES = new IdentityHashMap<>();
+  private static volatile IdentityHashMap<List<?>, IntelEntityIndex> INTEL_ENTITY_INDEXES = new IdentityHashMap<>();
+  private static volatile Map<Object, CommRelaySystemIndex> COMM_RELAY_SYSTEM_INDEXES =
       Collections.synchronizedMap(new WeakHashMap<>());
   static void maintainLabelIndexes(PrepatcherConfig c, long generation, long now) {
     IdentityHashMap<LinkedHashMap<?, ?>, LabelIndex> indexes = LABEL_INDEXES;
@@ -119,12 +162,11 @@ final class StarsectorPrepatcherIntelRuntime {
         return engine.getStarSystems();
       }
 
-      StarsectorPrepatcherScratch.Scratch scratch = StarsectorPrepatcherScratch.SCRATCH.get();
-      if (scratch.scopeDepth <= 0) {
+      if (!StarsectorPrepatcherScratch.hasOpenScope()) {
         StarsectorPrepatcherMetrics.COMM_RELAY_INDEX_FALLBACKS.increment();
         return engine.getStarSystems();
       }
-      StarsectorPrepatcherScratch.ScratchFrame frame = scratch.scopeFrame();
+      StarsectorPrepatcherScratch.ScratchFrame frame = StarsectorPrepatcherScratch.currentFrame();
       ArrayList entryScratch = frame.pooledList();
       ArrayList result = frame.pooledList();
       index.collect(playerLocation.x, playerLocation.y, radius, entryScratch);
@@ -188,7 +230,7 @@ final class StarsectorPrepatcherIntelRuntime {
       Vector2f location = token.getLocation();
       int cx = StarsectorPrepatcherHooks.floorCell(location.x, LabelIndex.CELL_X);
       int cy = StarsectorPrepatcherHooks.floorCell(location.y, LabelIndex.CELL_Y);
-      ArrayList<Object> result = StarsectorPrepatcherScratch.SCRATCH.get().scopeFrame().labelCandidates;
+      ArrayList<Object> result = StarsectorPrepatcherScratch.currentFrame().labelCandidates;
       result.clear();
       result.addAll(index.fallback);
       for (int dx = -1; dx <= 1; dx++) {
@@ -197,7 +239,7 @@ final class StarsectorPrepatcherIntelRuntime {
           if (bucket != null) result.addAll(bucket);
         }
       }
-      StarsectorPrepatcherScratch.SCRATCH.get().scopeFrame().observeRetainedList(result);
+      StarsectorPrepatcherScratch.currentFrame().observeRetainedList(result);
       StarsectorPrepatcherMetrics.LABEL_TOTAL.add(icons.size());
       StarsectorPrepatcherMetrics.LABEL_CANDIDATES.add(result.size());
       return result;
@@ -229,7 +271,13 @@ final class StarsectorPrepatcherIntelRuntime {
       }
     };
   }
-  static final class LabelIndex {
+  static final class LabelIndex implements StarsectorPrepatcherCampaignCaches.CacheOwner {
+    public long lastAccessNanos() {
+      return lastAccessNanos;
+    }
+    public int activeUsers() {
+      return activeUsers;
+    }
     static final float CELL_X = 10_000f;
     static final float CELL_Y = 3_000f;
     final int size;
@@ -358,7 +406,7 @@ final class StarsectorPrepatcherIntelRuntime {
   public static boolean fastContains(Collection collection, Object value) {
     PrepatcherConfig c = StarsectorPrepatcherHooks.config;
     if (c == null || !c.intelReconciliation || collection.size() < 16) { return collection.contains(value); }
-    StarsectorPrepatcherScratch.ScratchFrame scratch = StarsectorPrepatcherScratch.SCRATCH.get().scopeFrame();
+    StarsectorPrepatcherScratch.ScratchFrame scratch = StarsectorPrepatcherScratch.currentFrame();
     if (scratch.containsSource != collection || scratch.containsSourceSize != collection.size()) {
       scratch.containsSet.clear();
       scratch.containsSet.addAll(collection);
@@ -485,7 +533,13 @@ final class StarsectorPrepatcherIntelRuntime {
       }
     };
   }
-  static final class IntelEntityIndex {
+  static final class IntelEntityIndex implements StarsectorPrepatcherCampaignCaches.CacheOwner {
+    public long lastAccessNanos() {
+      return lastAccessNanos;
+    }
+    public int activeUsers() {
+      return activeUsers;
+    }
     final int size;
     final Object first;
     final Object last;

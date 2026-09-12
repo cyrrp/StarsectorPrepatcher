@@ -33,7 +33,13 @@ import java.util.concurrent.atomic.AtomicLong;
 /** Economy location maps, persistent snapshots, group index, and local-resources helpers. */
 final class StarsectorPrepatcherEconomyRuntime {
 
-  static volatile Map<ReachEconomy, EconomyLocationState> ECONOMY_LOCATION_STATES =
+  /** Detach campaign roots without taking cache/state monitors or clearing in-flight objects. */
+  static void campaignLifecycleReset() {
+    ECONOMY_LOCATION_STATES = Collections.synchronizedMap(new WeakHashMap<>());
+  }
+
+
+  private static volatile Map<ReachEconomy, EconomyLocationState> ECONOMY_LOCATION_STATES =
       Collections.synchronizedMap(new WeakHashMap<>());
   static final int ECONOMY_GROUP_INDEX_COMPONENT_REACH_ECONOMY = 1;
   static final int ECONOMY_GROUP_INDEX_COMPONENT_MARKET = 2;

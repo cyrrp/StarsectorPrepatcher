@@ -53,6 +53,17 @@ Trade/Cargo поздняя ошибка: оба повтора возвраща�
 Javaagent-классы и их `static`/`ThreadLocal` живут до завершения JVM. Поэтому любая достижимая из
 них campaign-ссылка считается process root, пока обратное не доказано GC-тестом.
 
+Runtime ownership changes require more than patch-status equality. Run `LifecycleGcRegressionTest`
+for two-phase identity/token transitions, weak reachability, reentrant scratch detach/drain and reset
+while another thread holds the old cache monitors. Run `CacheMaintenanceRuntimeTest` for owner TTL,
+LRU/active-user protection, stale-generation maintenance, scratch gauge/grace behavior and stale
+starfield leases. Run `MarketSchedulerRuntimeTest` for exact delivery/RLE, nested invocation, save
+failure and construction transitions, plus immutable snapshots across flush/reset, private owner
+root/context detachment and preservation of process-lifetime registration/delivery sequence.
+`DirectMarketObservationRuntimeTest` must cover observer report-interval handoff, caller-stack
+filtering and nested exceptions followed by a non-recursive successful call. Keep these checks in
+the existing gate entries; changing the owning class must not silently drop their execution.
+
 ## UI economy end-to-end matrix
 
 The scenario matrix covers condition-only, Survey, salvage LOOT, detached Cargo, live-market,

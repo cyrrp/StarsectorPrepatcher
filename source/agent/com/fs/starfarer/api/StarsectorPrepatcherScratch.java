@@ -21,9 +21,40 @@ import java.util.Set;
 /** Per-thread scratch pools and snapshot helpers for hot game loops. */
 final class StarsectorPrepatcherScratch {
 
-  static final ThreadLocal<Scratch> SCRATCH = ThreadLocal.withInitial(Scratch::new);
+  static void campaignLifecycleReset() {
+    // A lifecycle callback may be re-entrant inside a transformed scratch
+    // scope. Detach the old Scratch without clearing collections that the
+    // interrupted vanilla method still owns, then mirror only its open-lease
+    // depth into a fresh container. Subsequent hooks cannot append campaign
+    // objects to the detached container, and the replacement removes itself
+    // when the interrupted scope's generated finally hook completes.
+    SCRATCH_GAUGES = ScratchGaugeSnapshot.EMPTY;
+    Scratch previous = SCRATCH.get();
+    int openLeases = previous.scopeDepth;
+    SCRATCH.remove();
+    if (openLeases > 0) {
+      Scratch replacement = new Scratch();
+      replacement.scopeDepth = openLeases;
+      replacement.removeWhenIdle = true;
+      SCRATCH.set(replacement);
+    }
+  }
+  static ScratchGaugeSnapshot gaugeSnapshot() {
+    return SCRATCH_GAUGES;
+  }
+
+  static boolean hasOpenScope() {
+    return SCRATCH.get().scopeDepth > 0;
+  }
+
+  static ScratchFrame currentFrame() {
+    return SCRATCH.get().scopeFrame();
+  }
+
+
+  private static final ThreadLocal<Scratch> SCRATCH = ThreadLocal.withInitial(Scratch::new);
   static final int SCRATCH_RETAINED_FRAME_FLOOR = 4;
-  static volatile ScratchGaugeSnapshot SCRATCH_GAUGES = ScratchGaugeSnapshot.EMPTY;
+  private static volatile ScratchGaugeSnapshot SCRATCH_GAUGES = ScratchGaugeSnapshot.EMPTY;
   static void trimCurrentScratch(PrepatcherConfig c, long now) {
     if (!c.scratchTrimEnabled) {
       publishScratchGauges(SCRATCH.get());

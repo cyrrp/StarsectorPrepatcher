@@ -2,9 +2,6 @@ package com.fs.starfarer.api;
 
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 import com.starsector.prepatcher.agent.PrepatcherLog;
-import java.util.IdentityHashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.DoubleAdder;
 import java.util.concurrent.atomic.LongAdder;
@@ -219,52 +216,10 @@ final class StarsectorPrepatcherMetrics {
   static final LongAdder STARTUP_LOG_SOUND = new LongAdder();
   static final LongAdder STARTUP_LOG_OTHER = new LongAdder();
   static CacheGaugeSnapshot cacheGaugeSnapshot() {
-    int labelCurrent = 0;
-    long labelIcons = 0L;
-    long labelBuckets = 0L;
-    IdentityHashMap<LinkedHashMap<?, ?>, StarsectorPrepatcherIntelRuntime.LabelIndex> labels =
-        StarsectorPrepatcherIntelRuntime.LABEL_INDEXES;
-    synchronized (labels) {
-      if (labels == StarsectorPrepatcherIntelRuntime.LABEL_INDEXES) {
-        labelCurrent = labels.size();
-        for (StarsectorPrepatcherIntelRuntime.LabelIndex index : labels.values()) {
-          labelIcons += Math.max(0, index.size);
-          labelBuckets += index.buckets.size();
-        }
-      }
-    }
-
-    int intelCurrent = 0;
-    long intelEntries = 0L;
-    IdentityHashMap<List<?>, StarsectorPrepatcherIntelRuntime.IntelEntityIndex> intel =
-        StarsectorPrepatcherIntelRuntime.INTEL_ENTITY_INDEXES;
-    synchronized (intel) {
-      if (intel == StarsectorPrepatcherIntelRuntime.INTEL_ENTITY_INDEXES) {
-        intelCurrent = intel.size();
-        for (StarsectorPrepatcherIntelRuntime.IntelEntityIndex index : intel.values()) {
-          intelEntries += index.byPlugin.size();
-        }
-      }
-    }
-
-    int hitCurrent = 0;
-    long hitCells = 0L;
-    int hitMax = 0;
-    IdentityHashMap<Object, StarsectorPrepatcherMapRuntime.HitCache> hits = StarsectorPrepatcherMapRuntime.HIT_CACHES;
-    synchronized (hits) {
-      if (hits == StarsectorPrepatcherMapRuntime.HIT_CACHES) {
-        hitCurrent = hits.size();
-        for (StarsectorPrepatcherMapRuntime.HitCache cache : hits.values()) {
-          synchronized (cache) {
-            int cells = cache.cells.size();
-            hitCells += cells;
-            if (cells > hitMax) hitMax = cells;
-          }
-        }
-      }
-    }
-    return new CacheGaugeSnapshot(labelCurrent, labelIcons, labelBuckets, intelCurrent, intelEntries, hitCurrent,
-        hitCells, hitMax);
+    var intel = StarsectorPrepatcherIntelRuntime.gaugeSnapshot();
+    var hits = StarsectorPrepatcherMapRuntime.gaugeSnapshot();
+    return new CacheGaugeSnapshot(intel.labels(), intel.icons(), intel.buckets(), intel.indexes(), intel.entries(),
+        hits.owners(), hits.cells(), hits.maxCells());
   }
   record CacheGaugeSnapshot(int labelIndexesCurrent, long labelIndexesTotalIcons, long labelIndexesTotalBuckets,
       int intelEntityIndexesCurrent, long intelEntityIndexesTotalEntries, int hitCachesCurrent,
@@ -278,7 +233,7 @@ final class StarsectorPrepatcherMetrics {
       try {
         Thread.sleep(seconds * 1000L);
         CacheGaugeSnapshot gauges = cacheGaugeSnapshot();
-        StarsectorPrepatcherScratch.ScratchGaugeSnapshot scratchGauges = StarsectorPrepatcherScratch.SCRATCH_GAUGES;
+        StarsectorPrepatcherScratch.ScratchGaugeSnapshot scratchGauges = StarsectorPrepatcherScratch.gaugeSnapshot();
         StarsectorPrepatcherMarketScheduler.MarketSchedulerGaugeSnapshot marketGauges =
             StarsectorPrepatcherMarketScheduler.marketSchedulerGaugeSnapshot();
         PrepatcherLog.info("stats: retainCalls=" + RETAIN_CALLS.sumThenReset() + ", avoidedContainsUpperBound="
