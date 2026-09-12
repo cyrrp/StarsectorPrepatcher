@@ -1,5 +1,7 @@
 package com.starsector.prepatcher.agent.presentation;
 
+import com.starsector.prepatcher.agent.TransformDiagnostics;
+
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
@@ -288,7 +290,7 @@ public final class FastForwardPresentationTransformer implements ClassFileTransf
       ProtectionDomain protectionDomain, byte[] classfileBuffer) {
     if (className == null || !PLANS.containsKey(className) || !isTargetEnabled(className)) { return null; }
     if (runtimeLoader != null && loader != runtimeLoader) {
-      recordStatus(className, "SKIPPED_LOADER");
+      recordStatusRejected(className, "SKIPPED_LOADER");
       logOnce(className + ":loader", "Fast-forward presentation patch skipped " + className + ": target loader="
           + loaderName(loader) + ", runtime loader=" + loaderName(runtimeLoader));
       return null;
@@ -306,12 +308,12 @@ public final class FastForwardPresentationTransformer implements ClassFileTransf
       }
       return transformed;
     } catch (StructuralMismatch mismatch) {
-      recordStatus(className, "SKIPPED_STRUCTURAL");
+      recordStatusRejected(className, "SKIPPED_STRUCTURAL");
       logOnce(className + ":structural:" + mismatch.getMessage(),
           "Fast-forward presentation patch skipped " + className + ": " + mismatch.getMessage());
       return null;
     } catch (Throwable failure) {
-      recordStatus(className, "SKIPPED_ERROR");
+      recordStatusRejected(className, "SKIPPED_ERROR");
       PrepatcherLog.error("Fast-forward presentation patch failed for " + className + "; using input bytes", failure);
       return null;
     }
@@ -1081,8 +1083,13 @@ public final class FastForwardPresentationTransformer implements ClassFileTransf
   }
 
   private static void recordStatus(String className, String status) {
-    System.setProperty("starsector.prepatcher.patchStatus." + className.replace('/', '.') + ".fastForwardPresentation",
-        status);
+    TransformDiagnostics.status(
+        "starsector.prepatcher.patchStatus." + className.replace('/', '.') + ".fastForwardPresentation", status);
+  }
+
+  private static void recordStatusRejected(String className, String status) {
+    TransformDiagnostics.reject(
+        "starsector.prepatcher.patchStatus." + className.replace('/', '.') + ".fastForwardPresentation", status);
   }
 
   private static String loaderName(ClassLoader loader) {

@@ -1,5 +1,7 @@
 package com.starsector.prepatcher.agent.uieconomy;
 
+import com.starsector.prepatcher.agent.TransformDiagnostics;
+
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.ClassNode;
@@ -47,7 +49,7 @@ public final class CommodityMarketDataContractTransformer implements ClassFileTr
       patch.mutate(match.plan);
       patch.verify(match.plan, node);
       if (!publish(true, null)) {
-        record("SKIPPED_RUNTIME");
+        recordRejected("SKIPPED_RUNTIME");
         return null;
       }
       record("READY");
@@ -56,7 +58,7 @@ public final class CommodityMarketDataContractTransformer implements ClassFileTr
       reject("SKIPPED_STRUCTURAL", mismatch.getMessage());
     } catch (Throwable failure) {
       publish(false, failure.getClass().getName());
-      record("SKIPPED_ERROR");
+      recordRejected("SKIPPED_ERROR");
       PrepatcherLog.error(
           "SKIPPED_ERROR vanilla affected-commodity commit contract; " + "original global economy steps remain active",
           failure);
@@ -66,7 +68,7 @@ public final class CommodityMarketDataContractTransformer implements ClassFileTr
 
   private void reject(String status, String reason) {
     publish(false, reason);
-    record(status);
+    recordRejected(status);
     PrepatcherLog.warn(status + " vanilla affected-commodity commit contract: " + reason
         + "; original global economy steps remain active");
   }
@@ -93,6 +95,10 @@ public final class CommodityMarketDataContractTransformer implements ClassFileTr
   }
 
   private static void record(String status) {
-    System.setProperty("starsector.prepatcher.commodityMarketDataContract", status);
+    TransformDiagnostics.status("starsector.prepatcher.commodityMarketDataContract", status);
+  }
+
+  private static void recordRejected(String status) {
+    TransformDiagnostics.reject("starsector.prepatcher.commodityMarketDataContract", status);
   }
 }

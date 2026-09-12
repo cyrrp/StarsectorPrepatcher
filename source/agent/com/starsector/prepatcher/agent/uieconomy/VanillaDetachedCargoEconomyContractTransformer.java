@@ -1,5 +1,7 @@
 package com.starsector.prepatcher.agent.uieconomy;
 
+import com.starsector.prepatcher.agent.TransformDiagnostics;
+
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.ClassNode;
@@ -46,7 +48,7 @@ public final class VanillaDetachedCargoEconomyContractTransformer implements Cla
       patch.mutate(match.plan);
       patch.verify(match.plan, node);
       if (!publishRuntime(true)) {
-        record("SKIPPED_RUNTIME");
+        recordRejected("SKIPPED_RUNTIME");
         return null;
       }
       record("READY");
@@ -56,7 +58,7 @@ public final class VanillaDetachedCargoEconomyContractTransformer implements Cla
       reject("SKIPPED_STRUCTURAL", mismatch.getMessage());
     } catch (Throwable failure) {
       publishRuntime(false);
-      record("SKIPPED_ERROR");
+      recordRejected("SKIPPED_ERROR");
       PrepatcherLog.error(
           "SKIPPED_ERROR vanilla detached-Cargo economy contract; " + "original tripleStep remains active", failure);
     }
@@ -65,7 +67,7 @@ public final class VanillaDetachedCargoEconomyContractTransformer implements Cla
 
   private void reject(String status, String reason) {
     publishRuntime(false);
-    record(status);
+    recordRejected(status);
     PrepatcherLog
         .warn(status + " vanilla detached-Cargo economy contract: " + reason + "; original tripleStep remains active");
   }
@@ -98,6 +100,10 @@ public final class VanillaDetachedCargoEconomyContractTransformer implements Cla
   }
 
   private static void record(String status) {
-    System.setProperty("starsector.prepatcher.detachedCargoVanillaEconomyContract", status);
+    TransformDiagnostics.status("starsector.prepatcher.detachedCargoVanillaEconomyContract", status);
+  }
+
+  private static void recordRejected(String status) {
+    TransformDiagnostics.reject("starsector.prepatcher.detachedCargoVanillaEconomyContract", status);
   }
 }

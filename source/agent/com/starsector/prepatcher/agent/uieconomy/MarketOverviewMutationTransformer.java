@@ -1,5 +1,7 @@
 package com.starsector.prepatcher.agent.uieconomy;
 
+import com.starsector.prepatcher.agent.TransformDiagnostics;
+
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
@@ -38,7 +40,7 @@ public final class MarketOverviewMutationTransformer implements ClassFileTransfo
       ProtectionDomain protectionDomain, byte[] classfileBuffer) {
     if (!enabled || !TARGET.equals(className)) return null;
     if (!runtimeVisibleFrom(loader)) {
-      record("SKIPPED_LOADER");
+      recordRejected("SKIPPED_LOADER");
       PrepatcherLog.warn("Market overview mutation refresh not patched: target loader=" + loaderName(loader)
           + ", runtime loader=" + loaderName(runtimeLoader));
       return null;
@@ -66,12 +68,12 @@ public final class MarketOverviewMutationTransformer implements ClassFileTransfo
           + " shared recreate helper keeps global fallback for unknown actions");
       return transformed;
     } catch (StructuralMismatchException mismatch) {
-      record("SKIPPED_STRUCTURAL");
+      recordRejected("SKIPPED_STRUCTURAL");
       PrepatcherLog.warn("SKIPPED_STRUCTURAL market overview mutation refresh in " + className + ": "
           + mismatch.getMessage() + "; original mutation calls and tripleStep remain active");
       return null;
     } catch (Throwable failure) {
-      record("SKIPPED_ERROR");
+      recordRejected("SKIPPED_ERROR");
       PrepatcherLog.error("SKIPPED_ERROR market overview mutation refresh in " + className
           + "; original mutation behavior remains active", failure);
       return null;
@@ -97,7 +99,11 @@ public final class MarketOverviewMutationTransformer implements ClassFileTransfo
   }
 
   private static void record(String status) {
-    System.setProperty(statusProperty(), status);
+    TransformDiagnostics.status(statusProperty(), status);
+  }
+
+  private static void recordRejected(String status) {
+    TransformDiagnostics.reject(statusProperty(), status);
   }
 
   private static String loaderName(ClassLoader loader) {

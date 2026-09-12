@@ -1,5 +1,7 @@
 package com.starsector.prepatcher.agent.uieconomy;
 
+import com.starsector.prepatcher.agent.TransformDiagnostics;
+
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
@@ -34,7 +36,7 @@ public final class IndustryMarketMutationTransformer implements ClassFileTransfo
   public IndustryMarketMutationTransformer(boolean enabled, ClassLoader runtimeLoader) {
     this.enabled = enabled;
     this.runtimeLoader = runtimeLoader;
-    System.setProperty(groupStatusProperty(), enabled ? "awaiting-targets" : "disabled");
+    TransformDiagnostics.status(groupStatusProperty(), enabled ? "awaiting-targets" : "disabled");
   }
 
   public boolean isTargetEnabled(String internalName) {
@@ -46,7 +48,7 @@ public final class IndustryMarketMutationTransformer implements ClassFileTransfo
       ProtectionDomain protectionDomain, byte[] classfileBuffer) {
     if (!enabled || !TARGET_CLASSES.contains(className)) return null;
     if (!runtimeVisibleFrom(loader)) {
-      record(className, "SKIPPED_LOADER");
+      recordRejected(className, "SKIPPED_LOADER");
       rejectGroup("loader-mismatch");
       PrepatcherLog.warn("Industry market-mutation patch not applied: target loader=" + loaderName(loader)
           + ", runtime loader=" + loaderName(runtimeLoader));
@@ -58,13 +60,13 @@ public final class IndustryMarketMutationTransformer implements ClassFileTransfo
       if (INDUSTRY_DIALOG.equals(className)) return transformDialog(node);
       return transformPanel(node);
     } catch (StructuralMismatchException mismatch) {
-      record(className, "SKIPPED_STRUCTURAL");
+      recordRejected(className, "SKIPPED_STRUCTURAL");
       rejectGroup("structural-mismatch");
       PrepatcherLog.warn("SKIPPED_STRUCTURAL industry market-mutation patch in " + className + ": "
           + mismatch.getMessage() + "; original industry mutation and tripleStep remain active");
       return null;
     } catch (Throwable failure) {
-      record(className, "SKIPPED_ERROR");
+      recordRejected(className, "SKIPPED_ERROR");
       rejectGroup("transform-error");
       PrepatcherLog.error(
           "SKIPPED_ERROR industry market-mutation patch in " + className + "; original behavior remains active",
@@ -78,7 +80,7 @@ public final class IndustryMarketMutationTransformer implements ClassFileTransfo
     Match<IndustryMarketMutations.Plan> match = patch.match(node);
     if (match.alreadyApplied) {
       record(node.name, "ALREADY_APPLIED");
-      acceptTarget(node.name);
+      TransformDiagnostics.onCommit(() -> acceptTarget(node.name));
       return null;
     }
     if (match.plan == null) { throw mismatch(match.reason); }
@@ -87,7 +89,7 @@ public final class IndustryMarketMutationTransformer implements ClassFileTransfo
     byte[] transformed = write(node);
     patch.verify(match.plan, read(transformed));
     record(node.name, "APPLIED");
-    acceptTarget(node.name);
+    TransformDiagnostics.onCommit(() -> acceptTarget(node.name));
     PrepatcherLog.info("APPLIED exact industry affected-commodity wrappers to " + node.name
         + ": upgrade/downgrade/remove/cancel only");
     return transformed;
@@ -98,7 +100,7 @@ public final class IndustryMarketMutationTransformer implements ClassFileTransfo
     Match<IndustryOverviewMutationGuard.Plan> match = patch.match(node);
     if (match.alreadyApplied) {
       record(node.name, "ALREADY_APPLIED");
-      acceptTarget(node.name);
+      TransformDiagnostics.onCommit(() -> acceptTarget(node.name));
       return null;
     }
     if (match.plan == null) { throw mismatch(match.reason); }
@@ -107,7 +109,7 @@ public final class IndustryMarketMutationTransformer implements ClassFileTransfo
     byte[] transformed = write(node);
     patch.verify(match.plan, read(transformed));
     record(node.name, "APPLIED");
-    acceptTarget(node.name);
+    TransformDiagnostics.onCommit(() -> acceptTarget(node.name));
     PrepatcherLog.info("APPLIED one-shot industry mutation guard to " + node.name
         + ".recreateOverview; unknown/custom callers retain tripleStep");
     return transformed;
@@ -144,17 +146,21 @@ public final class IndustryMarketMutationTransformer implements ClassFileTransfo
   private synchronized void acceptTarget(String className) {
     if (groupRejected) return;
     verifiedTargets.add(className);
-    System.setProperty(groupStatusProperty(),
+    TransformDiagnostics.status(groupStatusProperty(),
         verifiedTargets.containsAll(TARGET_CLASSES) ? "ready" : "awaiting-targets");
   }
 
   private synchronized void rejectGroup(String reason) {
     groupRejected = true;
-    System.setProperty(groupStatusProperty(), "disabled-" + reason);
+    TransformDiagnostics.status(groupStatusProperty(), "disabled-" + reason);
   }
 
   private static void record(String className, String status) {
-    System.setProperty(statusProperty(className), status);
+    TransformDiagnostics.status(statusProperty(className), status);
+  }
+
+  private static void recordRejected(String className, String status) {
+    TransformDiagnostics.reject(statusProperty(className), status);
   }
 
   private static String loaderName(ClassLoader loader) {

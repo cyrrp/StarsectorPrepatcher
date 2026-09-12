@@ -1,5 +1,7 @@
 package com.starsector.prepatcher.agent.aotd;
 
+import com.starsector.prepatcher.agent.TransformDiagnostics;
+
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
@@ -40,7 +42,7 @@ public final class AoTDMarketOpenContextTransformer implements ClassFileTransfor
       ProtectionDomain protectionDomain, byte[] classfileBuffer) {
     if (!enabled || !TARGET.equals(className)) return null;
     if (!runtimeVisibleFrom(loader)) {
-      record("SKIPPED_LOADER");
+      recordRejected("SKIPPED_LOADER");
       PrepatcherLog.warn("AoTD market-open context not patched: target loader=" + loaderName(loader)
           + ", runtime loader=" + loaderName(runtimeLoader));
       return null;
@@ -67,11 +69,11 @@ public final class AoTDMarketOpenContextTransformer implements ClassFileTransfor
           + ": explicit condition-only/live-market guard with original" + " Economy.nextStep global fallback");
       return transformed;
     } catch (StructuralMismatchException mismatch) {
-      record("SKIPPED_STRUCTURAL");
+      recordRejected("SKIPPED_STRUCTURAL");
       PrepatcherLog.warn("SKIPPED_STRUCTURAL aotdMarketOpenContext in " + className + ": " + mismatch.getMessage());
       return null;
     } catch (Throwable failure) {
-      record("SKIPPED_ERROR");
+      recordRejected("SKIPPED_ERROR");
       PrepatcherLog.error(
           "SKIPPED_ERROR aotdMarketOpenContext in " + className + "; vanilla market-open behavior remains active.",
           failure);
@@ -94,8 +96,13 @@ public final class AoTDMarketOpenContextTransformer implements ClassFileTransfor
   }
 
   private static void record(String status) {
-    System.setProperty("starsector.prepatcher.aotdMarketOpenContextPatch", status);
-    System.setProperty("starsector.prepatcher.planetConditionMarketOpenNoGlobalEconomyStepPatch", status);
+    TransformDiagnostics.status("starsector.prepatcher.aotdMarketOpenContextPatch", status);
+    TransformDiagnostics.status("starsector.prepatcher.planetConditionMarketOpenNoGlobalEconomyStepPatch", status);
+  }
+
+  private static void recordRejected(String status) {
+    TransformDiagnostics.reject("starsector.prepatcher.aotdMarketOpenContextPatch", status);
+    TransformDiagnostics.reject("starsector.prepatcher.planetConditionMarketOpenNoGlobalEconomyStepPatch", status);
   }
 
   private static String loaderName(ClassLoader loader) {

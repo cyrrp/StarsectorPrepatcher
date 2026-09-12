@@ -1,5 +1,7 @@
 package com.starsector.prepatcher.agent.uieconomy;
 
+import com.starsector.prepatcher.agent.TransformDiagnostics;
+
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
@@ -56,7 +58,7 @@ public final class ReadOnlyUiEconomyStepTransformer implements ClassFileTransfor
       ProtectionDomain protectionDomain, byte[] classfileBuffer) {
     if (!TARGET_CLASSES.contains(className) || !isTargetEnabled(className)) return null;
     if (!acceptsLoader(className, loader)) {
-      record(className, "SKIPPED_LOADER");
+      recordRejected(className, "SKIPPED_LOADER");
       PrepatcherLog.warn("SKIPPED_LOADER readOnlyUiNoGlobalEconomyStep " + className + ": target loader="
           + loaderName(loader) + ", runtime loader=" + loaderName(runtimeLoader));
       return null;
@@ -84,12 +86,12 @@ public final class ReadOnlyUiEconomyStepTransformer implements ClassFileTransfor
           + ": removed exact Global.getSector() -> getEconomy()" + " -> tripleStep() UI-only sequence");
       return transformed;
     } catch (StructuralMismatchException mismatch) {
-      record(className, "SKIPPED_STRUCTURAL");
+      recordRejected(className, "SKIPPED_STRUCTURAL");
       PrepatcherLog.warn("SKIPPED_STRUCTURAL readOnlyUiNoGlobalEconomyStep in " + className + ": "
           + mismatch.getMessage() + "; original tripleStep remains active");
       return null;
     } catch (Throwable failure) {
-      record(className, "SKIPPED_ERROR");
+      recordRejected(className, "SKIPPED_ERROR");
       PrepatcherLog.error(
           "SKIPPED_ERROR readOnlyUiNoGlobalEconomyStep in " + className + "; original tripleStep remains active",
           failure);
@@ -124,7 +126,11 @@ public final class ReadOnlyUiEconomyStepTransformer implements ClassFileTransfor
   }
 
   private static void record(String className, String status) {
-    System.setProperty(statusProperty(className), status);
+    TransformDiagnostics.status(statusProperty(className), status);
+  }
+
+  private static void recordRejected(String className, String status) {
+    TransformDiagnostics.reject(statusProperty(className), status);
   }
 
   static public String statusProperty(String className) {

@@ -28,7 +28,7 @@ public final class PrepatcherLog {
   }
 
   public static void info(String message) {
-    write("INFO", message, null);
+    TransformDiagnostics.onCommit(() -> write("INFO", message, null));
   }
 
   public static void warn(String message) {

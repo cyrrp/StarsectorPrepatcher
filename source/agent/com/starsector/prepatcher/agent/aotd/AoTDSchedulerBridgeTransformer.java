@@ -1,5 +1,7 @@
 package com.starsector.prepatcher.agent.aotd;
 
+import com.starsector.prepatcher.agent.TransformDiagnostics;
+
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.tree.ClassNode;
@@ -28,14 +30,14 @@ public final class AoTDSchedulerBridgeTransformer implements ClassFileTransforme
       ProtectionDomain protectionDomain, byte[] classfileBuffer) {
     if (!TARGET.equals(className)) return null;
     if (!runtimeVisibleFrom(loader)) {
-      record("SKIPPED_LOADER");
+      recordRejected("SKIPPED_LOADER");
       PrepatcherLog.warn("AoTD bridge not patched: bridge loader=" + loaderName(loader) + ", runtime loader="
           + loaderName(runtimeLoader));
       return null;
     }
     try {
       if (containsForbiddenReflectionReference(classfileBuffer)) {
-        record("SKIPPED_REFLECTION_PRESENT");
+        recordRejected("SKIPPED_REFLECTION_PRESENT");
         PrepatcherLog.warn("AoTD bridge not patched: reflection reference present.");
         return null;
       }
@@ -61,10 +63,10 @@ public final class AoTDSchedulerBridgeTransformer implements ClassFileTransforme
       ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
       node.accept(writer);
       record("APPLIED");
-      System.setProperty("starsector.prepatcher.aotdBridgeLoader", loaderName(loader));
+      TransformDiagnostics.status("starsector.prepatcher.aotdBridgeLoader", loaderName(loader));
       return writer.toByteArray();
     } catch (Throwable failure) {
-      record("SKIPPED_ERROR");
+      recordRejected("SKIPPED_ERROR");
       PrepatcherLog.error("AoTD bridge transformation failed open.", failure);
       return null;
     }
@@ -88,7 +90,11 @@ public final class AoTDSchedulerBridgeTransformer implements ClassFileTransforme
   }
 
   private static void record(String status) {
-    System.setProperty("starsector.prepatcher.aotdBridgePatch", status);
+    TransformDiagnostics.status("starsector.prepatcher.aotdBridgePatch", status);
+  }
+
+  private static void recordRejected(String status) {
+    TransformDiagnostics.reject("starsector.prepatcher.aotdBridgePatch", status);
   }
 
   private static String loaderName(ClassLoader loader) {

@@ -221,8 +221,9 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     // loader-constraint LinkageError at the first invocation.
     if (runtimeLoader != null && className.startsWith("com/fs/") && loader != runtimeLoader) {
       String key = "starsector.prepatcher.patchStatus." + className.replace('/', '.') + ".classLoader";
-      if (!"SKIPPED_LOADER".equals(System.getProperty(key))) {
-        System.setProperty(key, "SKIPPED_LOADER");
+      boolean logged = "SKIPPED_LOADER".equals(System.getProperty(key));
+      TransformDiagnostics.reject(key, "SKIPPED_LOADER");
+      if (!logged) {
         PrepatcherLog.warn("SKIPPED_LOADER " + className + ": target loader=" + loaderName(loader) + ", runtime loader="
             + loaderName(runtimeLoader));
       }
@@ -422,8 +423,10 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       return null;
     }
 
-    int count = patchedClasses.incrementAndGet();
-    System.setProperty("starsector.prepatcher.patchedClasses", Integer.toString(count));
+    TransformDiagnostics.onCommit(() -> {
+      int count = patchedClasses.incrementAndGet();
+      System.setProperty("starsector.prepatcher.patchedClasses", Integer.toString(count));
+    });
     PrepatcherLog.info("Patched " + className + " structurally: " + String.join(", ", state.appliedDetails) + ", bytes "
         + classfileBuffer.length + " -> " + state.bytes.length);
 

@@ -1,5 +1,7 @@
 package com.starsector.prepatcher.agent.aotd;
 
+import com.starsector.prepatcher.agent.TransformDiagnostics;
+
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.tree.ClassNode;
@@ -55,7 +57,7 @@ public final class AoTDEconomyRestoreCompletionTransformer implements ClassFileT
       Match<EconomyRestoreCompletionSignal.Plan> match = patch.match(node);
       if (match.alreadyApplied) {
         if (!publish(true, null)) {
-          record("SKIPPED_RUNTIME");
+          recordRejected("SKIPPED_RUNTIME");
           return null;
         }
         record("ALREADY_PATCHED");
@@ -69,7 +71,7 @@ public final class AoTDEconomyRestoreCompletionTransformer implements ClassFileT
       node.accept(writer);
       byte[] transformed = writer.toByteArray();
       if (!publish(true, null)) {
-        record("SKIPPED_RUNTIME");
+        recordRejected("SKIPPED_RUNTIME");
         return null;
       }
       record("APPLIED");
@@ -80,7 +82,7 @@ public final class AoTDEconomyRestoreCompletionTransformer implements ClassFileT
       return null;
     } catch (Throwable failure) {
       publish(false, failure.getClass().getName());
-      record("SKIPPED_ERROR");
+      recordRejected("SKIPPED_ERROR");
       PrepatcherLog.error(
           "SKIPPED_ERROR AoTD economy-restore completion hook; " + "restore capability remains unavailable", failure);
       return null;
@@ -89,7 +91,7 @@ public final class AoTDEconomyRestoreCompletionTransformer implements ClassFileT
 
   private void reject(String status, String reason) {
     publish(false, reason);
-    record(status);
+    recordRejected(status);
     PrepatcherLog
         .warn(status + " AoTD economy-restore completion hook: " + reason + "; restore capability remains unavailable");
   }
@@ -120,6 +122,10 @@ public final class AoTDEconomyRestoreCompletionTransformer implements ClassFileT
   }
 
   private static void record(String status) {
-    System.setProperty(STATUS_PROPERTY, status);
+    TransformDiagnostics.status(STATUS_PROPERTY, status);
+  }
+
+  private static void recordRejected(String status) {
+    TransformDiagnostics.reject(STATUS_PROPERTY, status);
   }
 }
