@@ -1,6 +1,7 @@
 package com.starsector.prepatcher.runtime;
 
 import com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge;
+import com.fs.starfarer.api.StarsectorPrepatcherUiEconomyRuntime;
 
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -60,9 +61,9 @@ public final class UiEconomyActualAgentSmokeTest {
 
     Class.forName("com.fs.starfarer.campaign.econ.Economy", false, loader);
     Class.forName("com.fs.starfarer.campaign.econ.reach.ReachEconomy", false, loader);
-    require(StarsectorPrepatcherRuntimeBridge.isVanillaDetachedCargoEconomyContractOperational(),
+    require(StarsectorPrepatcherUiEconomyRuntime.isVanillaDetachedCargoEconomyContractOperational(),
         "vanilla synthetic-Cargo Economy contract is not READY");
-    require(StarsectorPrepatcherRuntimeBridge.isVanillaMarketOpenLocalizationContractOperational(),
+    require(StarsectorPrepatcherUiEconomyRuntime.isVanillaMarketOpenLocalizationContractOperational(),
         "vanilla live-market localization contract is not READY");
     require("READY".equals(System.getProperty("starsector.prepatcher.vanillaMarketOpenLocalizationContract", "")),
         "vanilla live-market localization status is not READY");

@@ -38,7 +38,7 @@ public final class UiMarketMutationFailOpenRuntimeTest {
             throw loggingFailure;
           }
         });
-        StarsectorPrepatcherRuntimeBridge.applyVanillaFreePortMutation(preFailure.proxy, true);
+        StarsectorPrepatcherUiEconomyRuntime.applyVanillaFreePortMutation(preFailure.proxy, true);
       } finally {
         System.setErr(originalErr);
       }
@@ -46,13 +46,13 @@ public final class UiMarketMutationFailOpenRuntimeTest {
 
       // A later successful setter in the same shared-helper batch must not
       // erase the earlier failure.
-      StarsectorPrepatcherRuntimeBridge.applyVanillaImmigrationClosedMutation(preFailure.proxy, true);
+      StarsectorPrepatcherUiEconomyRuntime.applyVanillaImmigrationClosedMutation(preFailure.proxy, true);
       require(preFailure.immigrationSets.get() == 1, "later policy setter was not invoked exactly once");
       invokeTripleGuarded(fallbackEconomy, preFailure.proxy);
       require(tripleSteps.get() == 1, "sticky pre-snapshot poison did not run original tripleStep once");
 
       MutationMarket postFailure = new MutationMarket(2);
-      StarsectorPrepatcherRuntimeBridge.applyVanillaFreePortMutation(postFailure.proxy, true);
+      StarsectorPrepatcherUiEconomyRuntime.applyVanillaFreePortMutation(postFailure.proxy, true);
       require(postFailure.freePortSets.get() == 1, "throwing post-snapshot suppressed or duplicated setFreePort");
       invokeTripleGuarded(fallbackEconomy, postFailure.proxy);
       require(tripleSteps.get() == 2, "post-snapshot failure did not run original tripleStep once");
@@ -65,7 +65,7 @@ public final class UiMarketMutationFailOpenRuntimeTest {
         return defaultValue(proxy, method, methodArgs, "throwing-setter-market");
       });
       try {
-        StarsectorPrepatcherRuntimeBridge.applyVanillaFreePortMutation(throwingSetter, true);
+        StarsectorPrepatcherUiEconomyRuntime.applyVanillaFreePortMutation(throwingSetter, true);
         throw new AssertionError("original setter exception was swallowed");
       } catch (RuntimeException actual) {
         require(actual == setterFailure, "wrapper changed the original setter exception identity");
@@ -78,7 +78,7 @@ public final class UiMarketMutationFailOpenRuntimeTest {
   }
 
   private static void invokeTripleGuarded(EconomyAPI economy, MarketAPI market) {
-    if (!StarsectorPrepatcherRuntimeBridge.shouldHandleVanillaUiMutationEconomyStep(economy, market)) {
+    if (!StarsectorPrepatcherUiEconomyRuntime.shouldHandleVanillaUiMutationEconomyStep(economy, market)) {
       economy.tripleStep();
     }
   }

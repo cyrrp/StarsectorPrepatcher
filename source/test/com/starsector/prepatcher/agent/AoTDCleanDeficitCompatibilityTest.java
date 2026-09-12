@@ -1,4 +1,5 @@
 package com.starsector.prepatcher.agent;
+import com.fs.starfarer.api.StarsectorPrepatcherAotdContract;
 import com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge;
 import com.fs.starfarer.api.util.Pair;
 import java.nio.file.*;
@@ -25,8 +26,8 @@ public final class AoTDCleanDeficitCompatibilityTest {
     require(((Pair<?, ?>) vanilla).two.equals(7), "raw vanilla fallback changed");
 
     StarsectorPrepatcherRuntimeBridge.configure(config, Path.of("."));
-    StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(true, "compatibility-test");
-    long caps = StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract("aotd_theory_of_toolbox",
+    StarsectorPrepatcherAotdContract.setAoTDEconomyRestoreCompletionContract(true, "compatibility-test");
+    long caps = StarsectorPrepatcherAotdContract.registerAoTDForkContract("aotd_theory_of_toolbox",
         StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
         StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES, new Consumer<Object>() {
           public void accept(Object event) {}

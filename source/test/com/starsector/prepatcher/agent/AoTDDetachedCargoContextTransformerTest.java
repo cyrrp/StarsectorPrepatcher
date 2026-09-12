@@ -29,7 +29,7 @@ public final class AoTDDetachedCargoContextTransformerTest {
       "(Lcom/fs/starfarer/campaign/ui/class$Oo;" + "Lcom/fs/starfarer/api/campaign/SectorEntityToken;"
           + "Lcom/fs/starfarer/campaign/command/OutpostListPanel$Oo;" + "Lcom/fs/starfarer/campaign/fleet/CargoData;"
           + "Ljava/lang/String;Lcom/fs/starfarer/coreui/_$o;" + "Lcom/fs/starfarer/ui/U;)V";
-  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime";
   private static final String SHOULD_SKIP_DESC =
       "(Ljava/lang/Object;Ljava/lang/Object;ZLjava/lang/Object;" + "Ljava/lang/Object;Ljava/lang/Object;)Z";
 

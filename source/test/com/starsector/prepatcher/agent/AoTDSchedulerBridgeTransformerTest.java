@@ -93,7 +93,7 @@ public final class AoTDSchedulerBridgeTransformerTest {
     Files.writeString(configPath,
         "patch.aotdCleanDeficitPath=true\n" + "patch.campaignCargoNoGlobalEconomyStep=true\n");
     com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge.configure(PrepatcherConfig.load(configPath), Path.of("."));
-    com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(true, "bridge-test");
+    com.fs.starfarer.api.StarsectorPrepatcherAotdContract.setAoTDEconomyRestoreCompletionContract(true, "bridge-test");
     Map<String, byte[]> patchedClasses = new HashMap<>(classes);
     patchedClasses.put(BRIDGE_ENTRY, patched);
     patchedClasses.put(ECONOMY_ENTRY, postCommitEconomyFixture(classes.get(ECONOMY_ENTRY)));
@@ -104,7 +104,8 @@ public final class AoTDSchedulerBridgeTransformerTest {
     long capabilities = ((Long) patchedBridge.getMethod("getNegotiatedCapabilities").invoke(null)).longValue();
     require(capabilities == 4095L, "unexpected negotiated capabilities: " + capabilities);
     patchedBridge.getMethod("requireProductionProfile").invoke(null);
-    Class<?> runtime = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge");
+    Class<?> runtime = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherAotdContract");
+    Class<?> runtimeState = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherAotdRuntimeState");
     long restoreSignalsBefore =
         ((Long) patchedBridge.getMethod("getEconomyRestoreCompleteSignalCount").invoke(null)).longValue();
     runtime.getMethod("publishAoTDEconomyRestoreComplete").invoke(null);
@@ -114,8 +115,8 @@ public final class AoTDSchedulerBridgeTransformerTest {
         "loader-local restore callback was not delivered exactly once");
     verifyCommittedForkDiagnosticsCannotSelectGlobalFallback(patchedLoader);
     patchedBridge.getMethod("publishRuntimeEpoch", long.class, long.class).invoke(null, 11L, 23L);
-    long campaignEpoch = ((Long) runtime.getMethod("getAoTDCampaignEpoch").invoke(null)).longValue();
-    long economyEpoch = ((Long) runtime.getMethod("getAoTDEconomyEpoch").invoke(null)).longValue();
+    long campaignEpoch = ((Long) runtimeState.getMethod("getAoTDCampaignEpoch").invoke(null)).longValue();
+    long economyEpoch = ((Long) runtimeState.getMethod("getAoTDEconomyEpoch").invoke(null)).longValue();
     require(campaignEpoch == 11L && economyEpoch == 23L,
         "runtime epoch publication failed: campaign=" + campaignEpoch + ", economy=" + economyEpoch);
     long globalToken =
@@ -129,7 +130,8 @@ public final class AoTDSchedulerBridgeTransformerTest {
             .longValue();
     patchedBridge.getMethod("publishRuntimeEpoch", long.class, long.class).invoke(null, 11L, 24L);
     patchedBridge.getMethod("afterGlobalBoundary", long.class, long.class).invoke(null, staleGlobalToken, 2L);
-    long staleGlobalBoundaries = ((Long) runtime.getMethod("getAoTDStaleGlobalBoundaryCount").invoke(null)).longValue();
+    long staleGlobalBoundaries =
+        ((Long) runtimeState.getMethod("getAoTDStaleGlobalBoundaryCount").invoke(null)).longValue();
     require(staleGlobalBoundaries == 1L, "stale global boundary was not rejected/accounted: " + staleGlobalBoundaries);
 
     Object market = new Object();
@@ -214,8 +216,8 @@ public final class AoTDSchedulerBridgeTransformerTest {
     boolean originalInitialized = initialized.getBoolean(null);
     boolean originalEnabled = enabled.getBoolean(null);
 
-    Field counter =
-        accessibleField(com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge.class, "DETACHED_CARGO_AOTD_DISPATCHES");
+    Field counter = accessibleField(com.fs.starfarer.api.StarsectorPrepatcherUiEconomyRuntime.class,
+        "DETACHED_CARGO_AOTD_DISPATCHES");
     Object originalCounter = counter.get(null);
     ThrowingOperations throwingOperations = new ThrowingOperations();
     ThrowingPhases throwingPhases = new ThrowingPhases();
@@ -235,7 +237,7 @@ public final class AoTDSchedulerBridgeTransformerTest {
       putStaticObject(operations, throwingOperations);
       putStaticObject(counter, throwingCounter);
 
-      boolean handled = com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge
+      boolean handled = com.fs.starfarer.api.StarsectorPrepatcherUiEconomyRuntime
           .shouldSkipVanillaCargoEconomyStep(economy, null, true, SyntheticMode.CARGO, null, null);
       if (!handled) globalFallbacks++;
 
@@ -356,7 +358,7 @@ public final class AoTDSchedulerBridgeTransformerTest {
     boolean restoreFactoryCall = false;
     for (AbstractInsnNode insn = initialize.instructions.getFirst(); insn != null; insn = insn.getNext()) {
       if (!(insn instanceof MethodInsnNode call) || call.getOpcode() != Opcodes.INVOKESTATIC) continue;
-      if ("com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge".equals(call.owner)
+      if ("com/fs/starfarer/api/StarsectorPrepatcherAotdContract".equals(call.owner)
           && "registerAoTDForkContract".equals(call.name)
           && ("(Ljava/lang/String;Ljava/lang/String;JLjava/util/function/Consumer;"
               + "Ljava/util/function/BiFunction;Ljava/lang/Runnable;)J").equals(call.desc))
@@ -381,7 +383,7 @@ public final class AoTDSchedulerBridgeTransformerTest {
     boolean localQueueCommit = false;
     for (AbstractInsnNode insn = afterMutation.instructions.getFirst(); insn != null; insn = insn.getNext()) {
       if (!(insn instanceof MethodInsnNode call) || call.getOpcode() != Opcodes.INVOKESTATIC) continue;
-      if ("com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge".equals(call.owner)
+      if ("com/fs/starfarer/api/StarsectorPrepatcherAotdRuntimeState".equals(call.owner)
           && "afterAoTDMarketMutation".equals(call.name))
         runtimeCommit = true;
       if (AoTDSchedulerBridgeTransformer.TARGET.equals(call.owner) && "acceptMarketMutation".equals(call.name))
@@ -401,19 +403,23 @@ public final class AoTDSchedulerBridgeTransformerTest {
       if ("afterGlobalBoundary".equals(method.name) && "(JJ)V".equals(method.desc)) afterGlobal = method;
     }
     require(publishEpoch != null, "publishRuntimeEpoch method missing");
-    require(calls(publishEpoch, "publishAoTDRuntimeEpoch"), "runtime epoch publication call missing");
+    require(calls(publishEpoch, "com/fs/starfarer/api/StarsectorPrepatcherAotdRuntimeState", "publishAoTDRuntimeEpoch"),
+        "runtime epoch publication call missing");
     require(runtimeCapabilities != null, "getRuntimeCapabilities method missing");
-    require(calls(runtimeCapabilities, "getAoTDNegotiatedCapabilities"),
-        "dynamic runtime capability query call missing");
+    require(calls(runtimeCapabilities, "com/fs/starfarer/api/StarsectorPrepatcherAotdContract",
+        "getAoTDNegotiatedCapabilities"), "dynamic runtime capability query call missing");
     require(beforeGlobal != null && afterGlobal != null, "global boundary methods missing");
-    require(calls(beforeGlobal, "beforeAoTDGlobalBoundary"), "runtime global begin call missing");
-    require(calls(afterGlobal, "afterAoTDGlobalBoundary"), "runtime global end call missing");
+    require(
+        calls(beforeGlobal, "com/fs/starfarer/api/StarsectorPrepatcherAotdRuntimeState", "beforeAoTDGlobalBoundary"),
+        "runtime global begin call missing");
+    require(calls(afterGlobal, "com/fs/starfarer/api/StarsectorPrepatcherAotdRuntimeState", "afterAoTDGlobalBoundary"),
+        "runtime global end call missing");
   }
 
-  private static boolean calls(MethodNode method, String name) {
+  private static boolean calls(MethodNode method, String owner, String name) {
     for (AbstractInsnNode insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
-      if (insn instanceof MethodInsnNode call && call.getOpcode() == Opcodes.INVOKESTATIC
-          && "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge".equals(call.owner) && name.equals(call.name))
+      if (insn instanceof MethodInsnNode call && call.getOpcode() == Opcodes.INVOKESTATIC && owner.equals(call.owner)
+          && name.equals(call.name))
         return true;
     }
     return false;

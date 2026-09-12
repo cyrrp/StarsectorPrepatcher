@@ -40,7 +40,7 @@ public final class AoTDEconomyRestoreActualAgentSmokeTest {
     require((capabilities & RESTORE_CAPABILITY) != 0L,
         "real fork negotiated without restore capability: 0x" + Long.toHexString(capabilities));
 
-    Class<?> runtime = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge", false, loader);
+    Class<?> runtime = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherAotdContract", false, loader);
     require(
         lifecycle.getClassLoader() == runtime.getClassLoader() && bridge.getClassLoader() == runtime.getClassLoader(),
         "CoreLifecycle/fork/runtime loader mismatch");

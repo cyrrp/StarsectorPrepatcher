@@ -83,7 +83,7 @@ public final class AoTDDetachedCargoContextTransformer implements ClassFileTrans
   private void disableRuntime(String reason) {
     if (runtimeLoader == null) return;
     try {
-      Class<?> bridge = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge", false, runtimeLoader);
+      Class<?> bridge = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherAotdContract", false, runtimeLoader);
       Method disable = bridge.getMethod("disableAoTDUiEconomyDispatch", String.class);
       disable.invoke(null, reason);
     } catch (Throwable ignored) {

@@ -23,7 +23,7 @@ public final class AoTDEconomyRestoreCompletionTransformer implements ClassFileT
   public static final String METHOD = EconomyRestoreCompletionSignal.METHOD;
   public static final String METHOD_DESC = EconomyRestoreCompletionSignal.METHOD_DESC;
 
-  private static final String RUNTIME_BINARY = "com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME_BINARY = "com.fs.starfarer.api.StarsectorPrepatcherAotdContract";
   private static final String STATUS_PROPERTY = "starsector.prepatcher.aotdEconomyRestoreCompletionPatch";
 
   private final boolean enabled;

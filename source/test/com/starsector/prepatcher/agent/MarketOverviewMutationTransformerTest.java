@@ -21,7 +21,7 @@ import com.starsector.prepatcher.agent.uieconomy.MarketOverviewMutationTransform
 /** Exact market-policy call-site, guard, idempotency and negative gate. */
 public final class MarketOverviewMutationTransformerTest {
   private static final String TARGET = MarketOverviewMutationTransformer.TARGET;
-  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime";
   private static final String MARKET_API = "com/fs/starfarer/api/campaign/econ/MarketAPI";
   private static final String MARKET_DESC = "L" + MARKET_API + ";";
   private static final String LEGACY_MARKET_FIELD = "String.interface$float";

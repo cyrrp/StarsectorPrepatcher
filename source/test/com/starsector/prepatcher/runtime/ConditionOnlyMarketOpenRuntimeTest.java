@@ -1,6 +1,7 @@
 package com.starsector.prepatcher.runtime;
 
 import com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge;
+import com.fs.starfarer.api.StarsectorPrepatcherUiEconomyRuntime;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 
 import javax.tools.JavaCompiler;
@@ -70,37 +71,39 @@ public final class ConditionOnlyMarketOpenRuntimeTest {
         Object emptyReach =
             reachClass.getConstructor(java.util.List.class).newInstance(java.util.Collections.emptyList());
         Object vanilla = economyClass.getConstructor(reachClass).newInstance(emptyReach);
-        require(StarsectorPrepatcherRuntimeBridge.shouldSkipConditionOnlyMarketOpenEconomyStep(vanilla, conditionOnly),
+        require(
+            StarsectorPrepatcherUiEconomyRuntime.shouldSkipConditionOnlyMarketOpenEconomyStep(vanilla, conditionOnly),
             "condition-only market outside economy was not skipped");
-        require(StarsectorPrepatcherRuntimeBridge.getConditionOnlyVanillaStepsSkipped() == 1L,
+        require(StarsectorPrepatcherUiEconomyRuntime.getConditionOnlyVanillaStepsSkipped() == 1L,
             "condition-only skip counter mismatch");
         marketClass.getMethod("setPlanetConditionMarketOnly", boolean.class).invoke(conditionOnly, false);
         Object colonizedReach = reachClass.getConstructor(java.util.List.class)
             .newInstance(java.util.Collections.singletonList(conditionOnly));
         Object colonizedEconomy = economyClass.getConstructor(reachClass).newInstance(colonizedReach);
-        require(!StarsectorPrepatcherRuntimeBridge.shouldSkipConditionOnlyMarketOpenEconomyStep(colonizedEconomy,
+        require(!StarsectorPrepatcherUiEconomyRuntime.shouldSkipConditionOnlyMarketOpenEconomyStep(colonizedEconomy,
             conditionOnly), "colonized live market still qualified for condition-only skip");
         marketClass.getMethod("setPlanetConditionMarketOnly", boolean.class).invoke(conditionOnly, true);
-        require(!StarsectorPrepatcherRuntimeBridge.shouldSkipConditionOnlyMarketOpenEconomyStep(vanilla, normal),
+        require(!StarsectorPrepatcherUiEconomyRuntime.shouldSkipConditionOnlyMarketOpenEconomyStep(vanilla, normal),
             "normal market was skipped");
 
         Object memberReach = reachClass.getConstructor(java.util.List.class)
             .newInstance(java.util.Collections.singletonList(conditionOnly));
         Object memberEconomy = economyClass.getConstructor(reachClass).newInstance(memberReach);
-        require(!StarsectorPrepatcherRuntimeBridge.shouldSkipConditionOnlyMarketOpenEconomyStep(memberEconomy,
+        require(!StarsectorPrepatcherUiEconomyRuntime.shouldSkipConditionOnlyMarketOpenEconomyStep(memberEconomy,
             conditionOnly), "condition-only market already in economy was skipped");
 
         Class<?> outerClass = Class.forName("fixture.OuterEconomy", true, loader);
         Object outer = outerClass.getConstructor(reachClass).newInstance(emptyReach);
-        require(!StarsectorPrepatcherRuntimeBridge.shouldSkipConditionOnlyMarketOpenEconomyStep(outer, conditionOnly),
+        require(
+            !StarsectorPrepatcherUiEconomyRuntime.shouldSkipConditionOnlyMarketOpenEconomyStep(outer, conditionOnly),
             "Economy subclass was treated as exact vanilla");
         Class<?> innerClass = Class.forName("fixture.InnerReachEconomy", true, loader);
         Object inner = innerClass.getConstructor(java.util.List.class).newInstance(java.util.Collections.emptyList());
         Object economyWithInnerSubclass = economyClass.getConstructor(reachClass).newInstance(inner);
-        require(!StarsectorPrepatcherRuntimeBridge
+        require(!StarsectorPrepatcherUiEconomyRuntime
             .shouldSkipConditionOnlyMarketOpenEconomyStep(economyWithInnerSubclass, conditionOnly),
             "ReachEconomy subclass was treated as exact vanilla");
-        require(!StarsectorPrepatcherRuntimeBridge.shouldSkipConditionOnlyMarketOpenEconomyStep(vanilla, null),
+        require(!StarsectorPrepatcherUiEconomyRuntime.shouldSkipConditionOnlyMarketOpenEconomyStep(vanilla, null),
             "null market was skipped");
       }
     } finally {

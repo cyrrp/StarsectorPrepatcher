@@ -35,7 +35,7 @@ public final class FasterRenderingLoaderSmokeTest {
   private static final String PRESENTATION_HOOKS = "com.fs.starfarer.api.StarsectorPrepatcherPresentationHooks";
   private static final String AGENT = "com.starsector.prepatcher.agent.PrepatcherAgent";
   private static final String RUNTIME_ENTRY_PREFIX = "com/fs/starfarer/api/StarsectorPrepatcher";
-  private static final int EXPECTED_RUNTIME_CLASS_COUNT = 113;
+  private static final int EXPECTED_RUNTIME_CLASS_COUNT = 116;
 
   private FasterRenderingLoaderSmokeTest() {}
 

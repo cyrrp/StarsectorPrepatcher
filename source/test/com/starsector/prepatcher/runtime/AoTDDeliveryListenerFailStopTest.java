@@ -1,5 +1,6 @@
 package com.starsector.prepatcher.runtime;
 
+import com.fs.starfarer.api.StarsectorPrepatcherAotdContract;
 import com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 
@@ -15,14 +16,14 @@ public final class AoTDDeliveryListenerFailStopTest {
     Path configFile = Files.createTempFile("prepatcher-aotd-delivery", ".properties");
     Files.writeString(configFile, "patch.aotdCleanDeficitPath=true\n");
     StarsectorPrepatcherRuntimeBridge.configure(PrepatcherConfig.load(configFile), configFile.getParent());
-    StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
+    StarsectorPrepatcherAotdContract.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
     AtomicInteger calls = new AtomicInteger();
     Consumer<Object> broken = ignored -> {
       calls.incrementAndGet();
       throw new IllegalAccessError("synthetic broken nestmate callback");
     };
 
-    long negotiated = StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract("aotd_theory_of_toolbox",
+    long negotiated = StarsectorPrepatcherAotdContract.registerAoTDForkContract("aotd_theory_of_toolbox",
         StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
         StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES, broken, (industry, ids) -> null,
         () -> {});
@@ -30,14 +31,14 @@ public final class AoTDDeliveryListenerFailStopTest {
         "delivery capability was not initially negotiated");
 
     Object market = new Object();
-    StarsectorPrepatcherRuntimeBridge.publishAoTDMarketTimeDelivered(market, 1f, 1);
-    StarsectorPrepatcherRuntimeBridge.publishAoTDMarketTimeDelivered(market, 1f, 1);
+    StarsectorPrepatcherAotdContract.publishAoTDMarketTimeDelivered(market, 1f, 1);
+    StarsectorPrepatcherAotdContract.publishAoTDMarketTimeDelivered(market, 1f, 1);
 
     require(calls.get() == 1, "broken callback was invoked more than once: " + calls.get());
-    long runtimeCapabilities = StarsectorPrepatcherRuntimeBridge.getAoTDNegotiatedCapabilities();
+    long runtimeCapabilities = StarsectorPrepatcherAotdContract.getAoTDNegotiatedCapabilities();
     require((runtimeCapabilities & StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_NATIVE_DELIVERY_EVENTS) == 0L,
         "delivery capability remained active after LinkageError");
-    String status = StarsectorPrepatcherRuntimeBridge.getAoTDForkContractStatus();
+    String status = StarsectorPrepatcherAotdContract.getAoTDForkContractStatus();
     require(status.contains("deliveryListener=disabled-linkage:java.lang.IllegalAccessError"),
         "missing disabled listener diagnostic: " + status);
     require(status.contains("callbackFailures=1"), "unexpected callback failure count: " + status);

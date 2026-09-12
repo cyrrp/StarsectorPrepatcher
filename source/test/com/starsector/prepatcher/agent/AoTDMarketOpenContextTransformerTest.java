@@ -24,7 +24,7 @@ public final class AoTDMarketOpenContextTransformerTest {
   private static final String TARGET = "com/fs/starfarer/campaign/CampaignEngine";
   private static final String ENTRY = TARGET + ".class";
   private static final String DESC = "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)V";
-  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime";
 
   private AoTDMarketOpenContextTransformerTest() {}
 

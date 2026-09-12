@@ -39,7 +39,7 @@ final class IndustryOverviewMutationGuard implements StructuredPatch<IndustryOve
   private static final String ECONOMY_API = "com/fs/starfarer/api/campaign/econ/EconomyAPI";
   private static final String GLOBAL = "com/fs/starfarer/api/Global";
   private static final String SECTOR_API = "com/fs/starfarer/api/campaign/SectorAPI";
-  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime";
 
   private static final String MARKET_DESC = "L" + MARKET_API + ";";
   private static final String PANEL_MARKET_FIELD = "market";

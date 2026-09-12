@@ -35,7 +35,7 @@ final class TradeMarketMutationRefresh implements StructuredPatch<TradeMarketMut
   private static final String MARKET_API = "com/fs/starfarer/api/campaign/econ/MarketAPI";
   private static final String ECONOMY_API = "com/fs/starfarer/api/campaign/econ/EconomyAPI";
   private static final String TRANSACTION = "com/fs/starfarer/api/campaign/PlayerMarketTransaction";
-  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime";
   private static final String LEGACY_MARKET_FIELD = "if.new$class";
   private static final String REPAIRED_MARKET_FIELD = "if_new$class";
   private static final String MARKET_DESC = "L" + MARKET + ";";

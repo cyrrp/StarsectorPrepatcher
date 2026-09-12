@@ -29,8 +29,8 @@ public final class TradeMutationPreparationRuntimeTest {
       Files.writeString(configFile, "patch.uiMarketMutationRefresh=true\n" + "patch.marketScheduler=false\n",
           StandardCharsets.UTF_8);
       StarsectorPrepatcherRuntimeBridge.configure(PrepatcherConfig.load(configFile), configFile.getParent());
-      StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
-      long negotiated = StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract("aotd_theory_of_toolbox",
+      StarsectorPrepatcherAotdContract.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
+      long negotiated = StarsectorPrepatcherAotdContract.registerAoTDForkContract("aotd_theory_of_toolbox",
           StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
           StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES, ignored -> {}, (industry, ids) -> null,
           () -> {});
@@ -40,20 +40,20 @@ public final class TradeMutationPreparationRuntimeTest {
       MarketAPI market = marketProxy("market-a");
       MarketAPI other = marketProxy("market-b");
       Method take =
-          StarsectorPrepatcherRuntimeBridge.class.getDeclaredMethod("takePreparedTradeMutation", Object.class);
+          StarsectorPrepatcherUiEconomyRuntime.class.getDeclaredMethod("takePreparedTradeMutation", Object.class);
       take.setAccessible(true);
       Method preparePolicy =
-          StarsectorPrepatcherRuntimeBridge.class.getDeclaredMethod("prepareUiMarketMutation", MarketAPI.class);
+          StarsectorPrepatcherUiEconomyRuntime.class.getDeclaredMethod("prepareUiMarketMutation", MarketAPI.class);
       preparePolicy.setAccessible(true);
 
-      StarsectorPrepatcherRuntimeBridge.prepareTradeMarketMutation(market);
+      StarsectorPrepatcherUiEconomyRuntime.prepareTradeMarketMutation(market);
       require((Boolean) take.invoke(null, market), "same-market prepared trade token was not consumed");
       require(!((Boolean) take.invoke(null, market)), "prepared trade token was not one-shot");
 
-      StarsectorPrepatcherRuntimeBridge.prepareTradeMarketMutation(market);
+      StarsectorPrepatcherUiEconomyRuntime.prepareTradeMarketMutation(market);
       require(!((Boolean) take.invoke(null, other)), "different market consumed prepared trade token");
 
-      StarsectorPrepatcherRuntimeBridge.prepareTradeMarketMutation(market);
+      StarsectorPrepatcherUiEconomyRuntime.prepareTradeMarketMutation(market);
       AtomicBoolean crossThread = new AtomicBoolean(true);
       Thread thread = new Thread(() -> {
         try {
@@ -67,18 +67,18 @@ public final class TradeMutationPreparationRuntimeTest {
       require(!crossThread.get(), "cross-thread trade token was visible");
       require((Boolean) take.invoke(null, market), "cross-thread probe corrupted owning-thread token");
 
-      StarsectorPrepatcherRuntimeBridge.prepareTradeMarketMutation(market);
-      StarsectorPrepatcherRuntimeBridge.publishAoTDRuntimeEpoch(2L, 2L);
+      StarsectorPrepatcherUiEconomyRuntime.prepareTradeMarketMutation(market);
+      StarsectorPrepatcherAotdRuntimeState.publishAoTDRuntimeEpoch(2L, 2L);
       require(!((Boolean) take.invoke(null, market)), "runtime epoch change did not invalidate trade token");
 
-      StarsectorPrepatcherRuntimeBridge.prepareTradeMarketMutation(market);
+      StarsectorPrepatcherUiEconomyRuntime.prepareTradeMarketMutation(market);
       preparePolicy.invoke(null, market);
       require(!((Boolean) take.invoke(null, market)), "unrelated policy mutation did not clear stale trade token");
 
       AtomicInteger doubleSteps = new AtomicInteger();
       EconomyAPI economy = economyProxy(doubleSteps);
-      StarsectorPrepatcherRuntimeBridge.prepareTradeMarketMutation(market);
-      boolean handled = StarsectorPrepatcherRuntimeBridge.shouldHandleTradeMarketMutationEconomyStep(economy, market,
+      StarsectorPrepatcherUiEconomyRuntime.prepareTradeMarketMutation(market);
+      boolean handled = StarsectorPrepatcherUiEconomyRuntime.shouldHandleTradeMarketMutationEconomyStep(economy, market,
           throwingTransaction(market, Failure.MARKET, null, null));
       require(!handled, "throwing transaction market getter was handled");
       require(doubleSteps.get() == 0, "trade guard invoked doubleStep instead of returning false");
@@ -93,7 +93,7 @@ public final class TradeMutationPreparationRuntimeTest {
           new TradeFailure("isCommodityStack", Failure.NONE, cargoWithStackThrowing("isCommodityStack"), null),
           new TradeFailure("getSize", Failure.NONE, cargoWithStackThrowing("getSize"), null),
           new TradeFailure("getCommodityId", Failure.NONE, cargoWithStackThrowing("getCommodityId"), null))) {
-        StarsectorPrepatcherRuntimeBridge.prepareTradeMarketMutation(market);
+        StarsectorPrepatcherUiEconomyRuntime.prepareTradeMarketMutation(market);
         invokeGuarded(economy, market, throwingTransaction(market, fixture.failure, fixture.bought, fixture.sold));
         expectedSteps++;
         require(doubleSteps.get() == expectedSteps,
@@ -102,7 +102,7 @@ public final class TradeMutationPreparationRuntimeTest {
       }
 
       require(
-          !StarsectorPrepatcherRuntimeBridge.shouldHandleTradeMarketMutationEconomyStep(null, market,
+          !StarsectorPrepatcherUiEconomyRuntime.shouldHandleTradeMarketMutationEconomyStep(null, market,
               throwingTransaction(market, Failure.NONE, null, null)),
           "null economy was incorrectly handled instead of preserving invoke semantics");
     } finally {
@@ -141,7 +141,8 @@ public final class TradeMutationPreparationRuntimeTest {
   }
 
   private static void invokeGuarded(EconomyAPI economy, MarketAPI market, PlayerMarketTransaction transaction) {
-    if (!StarsectorPrepatcherRuntimeBridge.shouldHandleTradeMarketMutationEconomyStep(economy, market, transaction)) {
+    if (!StarsectorPrepatcherUiEconomyRuntime.shouldHandleTradeMarketMutationEconomyStep(economy, market,
+        transaction)) {
       economy.doubleStep();
     }
   }

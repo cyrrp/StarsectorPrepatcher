@@ -23,11 +23,12 @@ final class AoTDSchedulerBridge implements StructuredPatch<AoTDSchedulerBridge.P
   private static final String STATE_DESC = "Ldata/kaysaar/aotd/tot/compat/SchedulerBridge$State;";
   private static final String INITIALIZE_DESC = "()" + STATE_DESC;
   private static final String ACTIVATE_DESC = "(J)" + STATE_DESC;
-  private static final String RUNTIME_BRIDGE = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME_CONTRACT = "com/fs/starfarer/api/StarsectorPrepatcherAotdContract";
+  private static final String RUNTIME_STATE = "com/fs/starfarer/api/StarsectorPrepatcherAotdRuntimeState";
   static final String PATCH_FIELD = "smo$patched$aotdSchedulerBridge";
   static final String PATCH_VALUE = "StarsectorPrepatcher:aotd-bridge-v10";
 
-  record Rewritten(MethodNode method, String runtimeName) {
+  record Rewritten(MethodNode method, String runtimeOwner, String runtimeName) {
   }
 
   record Plan(List<FieldNode> classFields, List<Rewritten> rewritten) {
@@ -41,23 +42,27 @@ final class AoTDSchedulerBridge implements StructuredPatch<AoTDSchedulerBridge.P
     require(node, "deficitResolverFunction", "()Ljava/util/function/BiFunction;");
     require(node, "economyRestoreCompleteSignal", "()Ljava/lang/Runnable;");
     List<Rewritten> rewritten = new ArrayList<>();
-    rewritten.add(new Rewritten(requireStatic(initialize), "registerAoTDForkContract"));
+    rewritten.add(new Rewritten(requireStatic(initialize), RUNTIME_CONTRACT, "registerAoTDForkContract"));
     rewritten.add(new Rewritten(requireStatic(node, "getDeliveredMarketGeneration", "(Ljava/lang/Object;)J"),
-        "getAoTDMarketDeliveredGeneration"));
+        RUNTIME_STATE, "getAoTDMarketDeliveredGeneration"));
     rewritten.add(new Rewritten(requireStatic(node, "getLastMarketDeliverySequence", "(Ljava/lang/Object;)J"),
-        "getAoTDMarketLastDeliverySequence"));
+        RUNTIME_STATE, "getAoTDMarketLastDeliverySequence"));
     rewritten.add(new Rewritten(requireStatic(node, "getLastMarketDeliveredAmount", "(Ljava/lang/Object;)F"),
-        "getAoTDMarketLastDeliveredAmount"));
+        RUNTIME_STATE, "getAoTDMarketLastDeliveredAmount"));
     rewritten.add(new Rewritten(requireStatic(node, "getMarketStructuralGeneration", "(Ljava/lang/Object;)J"),
-        "getAoTDMarketStructuralGeneration"));
-    rewritten.add(new Rewritten(requireStatic(node, "beforeMarketMutation", "(Ljava/lang/Object;I)J"),
+        RUNTIME_STATE, "getAoTDMarketStructuralGeneration"));
+    rewritten.add(new Rewritten(requireStatic(node, "beforeMarketMutation", "(Ljava/lang/Object;I)J"), RUNTIME_STATE,
         "beforeAoTDMarketMutation"));
-    rewritten.add(new Rewritten(requireStatic(node, "afterMarketMutation", "(JLjava/lang/Object;IJ)V"),
+    rewritten.add(new Rewritten(requireStatic(node, "afterMarketMutation", "(JLjava/lang/Object;IJ)V"), RUNTIME_STATE,
         "afterAoTDMarketMutation"));
-    rewritten.add(new Rewritten(requireStatic(node, "publishRuntimeEpoch", "(JJ)V"), "publishAoTDRuntimeEpoch"));
-    rewritten.add(new Rewritten(requireStatic(node, "getRuntimeCapabilities", "()J"), "getAoTDNegotiatedCapabilities"));
-    rewritten.add(new Rewritten(requireStatic(node, "beforeGlobalBoundary", "(IZ)J"), "beforeAoTDGlobalBoundary"));
-    rewritten.add(new Rewritten(requireStatic(node, "afterGlobalBoundary", "(JJ)V"), "afterAoTDGlobalBoundary"));
+    rewritten.add(
+        new Rewritten(requireStatic(node, "publishRuntimeEpoch", "(JJ)V"), RUNTIME_STATE, "publishAoTDRuntimeEpoch"));
+    rewritten.add(new Rewritten(requireStatic(node, "getRuntimeCapabilities", "()J"), RUNTIME_CONTRACT,
+        "getAoTDNegotiatedCapabilities"));
+    rewritten.add(
+        new Rewritten(requireStatic(node, "beforeGlobalBoundary", "(IZ)J"), RUNTIME_STATE, "beforeAoTDGlobalBoundary"));
+    rewritten.add(
+        new Rewritten(requireStatic(node, "afterGlobalBoundary", "(JJ)V"), RUNTIME_STATE, "afterAoTDGlobalBoundary"));
     return Match.plan(new Plan(node.fields, rewritten));
   }
 
@@ -65,14 +70,14 @@ final class AoTDSchedulerBridge implements StructuredPatch<AoTDSchedulerBridge.P
   public PatchReport mutate(Plan plan) {
     List<Rewritten> rewritten = plan.rewritten();
     rewrite(rewritten.get(0).method(), buildInitializeBody(), 7, 0);
-    rewrite(rewritten.get(1).method(), directObjectLong("getAoTDMarketDeliveredGeneration"), 1, 1);
-    rewrite(rewritten.get(2).method(), directObjectLong("getAoTDMarketLastDeliverySequence"), 1, 1);
-    rewrite(rewritten.get(3).method(), directObjectFloat("getAoTDMarketLastDeliveredAmount"), 1, 1);
-    rewrite(rewritten.get(4).method(), directObjectLong("getAoTDMarketStructuralGeneration"), 1, 1);
+    rewrite(rewritten.get(1).method(), directObjectLong(RUNTIME_STATE, "getAoTDMarketDeliveredGeneration"), 1, 1);
+    rewrite(rewritten.get(2).method(), directObjectLong(RUNTIME_STATE, "getAoTDMarketLastDeliverySequence"), 1, 1);
+    rewrite(rewritten.get(3).method(), directObjectFloat(RUNTIME_STATE, "getAoTDMarketLastDeliveredAmount"), 1, 1);
+    rewrite(rewritten.get(4).method(), directObjectLong(RUNTIME_STATE, "getAoTDMarketStructuralGeneration"), 1, 1);
     rewrite(rewritten.get(5).method(), directBeforeMutation(), 2, 2);
     rewrite(rewritten.get(6).method(), directAfterMutation(), 6, 6);
     rewrite(rewritten.get(7).method(), directPublishRuntimeEpoch(), 4, 4);
-    rewrite(rewritten.get(8).method(), directNoArgLong("getAoTDNegotiatedCapabilities"), 2, 0);
+    rewrite(rewritten.get(8).method(), directNoArgLong(RUNTIME_CONTRACT, "getAoTDNegotiatedCapabilities"), 2, 0);
     rewrite(rewritten.get(9).method(), directBeforeGlobalBoundary(), 2, 2);
     rewrite(rewritten.get(10).method(), directAfterGlobalBoundary(), 4, 4);
 
@@ -93,7 +98,7 @@ final class AoTDSchedulerBridge implements StructuredPatch<AoTDSchedulerBridge.P
       boolean found = false;
       for (AbstractInsnNode instruction : entry.method().instructions) {
         if (instruction instanceof MethodInsnNode call && call.getOpcode() == Opcodes.INVOKESTATIC
-            && RUNTIME_BRIDGE.equals(call.owner) && entry.runtimeName().equals(call.name)) {
+            && entry.runtimeOwner().equals(call.owner) && entry.runtimeName().equals(call.name)) {
           found = true;
           break;
         }
@@ -114,7 +119,7 @@ final class AoTDSchedulerBridge implements StructuredPatch<AoTDSchedulerBridge.P
         "()Ljava/util/function/BiFunction;", false));
     code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, TARGET, "economyRestoreCompleteSignal", "()Ljava/lang/Runnable;",
         false));
-    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE, "registerAoTDForkContract",
+    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_CONTRACT, "registerAoTDForkContract",
         "(Ljava/lang/String;Ljava/lang/String;JLjava/util/function/Consumer;"
             + "Ljava/util/function/BiFunction;Ljava/lang/Runnable;)J",
         false));
@@ -123,25 +128,25 @@ final class AoTDSchedulerBridge implements StructuredPatch<AoTDSchedulerBridge.P
     return code;
   }
 
-  private static InsnList directNoArgLong(String name) {
+  private static InsnList directNoArgLong(String owner, String name) {
     InsnList code = new InsnList();
-    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE, name, "()J", false));
+    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, owner, name, "()J", false));
     code.add(new InsnNode(Opcodes.LRETURN));
     return code;
   }
 
-  private static InsnList directObjectLong(String name) {
+  private static InsnList directObjectLong(String owner, String name) {
     InsnList code = new InsnList();
     code.add(new VarInsnNode(Opcodes.ALOAD, 0));
-    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE, name, "(Ljava/lang/Object;)J", false));
+    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, owner, name, "(Ljava/lang/Object;)J", false));
     code.add(new InsnNode(Opcodes.LRETURN));
     return code;
   }
 
-  private static InsnList directObjectFloat(String name) {
+  private static InsnList directObjectFloat(String owner, String name) {
     InsnList code = new InsnList();
     code.add(new VarInsnNode(Opcodes.ALOAD, 0));
-    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE, name, "(Ljava/lang/Object;)F", false));
+    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, owner, name, "(Ljava/lang/Object;)F", false));
     code.add(new InsnNode(Opcodes.FRETURN));
     return code;
   }
@@ -150,7 +155,7 @@ final class AoTDSchedulerBridge implements StructuredPatch<AoTDSchedulerBridge.P
     InsnList code = new InsnList();
     code.add(new VarInsnNode(Opcodes.ALOAD, 0));
     code.add(new VarInsnNode(Opcodes.ILOAD, 1));
-    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE, "beforeAoTDMarketMutation",
+    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_STATE, "beforeAoTDMarketMutation",
         "(Ljava/lang/Object;I)J", false));
     code.add(new InsnNode(Opcodes.LRETURN));
     return code;
@@ -162,7 +167,7 @@ final class AoTDSchedulerBridge implements StructuredPatch<AoTDSchedulerBridge.P
     code.add(new VarInsnNode(Opcodes.ALOAD, 2));
     code.add(new VarInsnNode(Opcodes.ILOAD, 3));
     code.add(new VarInsnNode(Opcodes.LLOAD, 4));
-    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE, "afterAoTDMarketMutation",
+    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_STATE, "afterAoTDMarketMutation",
         "(JLjava/lang/Object;IJ)V", false));
     // Preserve the fork-local dirty queue update after the runtime committed
     // structural generation. This is a direct same-loader call, not reflection.
@@ -170,7 +175,7 @@ final class AoTDSchedulerBridge implements StructuredPatch<AoTDSchedulerBridge.P
     code.add(new VarInsnNode(Opcodes.ILOAD, 3));
     code.add(new VarInsnNode(Opcodes.LLOAD, 4));
     code.add(new VarInsnNode(Opcodes.ALOAD, 2));
-    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE, "getAoTDMarketStructuralGeneration",
+    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_STATE, "getAoTDMarketStructuralGeneration",
         "(Ljava/lang/Object;)J", false));
     code.add(
         new MethodInsnNode(Opcodes.INVOKESTATIC, TARGET, "acceptMarketMutation", "(Ljava/lang/Object;IJJ)V", false));
@@ -183,7 +188,7 @@ final class AoTDSchedulerBridge implements StructuredPatch<AoTDSchedulerBridge.P
     InsnList code = new InsnList();
     code.add(new VarInsnNode(Opcodes.LLOAD, 0));
     code.add(new VarInsnNode(Opcodes.LLOAD, 2));
-    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE, "publishAoTDRuntimeEpoch", "(JJ)V", false));
+    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_STATE, "publishAoTDRuntimeEpoch", "(JJ)V", false));
     code.add(new InsnNode(Opcodes.RETURN));
     return code;
   }
@@ -192,7 +197,7 @@ final class AoTDSchedulerBridge implements StructuredPatch<AoTDSchedulerBridge.P
     InsnList code = new InsnList();
     code.add(new VarInsnNode(Opcodes.ILOAD, 0));
     code.add(new VarInsnNode(Opcodes.ILOAD, 1));
-    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE, "beforeAoTDGlobalBoundary", "(IZ)J", false));
+    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_STATE, "beforeAoTDGlobalBoundary", "(IZ)J", false));
     code.add(new InsnNode(Opcodes.LRETURN));
     return code;
   }
@@ -201,7 +206,7 @@ final class AoTDSchedulerBridge implements StructuredPatch<AoTDSchedulerBridge.P
     InsnList code = new InsnList();
     code.add(new VarInsnNode(Opcodes.LLOAD, 0));
     code.add(new VarInsnNode(Opcodes.LLOAD, 2));
-    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_BRIDGE, "afterAoTDGlobalBoundary", "(JJ)V", false));
+    code.add(new MethodInsnNode(Opcodes.INVOKESTATIC, RUNTIME_STATE, "afterAoTDGlobalBoundary", "(JJ)V", false));
     code.add(new InsnNode(Opcodes.RETURN));
     return code;
   }

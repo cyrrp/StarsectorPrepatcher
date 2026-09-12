@@ -1,5 +1,6 @@
 package com.starsector.prepatcher.runtime;
 
+import com.fs.starfarer.api.StarsectorPrepatcherAotdContract;
 import com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 
@@ -18,21 +19,21 @@ public final class AoTDEconomyRestoreRuntimeTest {
       Files.writeString(configFile, "patch.aotdCleanDeficitPath=true\n" + "patch.aotdEconomyRestoreCoordination=true\n"
           + "patch.uiMarketMutationRefresh=false\n", StandardCharsets.UTF_8);
       StarsectorPrepatcherRuntimeBridge.configure(PrepatcherConfig.load(configFile), configFile.getParent());
-      StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
+      StarsectorPrepatcherAotdContract.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
 
       AtomicInteger completed = new AtomicInteger();
       long negotiated = register(completed::incrementAndGet);
       require(negotiated == StarsectorPrepatcherRuntimeBridge.AOTD_REQUIRED_CAPABILITIES,
           "unexpected required profile: 0x" + Long.toHexString(negotiated));
 
-      StarsectorPrepatcherRuntimeBridge.publishAoTDEconomyRestoreComplete();
-      StarsectorPrepatcherRuntimeBridge.publishAoTDEconomyRestoreComplete();
+      StarsectorPrepatcherAotdContract.publishAoTDEconomyRestoreComplete();
+      StarsectorPrepatcherAotdContract.publishAoTDEconomyRestoreComplete();
       require(completed.get() == 2, "successful restore callback count changed: " + completed.get());
-      require(StarsectorPrepatcherRuntimeBridge.getAoTDEconomyRestoreSignalCount() == 2L,
+      require(StarsectorPrepatcherAotdContract.getAoTDEconomyRestoreSignalCount() == 2L,
           "successful signal count changed");
-      require(StarsectorPrepatcherRuntimeBridge.getAoTDEconomyRestoreCompletionCount() == 2L,
+      require(StarsectorPrepatcherAotdContract.getAoTDEconomyRestoreCompletionCount() == 2L,
           "successful completion count changed");
-      require(StarsectorPrepatcherRuntimeBridge.getAoTDEconomyRestoreFailureCount() == 0L,
+      require(StarsectorPrepatcherAotdContract.getAoTDEconomyRestoreFailureCount() == 0L,
           "successful callbacks recorded failures");
 
       AtomicInteger ordinaryFailures = new AtomicInteger();
@@ -41,14 +42,14 @@ public final class AoTDEconomyRestoreRuntimeTest {
         throw new IllegalStateException("synthetic recoverable restore failure");
       });
       for (int i = 0; i < 5; i++) {
-        StarsectorPrepatcherRuntimeBridge.publishAoTDEconomyRestoreComplete();
+        StarsectorPrepatcherAotdContract.publishAoTDEconomyRestoreComplete();
       }
       require(ordinaryFailures.get() == 5, "ordinary callback failures were not retryable");
       require(
-          (StarsectorPrepatcherRuntimeBridge.getAoTDNegotiatedCapabilities()
+          (StarsectorPrepatcherAotdContract.getAoTDNegotiatedCapabilities()
               & StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_ECONOMY_RESTORE_COORDINATION) != 0L,
           "ordinary callback failure removed restore capability");
-      require(StarsectorPrepatcherRuntimeBridge.getAoTDEconomyRestoreFailureCount() == 5L,
+      require(StarsectorPrepatcherAotdContract.getAoTDEconomyRestoreFailureCount() == 5L,
           "ordinary failure counter changed");
 
       AtomicInteger linkageFailures = new AtomicInteger();
@@ -56,10 +57,10 @@ public final class AoTDEconomyRestoreRuntimeTest {
         linkageFailures.incrementAndGet();
         throw new IllegalAccessError("synthetic broken restore callback");
       });
-      StarsectorPrepatcherRuntimeBridge.publishAoTDEconomyRestoreComplete();
-      StarsectorPrepatcherRuntimeBridge.publishAoTDEconomyRestoreComplete();
+      StarsectorPrepatcherAotdContract.publishAoTDEconomyRestoreComplete();
+      StarsectorPrepatcherAotdContract.publishAoTDEconomyRestoreComplete();
       require(linkageFailures.get() == 1, "linkage-broken callback was invoked more than once");
-      long afterLinkage = StarsectorPrepatcherRuntimeBridge.getAoTDNegotiatedCapabilities();
+      long afterLinkage = StarsectorPrepatcherAotdContract.getAoTDNegotiatedCapabilities();
       require(
           afterLinkage == (beforeLinkage
               & ~StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_ECONOMY_RESTORE_COORDINATION),
@@ -67,9 +68,9 @@ public final class AoTDEconomyRestoreRuntimeTest {
               + Long.toHexString(beforeLinkage) + ", after=0x" + Long.toHexString(afterLinkage));
       require((afterLinkage & StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_NATIVE_DELIVERY_EVENTS) != 0L,
           "LinkageError incorrectly removed delivery capability");
-      require(StarsectorPrepatcherRuntimeBridge.getAoTDEconomyRestoreFailureCount() == 6L,
+      require(StarsectorPrepatcherAotdContract.getAoTDEconomyRestoreFailureCount() == 6L,
           "linkage failure counter changed");
-      String status = StarsectorPrepatcherRuntimeBridge.getAoTDForkContractStatus();
+      String status = StarsectorPrepatcherAotdContract.getAoTDForkContractStatus();
       require(status.contains("economyRestoreListener=disabled-linkage:java.lang.IllegalAccessError"),
           "missing restore-listener downgrade diagnostic: " + status);
 
@@ -82,7 +83,7 @@ public final class AoTDEconomyRestoreRuntimeTest {
   }
 
   private static long register(Runnable restoreListener) {
-    return StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract("aotd_theory_of_toolbox",
+    return StarsectorPrepatcherAotdContract.registerAoTDForkContract("aotd_theory_of_toolbox",
         StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
         StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES, ignored -> {}, (industry, ids) -> null,
         restoreListener);

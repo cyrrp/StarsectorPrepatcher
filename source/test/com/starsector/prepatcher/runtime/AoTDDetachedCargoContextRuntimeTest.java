@@ -1,6 +1,8 @@
 package com.starsector.prepatcher.runtime;
 
+import com.fs.starfarer.api.StarsectorPrepatcherAotdContract;
 import com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge;
+import com.fs.starfarer.api.StarsectorPrepatcherUiEconomyRuntime;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 
 import javax.tools.JavaCompiler;
@@ -27,26 +29,26 @@ public final class AoTDDetachedCargoContextRuntimeTest {
         StandardCharsets.UTF_8);
     PrepatcherConfig config = PrepatcherConfig.load(configFile);
     StarsectorPrepatcherRuntimeBridge.configure(config, configFile.getParent());
-    require(!StarsectorPrepatcherRuntimeBridge.isVanillaDetachedCargoEconomyContractOperational(),
+    require(!StarsectorPrepatcherUiEconomyRuntime.isVanillaDetachedCargoEconomyContractOperational(),
         "vanilla economy contract started enabled before structural proof");
-    StarsectorPrepatcherRuntimeBridge.setVanillaDetachedCargoEconomyContract(true, "runtime-test");
-    StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
-    require(StarsectorPrepatcherRuntimeBridge.isVanillaDetachedCargoEconomyContractOperational(),
+    StarsectorPrepatcherUiEconomyRuntime.setVanillaDetachedCargoEconomyContract(true, "runtime-test");
+    StarsectorPrepatcherAotdContract.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
+    require(StarsectorPrepatcherUiEconomyRuntime.isVanillaDetachedCargoEconomyContractOperational(),
         "vanilla economy contract did not activate");
 
     testVanillaEligibility();
-    long negotiated = StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract("aotd_theory_of_toolbox",
+    long negotiated = StarsectorPrepatcherAotdContract.registerAoTDForkContract("aotd_theory_of_toolbox",
         StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
         StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES, ignored -> {}, (industry, ids) -> null,
         () -> {});
     require((negotiated & StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_UI_ECONOMY_DISPATCH) != 0L,
         "explicit UI dispatch capability was not negotiated");
 
-    StarsectorPrepatcherRuntimeBridge.disableAoTDUiEconomyDispatch("runtime-test");
-    require(!StarsectorPrepatcherRuntimeBridge.shouldSkipVanillaDetachedCargoEconomyStep(new Object(), true, Mode.CARGO,
-        null, null), "disabled patch still evaluated detached Cargo as skippable");
+    StarsectorPrepatcherAotdContract.disableAoTDUiEconomyDispatch("runtime-test");
+    require(!StarsectorPrepatcherUiEconomyRuntime.shouldSkipVanillaDetachedCargoEconomyStep(new Object(), true,
+        Mode.CARGO, null, null), "disabled patch still evaluated detached Cargo as skippable");
     require(
-        (StarsectorPrepatcherRuntimeBridge.getAoTDNegotiatedCapabilities()
+        (StarsectorPrepatcherAotdContract.getAoTDNegotiatedCapabilities()
             & StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_UI_ECONOMY_DISPATCH) == 0L,
         "fail-stop downgrade retained UI dispatch capability");
 
@@ -90,30 +92,30 @@ public final class AoTDDetachedCargoContextRuntimeTest {
         Object lootCargo =
             Class.forName("com.fs.starfarer.campaign.fleet.CargoData", true, loader).getConstructor().newInstance();
 
-        require(StarsectorPrepatcherRuntimeBridge.shouldSkipVanillaDetachedCargoEconomyStep(vanilla, true, Mode.CARGO,
-            null, null), "exact vanilla Economy/ReachEconomy was not skipped");
-        require(StarsectorPrepatcherRuntimeBridge.getDetachedCargoVanillaStepsSkipped() == 1L,
+        require(StarsectorPrepatcherUiEconomyRuntime.shouldSkipVanillaDetachedCargoEconomyStep(vanilla, true,
+            Mode.CARGO, null, null), "exact vanilla Economy/ReachEconomy was not skipped");
+        require(StarsectorPrepatcherUiEconomyRuntime.getDetachedCargoVanillaStepsSkipped() == 1L,
             "vanilla skip counter mismatch");
-        require(StarsectorPrepatcherRuntimeBridge.shouldSkipVanillaDetachedCargoEconomyStep(vanilla, true, Mode.LOOT,
+        require(StarsectorPrepatcherUiEconomyRuntime.shouldSkipVanillaDetachedCargoEconomyStep(vanilla, true, Mode.LOOT,
             null, lootCargo), "exact vanilla loot transfer was not skipped");
-        require(StarsectorPrepatcherRuntimeBridge.getLootTransferVanillaStepsSkipped() == 1L,
+        require(StarsectorPrepatcherUiEconomyRuntime.getLootTransferVanillaStepsSkipped() == 1L,
             "loot-transfer skip counter mismatch");
-        require(!StarsectorPrepatcherRuntimeBridge.shouldSkipVanillaDetachedCargoEconomyStep(vanilla, false, Mode.CARGO,
-            null, null), "non-synthetic vanilla Cargo was skipped");
-        require(!StarsectorPrepatcherRuntimeBridge.shouldSkipVanillaDetachedCargoEconomyStep(vanilla, true, Mode.MARKET,
-            null, null), "non-Cargo vanilla market was skipped");
+        require(!StarsectorPrepatcherUiEconomyRuntime.shouldSkipVanillaDetachedCargoEconomyStep(vanilla, false,
+            Mode.CARGO, null, null), "non-synthetic vanilla Cargo was skipped");
+        require(!StarsectorPrepatcherUiEconomyRuntime.shouldSkipVanillaDetachedCargoEconomyStep(vanilla, true,
+            Mode.MARKET, null, null), "non-Cargo vanilla market was skipped");
 
         Class<?> outerClass = Class.forName("fixture.OuterEconomy", true, loader);
         Object outer = outerClass.getConstructor(reachClass).newInstance(reach);
-        require(!StarsectorPrepatcherRuntimeBridge.shouldSkipVanillaDetachedCargoEconomyStep(outer, true, Mode.CARGO,
+        require(!StarsectorPrepatcherUiEconomyRuntime.shouldSkipVanillaDetachedCargoEconomyStep(outer, true, Mode.CARGO,
             null, null), "Economy subclass was incorrectly treated as vanilla");
 
         Class<?> innerClass = Class.forName("fixture.InnerReachEconomy", true, loader);
         Object innerReach = innerClass.getConstructor().newInstance();
         Object inner = economyClass.getConstructor(reachClass).newInstance(innerReach);
-        require(!StarsectorPrepatcherRuntimeBridge.shouldSkipVanillaDetachedCargoEconomyStep(inner, true, Mode.CARGO,
+        require(!StarsectorPrepatcherUiEconomyRuntime.shouldSkipVanillaDetachedCargoEconomyStep(inner, true, Mode.CARGO,
             null, null), "ReachEconomy subclass was incorrectly treated as vanilla");
-        require(StarsectorPrepatcherRuntimeBridge.getDetachedCargoUnknownEconomyFallbacks() == 2L,
+        require(StarsectorPrepatcherUiEconomyRuntime.getDetachedCargoUnknownEconomyFallbacks() == 2L,
             "unknown-economy fallback counter mismatch");
       }
     } finally {

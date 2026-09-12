@@ -1,6 +1,8 @@
 package com.starsector.prepatcher.runtime;
 
+import com.fs.starfarer.api.StarsectorPrepatcherAotdContract;
 import com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge;
+import com.fs.starfarer.api.StarsectorPrepatcherUiEconomyRuntime;
 import com.fs.starfarer.api.campaign.econ.MarketAPI;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 
@@ -30,9 +32,9 @@ public final class AoTDExplicitUiEconomyDispatchRuntimeTest {
               + "patch.vanillaMarketOpenLocalization=true\n" + "patch.uiMarketMutationRefresh=true\n",
           StandardCharsets.UTF_8);
       StarsectorPrepatcherRuntimeBridge.configure(PrepatcherConfig.load(configFile), configFile.getParent());
-      StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
+      StarsectorPrepatcherAotdContract.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
 
-      long negotiated = StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract("aotd_theory_of_toolbox",
+      long negotiated = StarsectorPrepatcherAotdContract.registerAoTDForkContract("aotd_theory_of_toolbox",
           StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
           StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES, ignored -> {}, (industry, ids) -> null,
           () -> {});
@@ -42,29 +44,29 @@ public final class AoTDExplicitUiEconomyDispatchRuntimeTest {
       MarketAPI market = marketFixture();
       AoTDEconomy economy = new AoTDEconomy();
 
-      require(StarsectorPrepatcherRuntimeBridge.shouldHandleVanillaMarketOpenEconomyStep(economy, market),
+      require(StarsectorPrepatcherUiEconomyRuntime.shouldHandleVanillaMarketOpenEconomyStep(economy, market),
           "market-open action was not dispatched");
       requireAction(economy, 1, market, 0L, null, "market-open");
 
-      require(StarsectorPrepatcherRuntimeBridge.shouldSkipVanillaCargoEconomyStep(economy, market, false, Mode.CARGO,
+      require(StarsectorPrepatcherUiEconomyRuntime.shouldSkipVanillaCargoEconomyStep(economy, market, false, Mode.CARGO,
           null, null), "live Cargo action was not dispatched");
       requireAction(economy, 2, market, 2L, null, "live Cargo");
 
-      require(StarsectorPrepatcherRuntimeBridge.shouldSkipVanillaCargoEconomyStep(economy, null, true, Mode.CARGO, null,
-          null), "synthetic Cargo action was not dispatched");
+      require(StarsectorPrepatcherUiEconomyRuntime.shouldSkipVanillaCargoEconomyStep(economy, null, true, Mode.CARGO,
+          null, null), "synthetic Cargo action was not dispatched");
       requireAction(economy, 2, null, 1L, null, "synthetic Cargo");
 
-      Method record = StarsectorPrepatcherRuntimeBridge.class.getDeclaredMethod("recordUiMarketMutation", Object.class,
-          int.class, int.class, String[].class);
+      Method record = StarsectorPrepatcherUiEconomyRuntime.class.getDeclaredMethod("recordUiMarketMutation",
+          Object.class, int.class, int.class, String[].class);
       record.setAccessible(true);
       Method take =
-          StarsectorPrepatcherRuntimeBridge.class.getDeclaredMethod("takeUiMarketMutationContext", Object.class);
+          StarsectorPrepatcherUiEconomyRuntime.class.getDeclaredMethod("takeUiMarketMutationContext", Object.class);
       take.setAccessible(true);
       int reason = StarsectorPrepatcherRuntimeBridge.MUTATION_REASON_TRADE_TRANSACTION;
       int scope = StarsectorPrepatcherRuntimeBridge.REFRESH_SCOPE_LOCAL_COMMODITIES
           | StarsectorPrepatcherRuntimeBridge.REFRESH_SCOPE_AFFECTED_GLOBAL_COMMODITIES;
       record.invoke(null, market, reason, scope, new String[]{"supplies", "ore", "ore", ""});
-      require(StarsectorPrepatcherRuntimeBridge.shouldHandleVanillaUiMutationEconomyStep(economy, market),
+      require(StarsectorPrepatcherUiEconomyRuntime.shouldHandleVanillaUiMutationEconomyStep(economy, market),
           "targeted mutation action was not dispatched");
       requireAction(economy, 3, market, ((long) reason << 32) | (scope & 0xffffffffL), new String[]{"ore", "supplies"},
           "targeted mutation");
@@ -72,28 +74,28 @@ public final class AoTDExplicitUiEconomyDispatchRuntimeTest {
       int beforeGlobal = economy.calls;
       record.invoke(null, market, reason, scope | StarsectorPrepatcherRuntimeBridge.REFRESH_SCOPE_GLOBAL_TOPOLOGY,
           new String[]{"ore"});
-      require(!StarsectorPrepatcherRuntimeBridge.shouldHandleVanillaUiMutationEconomyStep(economy, market),
+      require(!StarsectorPrepatcherUiEconomyRuntime.shouldHandleVanillaUiMutationEconomyStep(economy, market),
           "global-topology mutation suppressed its global fallback");
       require(economy.calls == beforeGlobal, "global-topology mutation reached the local dispatcher");
 
       economy.result = false;
       int beforeRejected = economy.calls;
-      require(!StarsectorPrepatcherRuntimeBridge.shouldHandleVanillaMarketOpenEconomyStep(economy, market),
+      require(!StarsectorPrepatcherUiEconomyRuntime.shouldHandleVanillaMarketOpenEconomyStep(economy, market),
           "dispatcher rejection suppressed the original global step");
       require(economy.calls == beforeRejected + 1, "dispatcher rejection did not attempt the explicit action once");
 
       economy.result = true;
       economy.fail = true;
-      require(!StarsectorPrepatcherRuntimeBridge.shouldHandleVanillaMarketOpenEconomyStep(economy, market),
+      require(!StarsectorPrepatcherUiEconomyRuntime.shouldHandleVanillaMarketOpenEconomyStep(economy, market),
           "dispatcher exception suppressed the original global step");
 
       FutureAoTDEconomy future = new FutureAoTDEconomy();
-      require(!StarsectorPrepatcherRuntimeBridge.shouldHandleVanillaMarketOpenEconomyStep(future, market),
+      require(!StarsectorPrepatcherUiEconomyRuntime.shouldHandleVanillaMarketOpenEconomyStep(future, market),
           "future AoTD subclass received exact-fork UI semantics");
       require(future.calls == 0, "future AoTD subclass reached the exact dispatcher");
 
       record.invoke(null, market, reason, scope, new String[]{"ore"});
-      require(!StarsectorPrepatcherRuntimeBridge.shouldHandleVanillaUiMutationEconomyStep(future, market),
+      require(!StarsectorPrepatcherUiEconomyRuntime.shouldHandleVanillaUiMutationEconomyStep(future, market),
           "future AoTD subclass received exact mutation semantics");
       require(take.invoke(null, market) == null, "future AoTD subclass retained a stale mutation payload");
 

@@ -22,8 +22,8 @@ public final class IndustryMutationRuntimeTest {
     try {
       Files.writeString(configFile, "patch.uiMarketMutationRefresh=true\n", StandardCharsets.UTF_8);
       StarsectorPrepatcherRuntimeBridge.configure(PrepatcherConfig.load(configFile), configFile.getParent());
-      StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
-      long negotiated = StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract("aotd_theory_of_toolbox",
+      StarsectorPrepatcherAotdContract.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
+      long negotiated = StarsectorPrepatcherAotdContract.registerAoTDForkContract("aotd_theory_of_toolbox",
           StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
           StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES, ignored -> {}, (industry, ids) -> null,
           () -> {});
@@ -75,24 +75,24 @@ public final class IndustryMutationRuntimeTest {
           });
 
       System.setProperty("starsector.prepatcher.industryMarketMutationPatchGroup", "awaiting-targets");
-      StarsectorPrepatcherRuntimeBridge.applyVanillaIndustryStartUpgrading(industry);
+      StarsectorPrepatcherUiEconomyRuntime.applyVanillaIndustryStartUpgrading(industry);
       require(starts.get() == 1, "startUpgrading was not invoked exactly once");
       require(takeContext(market) == null, "partial industry patch group published a context");
 
       System.setProperty("starsector.prepatcher.industryMarketMutationPatchGroup", "ready");
-      StarsectorPrepatcherRuntimeBridge.applyVanillaIndustryStartUpgrading(industry);
+      StarsectorPrepatcherUiEconomyRuntime.applyVanillaIndustryStartUpgrading(industry);
       require(starts.get() == 2, "active startUpgrading was not invoked exactly once");
       requirePayload(market, StarsectorPrepatcherRuntimeBridge.MUTATION_REASON_INDUSTRY_QUEUE);
 
-      StarsectorPrepatcherRuntimeBridge.applyVanillaIndustryDowngrade(industry);
+      StarsectorPrepatcherUiEconomyRuntime.applyVanillaIndustryDowngrade(industry);
       require(downgrades.get() == 1, "downgrade was not invoked exactly once");
       requirePayload(market, StarsectorPrepatcherRuntimeBridge.MUTATION_REASON_INDUSTRY_STRUCTURE);
 
-      StarsectorPrepatcherRuntimeBridge.applyVanillaIndustryCancelUpgrade(industry);
+      StarsectorPrepatcherUiEconomyRuntime.applyVanillaIndustryCancelUpgrade(industry);
       require(cancels.get() == 1, "cancelUpgrade was not invoked exactly once");
       requirePayload(market, StarsectorPrepatcherRuntimeBridge.MUTATION_REASON_INDUSTRY_QUEUE);
 
-      StarsectorPrepatcherRuntimeBridge.applyVanillaIndustryRemoval(market, "industry", null, false);
+      StarsectorPrepatcherUiEconomyRuntime.applyVanillaIndustryRemoval(market, "industry", null, false);
       require(removes.get() == 1, "removeIndustry was not invoked exactly once");
       requirePayload(market, StarsectorPrepatcherRuntimeBridge.MUTATION_REASON_INDUSTRY_STRUCTURE);
 
@@ -105,11 +105,11 @@ public final class IndustryMutationRuntimeTest {
       AtomicInteger preCancels = new AtomicInteger();
       Industry preFailureIndustry =
           mutationIndustry(preFailureMarket, preStarts, new AtomicInteger(), preCancels, null);
-      StarsectorPrepatcherRuntimeBridge.applyVanillaIndustryStartUpgrading(preFailureIndustry);
+      StarsectorPrepatcherUiEconomyRuntime.applyVanillaIndustryStartUpgrading(preFailureIndustry);
       require(preStarts.get() == 1, "throwing industry pre-snapshot suppressed or duplicated mutation");
       // A later successful record in the same batch must retain the first
       // mutation's global fallback requirement.
-      StarsectorPrepatcherRuntimeBridge.applyVanillaIndustryCancelUpgrade(preFailureIndustry);
+      StarsectorPrepatcherUiEconomyRuntime.applyVanillaIndustryCancelUpgrade(preFailureIndustry);
       require(preCancels.get() == 1, "later industry mutation was not invoked exactly once");
       invokeTripleGuarded(fallbackEconomy, preFailureMarket);
       require(tripleSteps.get() == 1, "industry pre-snapshot failure lost sticky global fallback");
@@ -119,7 +119,7 @@ public final class IndustryMutationRuntimeTest {
       AtomicInteger postDowngrades = new AtomicInteger();
       Industry postFailureIndustry =
           mutationIndustry(postFailureMarket, new AtomicInteger(), postDowngrades, new AtomicInteger(), null);
-      StarsectorPrepatcherRuntimeBridge.applyVanillaIndustryDowngrade(postFailureIndustry);
+      StarsectorPrepatcherUiEconomyRuntime.applyVanillaIndustryDowngrade(postFailureIndustry);
       require(postDowngrades.get() == 1, "throwing industry post-snapshot suppressed or duplicated mutation");
       invokeTripleGuarded(fallbackEconomy, postFailureMarket);
       require(tripleSteps.get() == 2, "industry post-snapshot failure did not retain tripleStep");
@@ -128,7 +128,7 @@ public final class IndustryMutationRuntimeTest {
       RuntimeException lookupFailure = new RuntimeException("synthetic market lookup");
       Industry unknownMarketIndustry =
           mutationIndustry(null, unknownStarts, new AtomicInteger(), new AtomicInteger(), lookupFailure);
-      StarsectorPrepatcherRuntimeBridge.applyVanillaIndustryStartUpgrading(unknownMarketIndustry);
+      StarsectorPrepatcherUiEconomyRuntime.applyVanillaIndustryStartUpgrading(unknownMarketIndustry);
       require(unknownStarts.get() == 1, "throwing industry market lookup suppressed original mutation");
       invokeTripleGuarded(fallbackEconomy, market);
       require(tripleSteps.get() == 3, "unknown-market industry failure did not poison next shared guard");
@@ -137,7 +137,7 @@ public final class IndustryMutationRuntimeTest {
       Industry throwingMutation =
           mutationIndustry(market, new AtomicInteger(), new AtomicInteger(), new AtomicInteger(), mutationFailure);
       try {
-        StarsectorPrepatcherRuntimeBridge.applyVanillaIndustryStartUpgrading(throwingMutation);
+        StarsectorPrepatcherUiEconomyRuntime.applyVanillaIndustryStartUpgrading(throwingMutation);
         throw new AssertionError("original industry exception was swallowed");
       } catch (RuntimeException actual) {
         require(actual == mutationFailure, "industry wrapper changed original exception identity");
@@ -184,7 +184,7 @@ public final class IndustryMutationRuntimeTest {
   }
 
   private static void invokeTripleGuarded(EconomyAPI economy, MarketAPI market) {
-    if (!StarsectorPrepatcherRuntimeBridge.shouldHandleVanillaUiMutationEconomyStep(economy, market)) {
+    if (!StarsectorPrepatcherUiEconomyRuntime.shouldHandleVanillaUiMutationEconomyStep(economy, market)) {
       economy.tripleStep();
     }
   }
@@ -262,7 +262,7 @@ public final class IndustryMutationRuntimeTest {
   private static Object[] takeContext(Object market) {
     try {
       Method take =
-          StarsectorPrepatcherRuntimeBridge.class.getDeclaredMethod("takeUiMarketMutationContext", Object.class);
+          StarsectorPrepatcherUiEconomyRuntime.class.getDeclaredMethod("takeUiMarketMutationContext", Object.class);
       take.setAccessible(true);
       return (Object[]) take.invoke(null, market);
     } catch (ReflectiveOperationException failure) {

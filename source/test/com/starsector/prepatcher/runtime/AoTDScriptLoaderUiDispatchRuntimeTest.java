@@ -1,6 +1,8 @@
 package com.starsector.prepatcher.runtime;
 
+import com.fs.starfarer.api.StarsectorPrepatcherAotdContract;
 import com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge;
+import com.fs.starfarer.api.StarsectorPrepatcherUiEconomyRuntime;
 import com.fs.starfarer.api.campaign.econ.MarketAPI;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 
@@ -33,7 +35,7 @@ public final class AoTDScriptLoaderUiDispatchRuntimeTest {
               + "patch.aotdCleanDeficitPath=true\n",
           StandardCharsets.UTF_8);
       StarsectorPrepatcherRuntimeBridge.configure(PrepatcherConfig.load(configFile), configFile.getParent());
-      StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
+      StarsectorPrepatcherAotdContract.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
 
       URL testClasses = AoTDScriptLoaderUiDispatchRuntimeTest.class.getProtectionDomain().getCodeSource().getLocation();
       ClassLoader parent = AoTDScriptLoaderUiDispatchRuntimeTest.class.getClassLoader();
@@ -42,7 +44,7 @@ public final class AoTDScriptLoaderUiDispatchRuntimeTest {
         Consumer<Object> delivery = callback(forkLoader, Consumer.class, "accept");
         BiFunction<Object, Object, Object> resolver = callback(forkLoader, BiFunction.class, "apply");
         Runnable economyRestore = callback(forkLoader, Runnable.class, "run");
-        long negotiated = StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract("aotd_theory_of_toolbox",
+        long negotiated = StarsectorPrepatcherAotdContract.registerAoTDForkContract("aotd_theory_of_toolbox",
             StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
             StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES, delivery, resolver, economyRestore);
         require(negotiated == StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES,
@@ -50,17 +52,17 @@ public final class AoTDScriptLoaderUiDispatchRuntimeTest {
 
         Object economy = Class.forName(ECONOMY, true, forkLoader).getConstructor().newInstance();
         MarketAPI market = marketFixture(parent);
-        require(StarsectorPrepatcherRuntimeBridge.shouldHandleVanillaMarketOpenEconomyStep(economy, market),
+        require(StarsectorPrepatcherUiEconomyRuntime.shouldHandleVanillaMarketOpenEconomyStep(economy, market),
             "child-loader market-open dispatch fell back globally");
         require(intField(economy, "lastAction") == 1, "child-loader market-open action mismatch");
 
-        require(StarsectorPrepatcherRuntimeBridge.shouldSkipVanillaCargoEconomyStep(economy, null, true, Mode.CARGO,
+        require(StarsectorPrepatcherUiEconomyRuntime.shouldSkipVanillaCargoEconomyStep(economy, null, true, Mode.CARGO,
             null, null), "child-loader synthetic Cargo dispatch fell back globally");
         require(intField(economy, "lastAction") == 2, "child-loader Cargo action mismatch");
         require(intField(economy, "calls") == 2, "unexpected child-loader dispatch count");
 
         Object foreign = Class.forName(ECONOMY, true, foreignLoader).getConstructor().newInstance();
-        require(!StarsectorPrepatcherRuntimeBridge.shouldHandleVanillaMarketOpenEconomyStep(foreign, market),
+        require(!StarsectorPrepatcherUiEconomyRuntime.shouldHandleVanillaMarketOpenEconomyStep(foreign, market),
             "unregistered duplicate loader received owned-fork semantics");
         require(intField(foreign, "calls") == 0, "unregistered duplicate reached the dispatcher");
       }

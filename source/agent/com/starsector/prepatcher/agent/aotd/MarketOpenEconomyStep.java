@@ -31,7 +31,7 @@ final class MarketOpenEconomyStep implements StructuredPatch<MarketOpenEconomySt
   private static final String METHOD = "reportPlayerOpenedMarket";
   private static final String DESC = "(Lcom/fs/starfarer/api/campaign/econ/MarketAPI;)V";
   private static final String LEGACY_RAW = "spp$raw$reportPlayerOpenedMarket";
-  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime";
   private static final String MARKER = "spp$patched$aotdMarketOpenContext";
   private static final String MARKER_VALUE = "StarsectorPrepatcher:aotd-market-open-explicit-guard-v4";
   private static final String MARKET_OPEN_GUARD = "shouldHandleVanillaMarketOpenEconomyStep";

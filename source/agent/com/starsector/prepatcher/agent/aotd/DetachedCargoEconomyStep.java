@@ -39,7 +39,7 @@ final class DetachedCargoEconomyStep implements StructuredPatch<DetachedCargoEco
           + "Lcom/fs/starfarer/campaign/command/OutpostListPanel$Oo;" + "Lcom/fs/starfarer/campaign/fleet/CargoData;"
           + "Ljava/lang/String;Lcom/fs/starfarer/coreui/_$o;" + "Lcom/fs/starfarer/ui/U;)V";
   private static final String ENTITY_DESC = "()Lcom/fs/starfarer/api/campaign/SectorEntityToken;";
-  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime";
   private static final String SHOULD_SKIP = "shouldSkipVanillaCargoEconomyStep";
   private static final String SHOULD_SKIP_DESC =
       "(Ljava/lang/Object;Ljava/lang/Object;ZLjava/lang/Object;Ljava/lang/Object;" + "Ljava/lang/Object;)Z";

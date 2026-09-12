@@ -40,7 +40,7 @@ final class MarketOverviewMutationRefresh implements StructuredPatch<MarketOverv
   private static final String ECONOMY_API = "com/fs/starfarer/api/campaign/econ/EconomyAPI";
   private static final String GLOBAL = "com/fs/starfarer/api/Global";
   private static final String SECTOR_API = "com/fs/starfarer/api/campaign/SectorAPI";
-  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime";
   private static final String MARKET_DESC = "L" + MARKET_API + ";";
   private static final String LEGACY_MARKET_FIELD = "String.interface$float";
   private static final String REPAIRED_MARKET_FIELD = "String_interface$float";

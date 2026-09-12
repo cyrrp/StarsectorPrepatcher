@@ -1,5 +1,7 @@
 package com.starsector.prepatcher.runtime;
 
+import com.fs.starfarer.api.StarsectorPrepatcherAotdContract;
+import com.fs.starfarer.api.StarsectorPrepatcherAotdRuntimeState;
 import com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 
@@ -18,33 +20,33 @@ public final class AoTDDomainRevisionRuntimeTest {
     Path configFile = Files.createTempFile("prepatcher-aotd-domain", ".properties");
     Files.writeString(configFile, "patch.aotdCleanDeficitPath=true\n");
     StarsectorPrepatcherRuntimeBridge.configure(PrepatcherConfig.load(configFile), configFile.getParent());
-    StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
-    StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract("aotd_theory_of_toolbox",
+    StarsectorPrepatcherAotdContract.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
+    StarsectorPrepatcherAotdContract.registerAoTDForkContract("aotd_theory_of_toolbox",
         StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
         StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES, ignored -> {}, (industry, ids) -> null,
         () -> {});
 
     Object market = new Object();
-    require(StarsectorPrepatcherRuntimeBridge.getAoTDMarketStructuralGeneration(market) == 0L,
+    require(StarsectorPrepatcherAotdRuntimeState.getAoTDMarketStructuralGeneration(market) == 0L,
         "unexpected initial structural generation");
 
-    long tradeToken = StarsectorPrepatcherRuntimeBridge.beforeAoTDMarketMutation(market, 1);
-    StarsectorPrepatcherRuntimeBridge.afterAoTDMarketMutation(tradeToken, market, DIRTY_TRADE | DIRTY_ACCESSIBILITY,
+    long tradeToken = StarsectorPrepatcherAotdRuntimeState.beforeAoTDMarketMutation(market, 1);
+    StarsectorPrepatcherAotdRuntimeState.afterAoTDMarketMutation(tradeToken, market, DIRTY_TRADE | DIRTY_ACCESSIBILITY,
         1L);
-    require(StarsectorPrepatcherRuntimeBridge.getAoTDMarketStructuralGeneration(market) == 0L,
+    require(StarsectorPrepatcherAotdRuntimeState.getAoTDMarketStructuralGeneration(market) == 0L,
         "non-structural dirty mask advanced structural generation");
 
-    long structureToken = StarsectorPrepatcherRuntimeBridge.beforeAoTDMarketMutation(market, 1);
-    StarsectorPrepatcherRuntimeBridge.afterAoTDMarketMutation(structureToken, market, DIRTY_STRUCTURE, 2L);
-    require(StarsectorPrepatcherRuntimeBridge.getAoTDMarketStructuralGeneration(market) == 1L,
+    long structureToken = StarsectorPrepatcherAotdRuntimeState.beforeAoTDMarketMutation(market, 1);
+    StarsectorPrepatcherAotdRuntimeState.afterAoTDMarketMutation(structureToken, market, DIRTY_STRUCTURE, 2L);
+    require(StarsectorPrepatcherAotdRuntimeState.getAoTDMarketStructuralGeneration(market) == 1L,
         "structural mutation did not advance structural generation");
 
-    long outer = StarsectorPrepatcherRuntimeBridge.beforeAoTDMarketMutation(market, 1);
-    long nested = StarsectorPrepatcherRuntimeBridge.beforeAoTDMarketMutation(market, 2);
+    long outer = StarsectorPrepatcherAotdRuntimeState.beforeAoTDMarketMutation(market, 1);
+    long nested = StarsectorPrepatcherAotdRuntimeState.beforeAoTDMarketMutation(market, 2);
     require(outer == nested, "nested boundary did not share token");
-    StarsectorPrepatcherRuntimeBridge.afterAoTDMarketMutation(nested, market, DIRTY_STRUCTURE, 3L);
-    StarsectorPrepatcherRuntimeBridge.afterAoTDMarketMutation(outer, market, DIRTY_TRADE, 4L);
-    require(StarsectorPrepatcherRuntimeBridge.getAoTDMarketStructuralGeneration(market) == 2L,
+    StarsectorPrepatcherAotdRuntimeState.afterAoTDMarketMutation(nested, market, DIRTY_STRUCTURE, 3L);
+    StarsectorPrepatcherAotdRuntimeState.afterAoTDMarketMutation(outer, market, DIRTY_TRADE, 4L);
+    require(StarsectorPrepatcherAotdRuntimeState.getAoTDMarketStructuralGeneration(market) == 2L,
         "nested structural mutation did not advance exactly once");
 
     Files.deleteIfExists(configFile);

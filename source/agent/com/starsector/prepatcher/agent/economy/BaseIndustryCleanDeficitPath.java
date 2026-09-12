@@ -37,7 +37,7 @@ public final class BaseIndustryCleanDeficitPath implements StructuredPatch<BaseI
   private static final String DESC = "([Ljava/lang/String;)Lcom/fs/starfarer/api/util/Pair;";
   private static final String TEMPLATE_OWNER = "com/starsector/prepatcher/agent/templates/BaseIndustryDeficitTemplate";
   private static final String TEMPLATE_RESOURCE = "/" + TEMPLATE_OWNER + ".class";
-  private static final String RUNTIME_BRIDGE = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME_BRIDGE = "com/fs/starfarer/api/StarsectorPrepatcherAotdContract";
 
   record Plan(List<MethodNode> classMethods, MethodNode wrapper, MethodNode installed, int originalAccess,
       String originalSignature, String[] originalExceptions) {

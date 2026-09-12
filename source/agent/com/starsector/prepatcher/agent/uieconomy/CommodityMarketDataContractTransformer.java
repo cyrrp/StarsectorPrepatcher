@@ -20,7 +20,7 @@ import com.starsector.prepatcher.agent.patch.StructuralMismatchException;
  */
 public final class CommodityMarketDataContractTransformer implements ClassFileTransformer {
   public static final String TARGET = CommodityMarketDataCommitContract.TARGET;
-  private static final String RUNTIME = "com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME = "com.fs.starfarer.api.StarsectorPrepatcherUiEconomyRuntime";
 
   private final boolean enabled;
   private final ClassLoader runtimeLoader;

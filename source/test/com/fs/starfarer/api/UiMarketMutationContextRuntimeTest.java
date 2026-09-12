@@ -19,19 +19,19 @@ public final class UiMarketMutationContextRuntimeTest {
           "patch.uiMarketMutationRefresh=true\n" + "patch.campaignCargoNoGlobalEconomyStep=true\n",
           StandardCharsets.UTF_8);
       StarsectorPrepatcherRuntimeBridge.configure(PrepatcherConfig.load(configFile), configFile.getParent());
-      StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
-      long negotiated = StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract("aotd_theory_of_toolbox",
+      StarsectorPrepatcherAotdContract.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
+      long negotiated = StarsectorPrepatcherAotdContract.registerAoTDForkContract("aotd_theory_of_toolbox",
           StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_FORK_VERSION,
           StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES, ignored -> {}, (industry, ids) -> null,
           () -> {});
       require((negotiated & StarsectorPrepatcherRuntimeBridge.AOTD_CAPABILITY_UI_MARKET_MUTATION_REFRESH) != 0L,
           "UI market-mutation capability was not negotiated");
 
-      Method record = StarsectorPrepatcherRuntimeBridge.class.getDeclaredMethod("recordUiMarketMutation", Object.class,
-          int.class, int.class);
+      Method record = StarsectorPrepatcherUiEconomyRuntime.class.getDeclaredMethod("recordUiMarketMutation",
+          Object.class, int.class, int.class);
       record.setAccessible(true);
       Method take =
-          StarsectorPrepatcherRuntimeBridge.class.getDeclaredMethod("takeUiMarketMutationContext", Object.class);
+          StarsectorPrepatcherUiEconomyRuntime.class.getDeclaredMethod("takeUiMarketMutationContext", Object.class);
       take.setAccessible(true);
       Object market = new Object();
       Object other = new Object();
@@ -70,7 +70,7 @@ public final class UiMarketMutationContextRuntimeTest {
 
       record.invoke(null, market, StarsectorPrepatcherRuntimeBridge.MUTATION_REASON_IMMIGRATION_POLICY,
           StarsectorPrepatcherRuntimeBridge.REFRESH_SCOPE_IMMIGRATION);
-      StarsectorPrepatcherRuntimeBridge.publishAoTDRuntimeEpoch(2L, 2L);
+      StarsectorPrepatcherAotdRuntimeState.publishAoTDRuntimeEpoch(2L, 2L);
       require(consumePacked(take, market) == 0L, "runtime epoch change did not invalidate context");
     } finally {
       Files.deleteIfExists(configFile);

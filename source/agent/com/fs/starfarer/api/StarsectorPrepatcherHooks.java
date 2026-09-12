@@ -1754,7 +1754,7 @@ public final class StarsectorPrepatcherHooks {
       try {
         if (!market.isInEconomy()) {
           boolean conditionOnly = market.isPlanetConditionMarketOnly();
-          StarsectorPrepatcherRuntimeBridge.recordAoTDNonEconomyDelivery(conditionOnly);
+          StarsectorPrepatcherAotdContract.recordAoTDNonEconomyDelivery(conditionOnly);
           publishToAoTD = false;
         }
       } catch (Throwable ignored) {
@@ -1762,7 +1762,7 @@ public final class StarsectorPrepatcherHooks {
         // implementation remains visible to the AoTD diagnostics.
       }
       if (publishToAoTD) {
-        StarsectorPrepatcherRuntimeBridge.publishAoTDMarketTimeDelivered(market, amount, origin);
+        StarsectorPrepatcherAotdContract.publishAoTDMarketTimeDelivered(market, amount, origin);
       }
     }
     if (market == null) return;

@@ -21,7 +21,7 @@ import com.starsector.prepatcher.agent.aotd.AoTDEconomyRestoreCompletionTransfor
 /** Exact-current CoreLifecycle successful-tail transformation and drift fixtures. */
 public final class AoTDEconomyRestoreCompletionTransformerTest {
   private static final String ENTRY = AoTDEconomyRestoreCompletionTransformer.TARGET + ".class";
-  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherAotdContract";
   private static final String HOOK = "publishAoTDEconomyRestoreComplete";
 
   private AoTDEconomyRestoreCompletionTransformerTest() {}

@@ -23,7 +23,7 @@ public final class VanillaMarketOpenLocalizationContractTransformer implements C
   public static final String ECONOMY = VanillaMarketOpenEconomyContract.TARGET;
   public static final String REACH = VanillaMarketOpenReachContract.TARGET;
   public static final Set<String> TARGET_CLASSES = Set.of(ECONOMY, REACH);
-  private static final String RUNTIME = "com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME = "com.fs.starfarer.api.StarsectorPrepatcherUiEconomyRuntime";
 
   private final boolean enabled;
   private final ClassLoader runtimeLoader;

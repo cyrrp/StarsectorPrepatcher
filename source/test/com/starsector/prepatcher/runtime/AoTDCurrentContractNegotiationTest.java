@@ -1,5 +1,6 @@
 package com.starsector.prepatcher.runtime;
 
+import com.fs.starfarer.api.StarsectorPrepatcherAotdContract;
 import com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 
@@ -34,7 +35,7 @@ public final class AoTDCurrentContractNegotiationTest {
           "missing structural proof did not reject the required capability");
       WeakReference<ClassLoader> rejectedLoader = registerRejectedChildLoaderContract();
       awaitCollected(rejectedLoader, "rejected pre-proof callbacks retained their child loader");
-      StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
+      StarsectorPrepatcherAotdContract.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
       long safeProfile = registerCurrent();
       require(safeProfile == StarsectorPrepatcherRuntimeBridge.AOTD_REQUIRED_CAPABILITIES,
           "safe profile did not negotiate exactly the required contract: 0x" + Long.toHexString(safeProfile));
@@ -83,7 +84,7 @@ public final class AoTDCurrentContractNegotiationTest {
       Files.writeString(configFile, "patch.uiMarketMutationRefresh=true\n" + "patch.aotdCleanDeficitPath=true\n",
           StandardCharsets.UTF_8);
       StarsectorPrepatcherRuntimeBridge.configure(PrepatcherConfig.load(configFile), configFile.getParent());
-      StarsectorPrepatcherRuntimeBridge.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
+      StarsectorPrepatcherAotdContract.setAoTDEconomyRestoreCompletionContract(true, "runtime-test");
       long fullProfile = registerCurrent();
       require(fullProfile == StarsectorPrepatcherRuntimeBridge.AOTD_CURRENT_DECLARED_CAPABILITIES,
           "enabled optional profile did not negotiate the full current mask: 0x" + Long.toHexString(fullProfile));
@@ -103,7 +104,7 @@ public final class AoTDCurrentContractNegotiationTest {
   private static long register(String forkVersion, long declaredCapabilities,
       java.util.function.Consumer<Object> deliveryListener,
       java.util.function.BiFunction<Object, Object, Object> deficitResolver, Runnable economyRestoreListener) {
-    return StarsectorPrepatcherRuntimeBridge.registerAoTDForkContract("aotd_theory_of_toolbox", forkVersion,
+    return StarsectorPrepatcherAotdContract.registerAoTDForkContract("aotd_theory_of_toolbox", forkVersion,
         declaredCapabilities, deliveryListener, deficitResolver, economyRestoreListener);
   }
 

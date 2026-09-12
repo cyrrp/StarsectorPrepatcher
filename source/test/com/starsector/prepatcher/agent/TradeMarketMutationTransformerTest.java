@@ -26,7 +26,7 @@ import com.starsector.prepatcher.agent.uieconomy.TradeMarketMutationTransformer;
 /** Exact trade guard/fallback and same-class Cargo composition contract. */
 public final class TradeMarketMutationTransformerTest {
   private static final String TARGET = TradeMarketMutationTransformer.TARGET;
-  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime";
   private static final String ECONOMY_API = "com/fs/starfarer/api/campaign/econ/EconomyAPI";
   private static final String MARKET_DESC = "Lcom/fs/starfarer/campaign/econ/Market;";
   private static final String LEGACY_MARKET_FIELD = "if.new$class";
@@ -171,7 +171,7 @@ public final class TradeMarketMutationTransformerTest {
   }
 
   private static void inspectRuntimeFailOpenBoundaries() throws Exception {
-    String resource = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge.class";
+    String resource = "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime.class";
     byte[] bytes;
     try (var input = TradeMarketMutationTransformerTest.class.getClassLoader().getResourceAsStream(resource)) {
       require(input != null, "missing runtime bridge class resource");
@@ -183,12 +183,12 @@ public final class TradeMarketMutationTransformerTest {
         "runtime trade guard still owns the original doubleStep");
     requireThrowableCoveredCall(trade, "com/fs/starfarer/api/campaign/PlayerMarketTransaction", "getMarket",
         "()Lcom/fs/starfarer/api/campaign/econ/MarketAPI;");
-    requireThrowableCoveredCall(trade, "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge",
+    requireThrowableCoveredCall(trade, "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime",
         "collectTransactionCommodityIds",
         "(Lcom/fs/starfarer/api/campaign/PlayerMarketTransaction;)[Ljava/lang/String;");
     requireThrowableCoveredCall(trade, "com/fs/starfarer/api/Global", "getSector",
         "()Lcom/fs/starfarer/api/campaign/SectorAPI;");
-    requireThrowableCoveredCall(trade, "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge",
+    requireThrowableCoveredCall(trade, "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime",
         "containsMarketIdentity",
         "(Lcom/fs/starfarer/campaign/econ/reach/ReachEconomy;" + "Lcom/fs/starfarer/campaign/econ/Market;)Z");
 
@@ -196,7 +196,7 @@ public final class TradeMarketMutationTransformerTest {
         method(runtime, "shouldHandleVanillaUiMutationEconomyStep", "(Ljava/lang/Object;Ljava/lang/Object;)Z");
     requireThrowableCoveredCall(shared, "com/fs/starfarer/api/Global", "getSector",
         "()Lcom/fs/starfarer/api/campaign/SectorAPI;");
-    requireThrowableCoveredCall(shared, "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge",
+    requireThrowableCoveredCall(shared, "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime",
         "containsMarketIdentity",
         "(Lcom/fs/starfarer/campaign/econ/reach/ReachEconomy;" + "Lcom/fs/starfarer/campaign/econ/Market;)Z");
 
@@ -204,7 +204,7 @@ public final class TradeMarketMutationTransformerTest {
         method(runtime, "shouldHandleVanillaMarketOpenEconomyStep", "(Ljava/lang/Object;Ljava/lang/Object;)Z");
     requireThrowableCoveredCall(marketOpen, "com/fs/starfarer/api/Global", "getSector",
         "()Lcom/fs/starfarer/api/campaign/SectorAPI;");
-    requireThrowableCoveredCall(marketOpen, "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge",
+    requireThrowableCoveredCall(marketOpen, "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime",
         "containsMarketIdentity",
         "(Lcom/fs/starfarer/campaign/econ/reach/ReachEconomy;" + "Lcom/fs/starfarer/campaign/econ/Market;)Z");
   }

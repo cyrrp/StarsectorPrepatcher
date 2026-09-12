@@ -18,7 +18,7 @@ import com.starsector.prepatcher.agent.uieconomy.IndustryMarketMutationTransform
 
 /** Exact vanilla industry mutation wrappers and shared-helper fail-closed guard. */
 public final class IndustryMarketMutationTransformerTest {
-  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME = "com/fs/starfarer/api/StarsectorPrepatcherUiEconomyRuntime";
   private static final String INDUSTRY = "com/fs/starfarer/api/campaign/econ/Industry";
   private static final String MARKET_API = "com/fs/starfarer/api/campaign/econ/MarketAPI";
   private static final String MODE = "com/fs/starfarer/api/campaign/econ/MarketAPI$MarketInteractionMode";

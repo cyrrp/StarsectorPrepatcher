@@ -24,7 +24,7 @@ final class EconomyRestoreCompletionSignal implements StructuredPatch<EconomyRes
   static final String METHOD = "econPostSaveRestore";
   static final String METHOD_DESC = "()V";
 
-  private static final String RUNTIME_INTERNAL = "com/fs/starfarer/api/StarsectorPrepatcherRuntimeBridge";
+  private static final String RUNTIME_INTERNAL = "com/fs/starfarer/api/StarsectorPrepatcherAotdContract";
   private static final String HOOK = "publishAoTDEconomyRestoreComplete";
   private static final String HOOK_DESC = "()V";
 
