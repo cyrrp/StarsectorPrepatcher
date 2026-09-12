@@ -1,23 +1,17 @@
 package com.fs.starfarer.api;
 
+import com.fs.starfarer.api.StarsectorPrepatcherStrategicJumpIndexData.PointRecord;
+import com.fs.starfarer.api.StarsectorPrepatcherStrategicJumpIndexData.WeakIdentityOwnerCache;
+import com.fs.starfarer.api.StarsectorPrepatcherStrategicJumpIndexLocation.LocationState;
 import com.fs.starfarer.api.campaign.JumpPointAPI;
 import com.fs.starfarer.api.campaign.LocationAPI;
-import com.fs.starfarer.api.campaign.SectorEntityToken;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 
-import java.lang.ref.WeakReference;
-import java.util.AbstractList;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.IdentityHashMap;
-import java.util.Iterator;
 import java.util.List;
-import java.util.NoSuchElementException;
-import java.util.RandomAccess;
-import java.util.TreeSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongSupplier;
 
@@ -33,8 +27,8 @@ import java.util.function.LongSupplier;
 final class StarsectorPrepatcherStrategicJumpIndex {
   private static final Object LOCK = new Object();
   private static final long REFILL_PERIOD_NANOS = 16_666_667L;
-  private static final int MAX_PENDING_POINT_DELTAS = 256;
-  private static final List<?> DEFERRED = Collections.emptyList();
+  static final int MAX_PENDING_POINT_DELTAS = 256;
+  static final List<?> DEFERRED = Collections.emptyList();
 
   /** Strong values are deliberately bounded by LRU admission and campaign reset. */
   private static IdentityHashMap<LocationAPI, LocationState> states = new IdentityHashMap<>();
@@ -42,7 +36,7 @@ final class StarsectorPrepatcherStrategicJumpIndex {
   /** Indexed binary heap: no process-wide LRU scan is needed to find a due retry. */
   private static ArrayList<LocationState> retryHeap = new ArrayList<>();
   /** Fixed-size best-effort accelerator; audit remains the correctness fallback. */
-  private static final WeakIdentityOwnerCache destinationOwners = new WeakIdentityOwnerCache(8_192);
+  static final WeakIdentityOwnerCache destinationOwners = new WeakIdentityOwnerCache(8_192);
 
   private static LocationState lruHead;
   private static LocationState lruTail;
@@ -56,7 +50,7 @@ final class StarsectorPrepatcherStrategicJumpIndex {
   private static int evictableCount;
   private static long generation = Long.MIN_VALUE;
   private static int stateMapCapacity;
-  private static long lastNowNanos;
+  static long lastNowNanos;
   private static long lastRefillNanos;
   private static long budgetTokensNanos;
   private static long tokenRemainder;
@@ -75,9 +69,9 @@ final class StarsectorPrepatcherStrategicJumpIndex {
   private static final LongAdder PROTECTED_CAPACITY_DEFERRALS = new LongAdder();
   private static final LongAdder ADMISSIONS = new LongAdder();
   private static final LongAdder EVICTIONS = new LongAdder();
-  private static final LongAdder BUILDS_STARTED = new LongAdder();
-  private static final LongAdder BUILDS_COMPLETED = new LongAdder();
-  private static final LongAdder BUILD_RESTARTS = new LongAdder();
+  static final LongAdder BUILDS_STARTED = new LongAdder();
+  static final LongAdder BUILDS_COMPLETED = new LongAdder();
+  static final LongAdder BUILD_RESTARTS = new LongAdder();
   private static final LongAdder MAINTENANCE_CALLS = new LongAdder();
   /** Full maintenance duration, including selection, queues, LRU and cleanup. */
   private static final LongAdder MAINTENANCE_NANOS = new LongAdder();
@@ -86,22 +80,22 @@ final class StarsectorPrepatcherStrategicJumpIndex {
   private static final LongAdder WORK_UNITS = new LongAdder();
   /** Time inside indivisible build/refresh/audit units only. */
   private static final LongAdder WORK_NANOS = new LongAdder();
-  private static final LongAdder POINT_REFRESHES = new LongAdder();
+  static final LongAdder POINT_REFRESHES = new LongAdder();
   private static final LongAdder AUDIT_UNITS = new LongAdder();
-  private static final LongAdder AUDIT_REPAIRS = new LongAdder();
+  static final LongAdder AUDIT_REPAIRS = new LongAdder();
   private static final LongAdder SOURCE_INVALIDATIONS = new LongAdder();
   private static final LongAdder POINT_INVALIDATIONS = new LongAdder();
   private static final LongAdder RETARGET_INVALIDATIONS = new LongAdder();
-  private static final LongAdder FAILURES = new LongAdder();
-  private static final LongAdder RETRIES = new LongAdder();
+  static final LongAdder FAILURES = new LongAdder();
+  static final LongAdder RETRIES = new LongAdder();
   private static final LongAdder IDLE_EVICTIONS = new LongAdder();
 
   /** Interval maxima are updated under LOCK and reset by statsAndReset(). */
   private static long maintenanceMaxNanos;
   private static long maintenanceMaxOverrunNanos;
-  private static long readyLatencyMaxNanos;
-  private static long deferredLookupMaxNanos;
-  private static long deferredPlanMaxNanos;
+  static long readyLatencyMaxNanos;
+  static long deferredLookupMaxNanos;
+  static long deferredPlanMaxNanos;
   private static long admissionDeferredMaxNanos;
   private static int workQueueMax;
   private static int auditQueueMax;
@@ -627,7 +621,7 @@ final class StarsectorPrepatcherStrategicJumpIndex {
     admissionsAvailable = Math.min(admissionCapacity, admissionsAvailable + admissionAdd);
   }
 
-  private static Object safeGet(List<?> values, int index) {
+  static Object safeGet(List<?> values, int index) {
     try {
       return values.get(index);
     } catch (Throwable ignored) {
@@ -663,7 +657,7 @@ final class StarsectorPrepatcherStrategicJumpIndex {
     }
   }
 
-  private static void enqueue(LocationState state) {
+  static void enqueue(LocationState state) {
     if (!state.active || state.queued || state.phase == LocationState.FAILED) return;
     state.queued = true;
     workQueue.addLast(state);
@@ -679,7 +673,7 @@ final class StarsectorPrepatcherStrategicJumpIndex {
     return null;
   }
 
-  private static void scheduleAudit(LocationState state) {
+  static void scheduleAudit(LocationState state) {
     if (!state.active || state.phase != LocationState.READY || state.data == null || state.auditLinked) return;
     state.auditPrevious = auditTail;
     state.auditNext = null;
@@ -691,7 +685,7 @@ final class StarsectorPrepatcherStrategicJumpIndex {
     if (auditQueueSize > auditQueueMax) auditQueueMax = auditQueueSize;
   }
 
-  private static void unlinkAudit(LocationState state) {
+  static void unlinkAudit(LocationState state) {
     if (!state.auditLinked) return;
     if (state.auditPrevious == null) auditHead = state.auditNext;
     else state.auditPrevious.auditNext = state.auditNext;
@@ -712,7 +706,7 @@ final class StarsectorPrepatcherStrategicJumpIndex {
     return null;
   }
 
-  private static void scheduleRetry(LocationState state) {
+  static void scheduleRetry(LocationState state) {
     if (!state.active || state.phase != LocationState.FAILED) return;
     removeRetry(state);
     state.retryOrder = ++retrySequence;
@@ -723,7 +717,7 @@ final class StarsectorPrepatcherStrategicJumpIndex {
     if (retryHeap.size() > retryQueueMax) retryQueueMax = retryHeap.size();
   }
 
-  private static void removeRetry(LocationState state) {
+  static void removeRetry(LocationState state) {
     int index = state.retryHeapIndex;
     if (index < 0 || index >= retryHeap.size() || retryHeap.get(index) != state) {
       state.retryHeapIndex = -1;
@@ -830,7 +824,7 @@ final class StarsectorPrepatcherStrategicJumpIndex {
     state.next = null;
   }
 
-  private static void linkEvictableTail(LocationState state) {
+  static void linkEvictableTail(LocationState state) {
     if (state.evictableLinked || !state.active
         || (state.phase != LocationState.READY && state.phase != LocationState.FAILED))
       return;
@@ -843,7 +837,7 @@ final class StarsectorPrepatcherStrategicJumpIndex {
     evictableCount++;
   }
 
-  private static void unlinkEvictable(LocationState state) {
+  static void unlinkEvictable(LocationState state) {
     if (!state.evictableLinked) return;
     if (state.evictablePrevious == null) evictableHead = state.evictableNext;
     else state.evictablePrevious.evictableNext = state.evictableNext;
@@ -895,1020 +889,4 @@ final class StarsectorPrepatcherStrategicJumpIndex {
     admissionDeferredSinceNanos = 0L;
   }
 
-  private static final class LocationState {
-    static final int BUILDING = 1;
-    static final int REFRESHING = 2;
-    static final int READY = 3;
-    static final int FAILED = 4;
-
-    final LocationAPI location;
-    Class<?> jumpPointType;
-    boolean active = true;
-    boolean queued;
-    boolean auditLinked;
-    boolean evictableLinked;
-    LocationState previous;
-    LocationState next;
-    LocationState auditPrevious;
-    LocationState auditNext;
-    LocationState evictablePrevious;
-    LocationState evictableNext;
-    int retryHeapIndex = -1;
-    long retryOrder;
-    long lastAccessNanos;
-    long sourceEpoch;
-    long pendingSinceNanos;
-    long deferredLookupSinceNanos;
-    long deferredPlanSinceNanos;
-    List<?> observedSource;
-    int observedSize;
-    Object observedFirst;
-    Object observedLast;
-    boolean observedRandomAccess;
-    boolean fullBuildRequested = true;
-    int phase = BUILDING;
-    long retryAtNanos;
-    int consecutiveFailures;
-    IndexData data;
-    BuildTask build;
-    PointRefreshTask refresh;
-    final ArrayDeque<JumpPointAPI> dirtyQueue = new ArrayDeque<>();
-    final IdentityHashMap<JumpPointAPI, Boolean> dirtySet = new IdentityHashMap<>();
-    AuditTask audit;
-
-    LocationState(LocationAPI location, Class<?> jumpPointType) {
-      this.location = location;
-      this.jumpPointType = jumpPointType;
-    }
-
-    String phaseName() {
-      return switch (phase) {
-        case BUILDING -> "BUILDING";
-        case REFRESHING -> "REFRESHING";
-        case READY -> "READY";
-        case FAILED -> "FAILED_COOLDOWN";
-        default -> "UNKNOWN";
-      };
-    }
-
-    void noteDeferredLookup() {
-      if (deferredLookupSinceNanos == 0L && lastNowNanos > 0L) {
-        deferredLookupSinceNanos = lastNowNanos;
-      }
-    }
-
-    void noteDeferredPlan() {
-      if (deferredPlanSinceNanos == 0L && lastNowNanos > 0L) {
-        deferredPlanSinceNanos = lastNowNanos;
-      }
-    }
-
-    private void beginPending() {
-      if (pendingSinceNanos == 0L && lastNowNanos > 0L) {
-        pendingSinceNanos = lastNowNanos;
-      }
-    }
-
-    void resolveDebt(long now) {
-      if (pendingSinceNanos > 0L && now > pendingSinceNanos) {
-        readyLatencyMaxNanos = Math.max(readyLatencyMaxNanos, now - pendingSinceNanos);
-      }
-      if (deferredLookupSinceNanos > 0L && now > deferredLookupSinceNanos) {
-        deferredLookupMaxNanos = Math.max(deferredLookupMaxNanos, now - deferredLookupSinceNanos);
-      }
-      if (deferredPlanSinceNanos > 0L && now > deferredPlanSinceNanos) {
-        deferredPlanMaxNanos = Math.max(deferredPlanMaxNanos, now - deferredPlanSinceNanos);
-      }
-      pendingSinceNanos = 0L;
-      deferredLookupSinceNanos = 0L;
-      deferredPlanSinceNanos = 0L;
-    }
-
-    void observeSource(List<?> live) {
-      observedSource = live;
-      observedSize = live.size();
-      observedRandomAccess = live instanceof RandomAccess;
-      observedFirst = observedSize == 0 ? null : safeGet(live, 0);
-      observedLast = observedSize == 0 ? null : (observedRandomAccess ? safeGet(live, observedSize - 1) : null);
-    }
-
-    boolean fastSourceMatches(List<?> live) {
-      if (observedSource != live || observedSize != live.size()) return false;
-      if (observedSize == 0) return true;
-      if (safeGet(live, 0) != observedFirst) return false;
-      return !observedRandomAccess || safeGet(live, observedSize - 1) == observedLast;
-    }
-
-    void requestFullBuild() {
-      unlinkAudit(this);
-      unlinkEvictable(this);
-      removeRetry(this);
-      data = null;
-      build = null;
-      refresh = null;
-      audit = null;
-      dirtyQueue.clear();
-      dirtySet.clear();
-      fullBuildRequested = true;
-      phase = BUILDING;
-      retryAtNanos = 0L;
-      beginPending();
-      enqueue(this);
-    }
-
-    private void enterRefreshing() {
-      unlinkAudit(this);
-      unlinkEvictable(this);
-      removeRetry(this);
-      phase = REFRESHING;
-      beginPending();
-    }
-
-    private void enterReady(long now) {
-      removeRetry(this);
-      unlinkAudit(this);
-      unlinkEvictable(this);
-      phase = READY;
-      resolveDebt(now);
-      scheduleAudit(this);
-      linkEvictableTail(this);
-    }
-
-    void invalidateSource() {
-      sourceEpoch++;
-      observedSource = null;
-      observedSize = -1;
-      observedFirst = null;
-      observedLast = null;
-      observedRandomAccess = false;
-      requestFullBuild();
-    }
-
-    void markPointDirty(JumpPointAPI point) {
-      if (phase == FAILED) {
-        sourceEpoch++;
-        requestFullBuild();
-        return;
-      }
-      if (dirtySet.put(point, Boolean.TRUE) == null) dirtyQueue.addLast(point);
-      if (dirtySet.size() > MAX_PENDING_POINT_DELTAS) {
-        // A post-load topology burst is cheaper and more compact as one
-        // replacement snapshot than as an unbounded queue of point deltas.
-        sourceEpoch++;
-        requestFullBuild();
-        return;
-      }
-      if (phase == READY) enterRefreshing();
-      retryAtNanos = 0L;
-      enqueue(this);
-    }
-
-    PointRecord recordFor(JumpPointAPI point) {
-      if (refresh != null && refresh.oldRecord.point == point) return refresh.oldRecord;
-      if (build != null) {
-        PointRecord record = build.data.byPoint.get(point);
-        if (record != null) return record;
-      }
-      return data == null ? null : data.byPoint.get(point);
-    }
-
-    boolean hasWork() {
-      if (!active || phase == FAILED) return false;
-      return fullBuildRequested || build != null || refresh != null || !dirtyQueue.isEmpty();
-    }
-
-    boolean workOne(PrepatcherConfig config, long now) {
-      if (!active) return false;
-      if (phase == FAILED) {
-        if (now < retryAtNanos) {
-          scheduleRetry(this);
-          return false;
-        }
-        RETRIES.increment();
-        unlinkEvictable(this);
-        phase = BUILDING;
-        fullBuildRequested = true;
-        beginPending();
-      }
-      if (fullBuildRequested || build != null) { return buildOne(config, now); }
-      if (refresh != null || !dirtyQueue.isEmpty()) { return refreshOne(config, now); }
-      if (data != null) enterReady(now);
-      return false;
-    }
-
-    private boolean buildOne(PrepatcherConfig config, long now) {
-      if (build == null) {
-        List<?> live = observedSource;
-        if (live == null) {
-          try {
-            live = location.getEntities(jumpPointType);
-          } catch (Throwable failure) {
-            fail(config, now);
-            return false;
-          }
-          if (live == null) {
-            fail(config, now);
-            return false;
-          }
-          observeSource(live);
-        }
-        build = new BuildTask(this, live, sourceEpoch);
-        fullBuildRequested = false;
-        phase = BUILDING;
-        BUILDS_STARTED.increment();
-      }
-
-      BuildResult result = build.step();
-      if (result == BuildResult.MORE) return true;
-      if (result == BuildResult.FAILED) {
-        fail(config, now);
-        return false;
-      }
-      if (result == BuildResult.RESTART || build.sourceEpoch != sourceEpoch || !fastSourceMatches(build.source)) {
-        invalidateSource();
-        BUILD_RESTARTS.increment();
-        return true;
-      }
-
-      data = build.data;
-      build = null;
-      audit = null;
-      consecutiveFailures = 0;
-      BUILDS_COMPLETED.increment();
-      if (dirtyQueue.isEmpty()) {
-        enterReady(now);
-        return false;
-      }
-      enterRefreshing();
-      return true;
-    }
-
-    private boolean refreshOne(PrepatcherConfig config, long now) {
-      if (data == null) {
-        requestFullBuild();
-        return true;
-      }
-      if (refresh == null) {
-        JumpPointAPI point = null;
-        while (!dirtyQueue.isEmpty() && point == null) {
-          JumpPointAPI candidate = dirtyQueue.removeFirst();
-          if (dirtySet.remove(candidate) != null) point = candidate;
-        }
-        if (point == null) {
-          enterReady(now);
-          return false;
-        }
-        PointRecord old = data.byPoint.get(point);
-        if (old == null) {
-          invalidateSource();
-          return true;
-        }
-        refresh = new PointRefreshTask(this, data, old);
-      }
-
-      RefreshResult result = refresh.step();
-      if (result == RefreshResult.MORE) return true;
-      if (result == RefreshResult.FAILED) {
-        refresh = null;
-        fail(config, now);
-        return false;
-      }
-      refresh = null;
-      audit = null;
-      POINT_REFRESHES.increment();
-      if (!dirtyQueue.isEmpty()) return true;
-      enterReady(now);
-      return false;
-    }
-
-    boolean auditOne() {
-      if (!active || phase != READY || data == null) return false;
-      if (audit == null) audit = new AuditTask(this, data);
-      AuditResult result = audit.step();
-      if (result == AuditResult.CYCLE_COMPLETE) {
-        audit = null;
-        return false;
-      }
-      if (result == AuditResult.SOURCE_CHANGED) {
-        audit = null;
-        invalidateSource();
-        AUDIT_REPAIRS.increment();
-        return false;
-      }
-      if (result == AuditResult.POINT_CHANGED) {
-        JumpPointAPI point = audit.changedPoint;
-        audit = null;
-        markPointDirty(point);
-        AUDIT_REPAIRS.increment();
-        return false;
-      }
-      return true;
-    }
-
-    void fail(PrepatcherConfig config, long now) {
-      unlinkAudit(this);
-      unlinkEvictable(this);
-      removeRetry(this);
-      data = null;
-      build = null;
-      refresh = null;
-      audit = null;
-      fullBuildRequested = false;
-      dirtyQueue.clear();
-      dirtySet.clear();
-      phase = FAILED;
-      beginPending();
-      consecutiveFailures = Math.min(16, consecutiveFailures + 1);
-      long delay = (long) config.strategicJumpIndexFailureRetryMs * 1_000_000L;
-      int shift = Math.min(4, consecutiveFailures - 1);
-      delay = Math.min(delay << shift, 300_000_000_000L);
-      retryAtNanos = now + Math.max(1L, delay);
-      linkEvictableTail(this);
-      scheduleRetry(this);
-      FAILURES.increment();
-    }
-  }
-
-  private enum BuildResult {
-    MORE, COMPLETE, RESTART, FAILED
-  }
-  private enum RefreshResult {
-    MORE, COMPLETE, FAILED
-  }
-  private enum AuditResult {
-    MORE, CYCLE_COMPLETE, SOURCE_CHANGED, POINT_CHANGED
-  }
-
-  private static final class BuildTask {
-    final LocationState state;
-    final List<?> source;
-    final int size;
-    final boolean randomAccess;
-    final Object first;
-    final Object last;
-    final long sourceEpoch;
-    final IndexData data;
-    Iterator<?> sourceIterator;
-    int sourceIndex;
-    PointCapture capture;
-    PointRecord pendingRecord;
-    int contributionIndex;
-    int captureRestarts;
-
-    BuildTask(LocationState state, List<?> source, long sourceEpoch) {
-      this.state = state;
-      this.source = source;
-      this.size = source.size();
-      this.randomAccess = source instanceof RandomAccess;
-      this.first = size == 0 ? null : safeGet(source, 0);
-      this.last = size == 0 || !randomAccess ? null : safeGet(source, size - 1);
-      this.sourceEpoch = sourceEpoch;
-      this.data = new IndexData(source, size, first, last, randomAccess);
-      if (!randomAccess) sourceIterator = source.iterator();
-    }
-
-    BuildResult step() {
-      try {
-        if (pendingRecord != null) {
-          if (contributionIndex < pendingRecord.locationCount) {
-            data.addContribution(pendingRecord, pendingRecord.locations[contributionIndex++]);
-            return BuildResult.MORE;
-          }
-          pendingRecord = null;
-          sourceIndex++;
-          return sourceIndex >= size ? BuildResult.COMPLETE : BuildResult.MORE;
-        }
-        if (capture != null) {
-          if (!capture.complete()) {
-            if (!capture.captureOne()) {
-              capture = null;
-              if (++captureRestarts > 16) return BuildResult.FAILED;
-            }
-            return BuildResult.MORE;
-          }
-          if (!capture.stable()) {
-            capture = null;
-            if (++captureRestarts > 16) return BuildResult.FAILED;
-            return BuildResult.MORE;
-          }
-          PointRecord record = capture.finish();
-          capture = null;
-          captureRestarts = 0;
-          if (data.byPoint.put(record.point, record) != null) { return BuildResult.FAILED; }
-          data.records.set(record.ordinal, record);
-          pendingRecord = record;
-          contributionIndex = 0;
-          return BuildResult.MORE;
-        }
-        if (sourceIndex >= size) return BuildResult.COMPLETE;
-        if (source.size() != size) return BuildResult.RESTART;
-        Object raw = randomAccess ? source.get(sourceIndex) : sourceIterator.next();
-        if (!(raw instanceof JumpPointAPI point)) return BuildResult.FAILED;
-        capture = new PointCapture(state, point, sourceIndex);
-        return BuildResult.MORE;
-      } catch (Throwable failure) {
-        return BuildResult.FAILED;
-      }
-    }
-  }
-
-  private static final class PointRefreshTask {
-    private static final int CAPTURE = 1;
-    private static final int REMOVE = 2;
-    private static final int ADD = 3;
-    private static final int COMMIT = 4;
-
-    final LocationState state;
-    final IndexData data;
-    final PointRecord oldRecord;
-    PointCapture capture;
-    PointRecord newRecord;
-    int phase = CAPTURE;
-    int index;
-    int captureRestarts;
-
-    PointRefreshTask(LocationState state, IndexData data, PointRecord oldRecord) {
-      this.state = state;
-      this.data = data;
-      this.oldRecord = oldRecord;
-    }
-
-    RefreshResult step() {
-      try {
-        if (phase == CAPTURE) {
-          if (capture == null) {
-            capture = new PointCapture(state, oldRecord.point, oldRecord.ordinal);
-            return RefreshResult.MORE;
-          }
-          if (!capture.complete()) {
-            if (!capture.captureOne()) {
-              capture = null;
-              if (++captureRestarts > 16) return RefreshResult.FAILED;
-            }
-            return RefreshResult.MORE;
-          }
-          if (!capture.stable()) {
-            capture = null;
-            if (++captureRestarts > 16) return RefreshResult.FAILED;
-            return RefreshResult.MORE;
-          }
-          newRecord = capture.finish();
-          capture = null;
-          captureRestarts = 0;
-          phase = REMOVE;
-          index = 0;
-          return RefreshResult.MORE;
-        }
-        if (phase == REMOVE) {
-          if (index < oldRecord.locationCount) {
-            data.removeContribution(oldRecord, oldRecord.locations[index++]);
-            return RefreshResult.MORE;
-          }
-          phase = ADD;
-          index = 0;
-          return RefreshResult.MORE;
-        }
-        if (phase == ADD) {
-          if (index < newRecord.locationCount) {
-            data.addContribution(newRecord, newRecord.locations[index++]);
-            return RefreshResult.MORE;
-          }
-          phase = COMMIT;
-          return RefreshResult.MORE;
-        }
-        data.byPoint.put(newRecord.point, newRecord);
-        data.records.set(newRecord.ordinal, newRecord);
-        data.clearMergeCache();
-        return RefreshResult.COMPLETE;
-      } catch (Throwable failure) {
-        return RefreshResult.FAILED;
-      }
-    }
-  }
-
-  private static final class AuditTask {
-    final LocationState state;
-    final IndexData data;
-    Iterator<?> sourceIterator;
-    int ordinal;
-    int destinationIndex = -1;
-    Iterator<?> destinationIterator;
-    PointRecord current;
-    JumpPointAPI changedPoint;
-
-    AuditTask(LocationState state, IndexData data) {
-      this.state = state;
-      this.data = data;
-      if (!data.randomAccess) sourceIterator = data.source.iterator();
-    }
-
-    AuditResult step() {
-      try {
-        if (data.source != state.observedSource || data.source.size() != data.size) {
-          return AuditResult.SOURCE_CHANGED;
-        }
-        if (ordinal >= data.size) return AuditResult.CYCLE_COMPLETE;
-        current = data.records.get(ordinal);
-        if (current == null) return AuditResult.SOURCE_CHANGED;
-
-        if (destinationIndex < 0) {
-          Object raw = data.randomAccess ? data.source.get(ordinal) : sourceIterator.next();
-          if (raw != current.point) return AuditResult.SOURCE_CHANGED;
-          List<JumpPointAPI.JumpDestination> live = current.point.getDestinations();
-          if (live == null || live.size() != current.destinationCount) {
-            changedPoint = current.point;
-            return AuditResult.POINT_CHANGED;
-          }
-          destinationIterator = live instanceof RandomAccess ? null : live.iterator();
-          destinationIndex = 0;
-          if (current.destinationCount == 0) {
-            ordinal++;
-            destinationIndex = -1;
-          }
-          return AuditResult.MORE;
-        }
-
-        Object liveDestination;
-        List<JumpPointAPI.JumpDestination> live = current.point.getDestinations();
-        if (live == null || live.size() != current.destinationCount) {
-          changedPoint = current.point;
-          return AuditResult.POINT_CHANGED;
-        }
-        liveDestination = live instanceof RandomAccess ? live.get(destinationIndex) : destinationIterator.next();
-        if (!current.matches(destinationIndex, liveDestination)) {
-          changedPoint = current.point;
-          return AuditResult.POINT_CHANGED;
-        }
-        destinationIndex++;
-        if (destinationIndex >= current.destinationCount) {
-          ordinal++;
-          destinationIndex = -1;
-          destinationIterator = null;
-        }
-        return AuditResult.MORE;
-      } catch (Throwable failure) {
-        if (destinationIndex >= 0 && current != null) changedPoint = current.point;
-        return destinationIndex < 0 ? AuditResult.SOURCE_CHANGED : AuditResult.POINT_CHANGED;
-      }
-    }
-  }
-
-  private static final class PointCapture {
-    final LocationState state;
-    final JumpPointAPI point;
-    final int ordinal;
-    final List<JumpPointAPI.JumpDestination> live;
-    final boolean randomAccess;
-    final int size;
-    final Object[] snapshot;
-    final LocationAPI[] locations;
-    final SegmentedIdentityMap<LocationAPI, Boolean> seen;
-    final PointRecord provisional;
-    Iterator<JumpPointAPI.JumpDestination> iterator;
-    int cursor;
-    int locationCount;
-
-    PointCapture(LocationState state, JumpPointAPI point, int ordinal) {
-      this.state = state;
-      this.point = point;
-      this.ordinal = ordinal;
-      this.live = point.getDestinations();
-      if (live == null) throw new IllegalStateException("JumpPoint destination list is null");
-      this.randomAccess = live instanceof RandomAccess;
-      this.size = live.size();
-      this.snapshot = size == 0 ? PointRecord.EMPTY_OBJECTS : new Object[size * 3];
-      this.locations = size == 0 ? PointRecord.EMPTY_LOCATIONS : new LocationAPI[size];
-      this.seen = size > 8 ? new SegmentedIdentityMap<>(size) : null;
-      this.provisional = new PointRecord(state, point, ordinal, size, snapshot, locations, 0);
-      if (!randomAccess) iterator = live.iterator();
-    }
-
-    boolean complete() {
-      return cursor >= size;
-    }
-
-    boolean captureOne() {
-      if (live.size() != size) return false;
-      JumpPointAPI.JumpDestination destination;
-      try {
-        destination = randomAccess ? live.get(cursor) : iterator.next();
-      } catch (IndexOutOfBoundsException | NoSuchElementException | java.util.ConcurrentModificationException changed) {
-        return false;
-      }
-      if (destination == null) throw new IllegalStateException("Null JumpDestination");
-      SectorEntityToken target = destination.getDestination();
-      LocationAPI location = target == null ? null : target.getContainingLocation();
-      int offset = cursor * 3;
-      snapshot[offset] = destination;
-      snapshot[offset + 1] = target;
-      snapshot[offset + 2] = location;
-      destinationOwners.put(destination, provisional);
-      if (target != null && addUnique(location)) locations[locationCount++] = location;
-      cursor++;
-      return true;
-    }
-
-    boolean stable() {
-      try {
-        return live.size() == size;
-      } catch (Throwable failure) {
-        return false;
-      }
-    }
-
-    PointRecord finish() {
-      provisional.locationCount = locationCount;
-      return provisional;
-    }
-
-    private boolean addUnique(LocationAPI location) {
-      if (seen != null) return seen.put(location, Boolean.TRUE) == null;
-      for (int i = 0; i < locationCount; i++) {
-        if (locations[i] == location) return false;
-      }
-      return true;
-    }
-  }
-
-  private static final class PointRecord {
-    static final Object[] EMPTY_OBJECTS = new Object[0];
-    static final LocationAPI[] EMPTY_LOCATIONS = new LocationAPI[0];
-
-    final LocationState state;
-    final JumpPointAPI point;
-    final int ordinal;
-    final int destinationCount;
-    final Object[] snapshot;
-    final LocationAPI[] locations;
-    int locationCount;
-
-    PointRecord(LocationState state, JumpPointAPI point, int ordinal, int destinationCount, Object[] snapshot,
-        LocationAPI[] locations, int locationCount) {
-      this.state = state;
-      this.point = point;
-      this.ordinal = ordinal;
-      this.destinationCount = destinationCount;
-      this.snapshot = snapshot;
-      this.locations = locations;
-      this.locationCount = locationCount;
-    }
-
-    boolean matches(int index, Object rawDestination) {
-      if (!(rawDestination instanceof JumpPointAPI.JumpDestination destination)) return false;
-      int offset = index * 3;
-      if (snapshot[offset] != destination) return false;
-      SectorEntityToken target = destination.getDestination();
-      if (snapshot[offset + 1] != target) return false;
-      LocationAPI location = target == null ? null : target.getContainingLocation();
-      return snapshot[offset + 2] == location;
-    }
-  }
-
-  private static final class IndexData {
-    private static final int MERGE_CACHE_SIZE = 8;
-
-    final List<?> source;
-    final int size;
-    final Object first;
-    final Object last;
-    final boolean randomAccess;
-    final PointRecordTable records;
-    final SegmentedIdentityMap<JumpPointAPI, PointRecord> byPoint;
-    final SegmentedIdentityMap<LocationAPI, CandidateBucket> byDestination;
-    final LocationAPI[] mergeDirectKeys = new LocationAPI[MERGE_CACHE_SIZE];
-    final LocationAPI[] mergeFallbackKeys = new LocationAPI[MERGE_CACHE_SIZE];
-    final List<?>[] mergeValues = new List<?>[MERGE_CACHE_SIZE];
-    int mergeCursor;
-
-    IndexData(List<?> source, int size, Object first, Object last, boolean randomAccess) {
-      this.source = source;
-      this.size = size;
-      this.first = first;
-      this.last = last;
-      this.randomAccess = randomAccess;
-      this.records = new PointRecordTable();
-      this.byPoint = new SegmentedIdentityMap<>(size);
-      this.byDestination = new SegmentedIdentityMap<>(size);
-    }
-
-    void addContribution(PointRecord record, LocationAPI location) {
-      CandidateBucket bucket = byDestination.get(location);
-      if (bucket == null) {
-        bucket = new CandidateBucket();
-        byDestination.put(location, bucket);
-      }
-      bucket.add(record);
-    }
-
-    void removeContribution(PointRecord record, LocationAPI location) {
-      CandidateBucket bucket = byDestination.get(location);
-      if (bucket == null) return;
-      bucket.remove(record);
-      if (bucket.isEmpty()) byDestination.remove(location);
-    }
-
-    @SuppressWarnings("rawtypes")
-    List candidates(LocationAPI requested, LocationAPI fallback, boolean includeFallback) {
-      CandidateBucket direct = byDestination.get(requested);
-      if (!includeFallback || requested == fallback) { return direct == null ? DEFERRED : direct; }
-      CandidateBucket fallbackBucket = byDestination.get(fallback);
-      if (direct == null) return fallbackBucket == null ? DEFERRED : fallbackBucket;
-      if (fallbackBucket == null || fallbackBucket == direct) return direct;
-      for (int i = 0; i < MERGE_CACHE_SIZE; i++) {
-        if (mergeDirectKeys[i] == requested && mergeFallbackKeys[i] == fallback) { return (List) mergeValues[i]; }
-      }
-      MergedCandidateList merged = new MergedCandidateList(direct, fallbackBucket);
-      int slot = mergeCursor++ & (MERGE_CACHE_SIZE - 1);
-      mergeDirectKeys[slot] = requested;
-      mergeFallbackKeys[slot] = fallback;
-      mergeValues[slot] = merged;
-      return merged;
-    }
-
-    void clearMergeCache() {
-      for (int i = 0; i < MERGE_CACHE_SIZE; i++) {
-        mergeDirectKeys[i] = null;
-        mergeFallbackKeys[i] = null;
-        mergeValues[i] = null;
-      }
-      mergeCursor = 0;
-    }
-  }
-
-  private static final class CandidateBucket extends AbstractList<SectorEntityToken> implements RandomAccess {
-    private static final Comparator<PointRecord> BY_ORDINAL = Comparator.comparingInt(record -> record.ordinal);
-    final TreeSet<PointRecord> records = new TreeSet<>(BY_ORDINAL);
-
-    void add(PointRecord record) {
-      if (!records.add(record)) {
-        PointRecord existing = records.ceiling(record);
-        if (existing == null || existing.ordinal != record.ordinal || existing.point != record.point) {
-          throw new IllegalStateException("Duplicate strategic jump ordinal");
-        }
-      }
-    }
-
-    void remove(PointRecord record) {
-      records.remove(record);
-    }
-
-    @Override
-    public SectorEntityToken get(int index) {
-      if (index < 0 || index >= records.size()) throw new IndexOutOfBoundsException(index);
-      int current = 0;
-      for (PointRecord record : records) {
-        if (current++ == index) return (SectorEntityToken) record.point;
-      }
-      throw new IndexOutOfBoundsException(index);
-    }
-
-    @Override
-    public int size() {
-      return records.size();
-    }
-
-    @Override
-    public Iterator<SectorEntityToken> iterator() {
-      Iterator<PointRecord> delegate = records.iterator();
-      return new Iterator<>() {
-        @Override
-        public boolean hasNext() {
-          return delegate.hasNext();
-        }
-        @Override
-        public SectorEntityToken next() {
-          return (SectorEntityToken) delegate.next().point;
-        }
-      };
-    }
-  }
-
-  private static final class MergedCandidateList extends AbstractList<SectorEntityToken> implements RandomAccess {
-    final CandidateBucket first;
-    final CandidateBucket second;
-    int cachedSize = -1;
-
-    MergedCandidateList(CandidateBucket first, CandidateBucket second) {
-      this.first = first;
-      this.second = second;
-    }
-
-    @Override
-    public SectorEntityToken get(int index) {
-      if (index < 0 || index >= size()) throw new IndexOutOfBoundsException(index);
-      Iterator<SectorEntityToken> iterator = iterator();
-      for (int i = 0; i < index; i++) iterator.next();
-      return iterator.next();
-    }
-
-    @Override
-    public int size() {
-      int result = cachedSize;
-      if (result < 0) {
-        result = mergedSize(first.records.iterator(), second.records.iterator());
-        cachedSize = result;
-      }
-      return result;
-    }
-
-    @Override
-    public Iterator<SectorEntityToken> iterator() {
-      return new MergeIterator(first.records.iterator(), second.records.iterator());
-    }
-
-    private static int mergedSize(Iterator<PointRecord> first, Iterator<PointRecord> second) {
-      PointRecord a = first.hasNext() ? first.next() : null;
-      PointRecord b = second.hasNext() ? second.next() : null;
-      int count = 0;
-      while (a != null || b != null) {
-        count++;
-        if (b == null || (a != null && a.ordinal < b.ordinal)) {
-          a = first.hasNext() ? first.next() : null;
-        } else if (a == null || b.ordinal < a.ordinal) {
-          b = second.hasNext() ? second.next() : null;
-        } else {
-          a = first.hasNext() ? first.next() : null;
-          b = second.hasNext() ? second.next() : null;
-        }
-      }
-      return count;
-    }
-  }
-
-  private static final class MergeIterator implements Iterator<SectorEntityToken> {
-    final Iterator<PointRecord> first;
-    final Iterator<PointRecord> second;
-    PointRecord a;
-    PointRecord b;
-
-    MergeIterator(Iterator<PointRecord> first, Iterator<PointRecord> second) {
-      this.first = first;
-      this.second = second;
-      a = first.hasNext() ? first.next() : null;
-      b = second.hasNext() ? second.next() : null;
-    }
-
-    @Override
-    public boolean hasNext() {
-      return a != null || b != null;
-    }
-
-    @Override
-    public SectorEntityToken next() {
-      if (!hasNext()) throw new NoSuchElementException();
-      PointRecord result;
-      if (b == null || (a != null && a.ordinal < b.ordinal)) {
-        result = a;
-        a = first.hasNext() ? first.next() : null;
-      } else if (a == null || b.ordinal < a.ordinal) {
-        result = b;
-        b = second.hasNext() ? second.next() : null;
-      } else {
-        result = a;
-        a = first.hasNext() ? first.next() : null;
-        b = second.hasNext() ? second.next() : null;
-      }
-      return (SectorEntityToken) result.point;
-    }
-  }
-
-  private static final class PointRecordTable {
-    private static final int SHIFT = 6;
-    private static final int CHUNK = 1 << SHIFT;
-    private final ArrayList<PointRecord[]> chunks = new ArrayList<>();
-
-    void set(int index, PointRecord record) {
-      int chunkIndex = index >> SHIFT;
-      while (chunks.size() <= chunkIndex) chunks.add(new PointRecord[CHUNK]);
-      chunks.get(chunkIndex)[index & (CHUNK - 1)] = record;
-    }
-
-    PointRecord get(int index) {
-      int chunkIndex = index >> SHIFT;
-      if (chunkIndex >= chunks.size()) return null;
-      return chunks.get(chunkIndex)[index & (CHUNK - 1)];
-    }
-  }
-
-  /** Identity map sharded so no resize ever copies the complete location index. */
-  private static final class SegmentedIdentityMap<K, V> {
-    private final IdentityHashMap<K, V>[] segments;
-    private final int mask;
-
-    @SuppressWarnings("unchecked")
-    SegmentedIdentityMap(int expectedSize) {
-      int count = 4;
-      while (count < 128 && count * 16 < Math.max(1, expectedSize)) count <<= 1;
-      segments = (IdentityHashMap<K, V>[]) new IdentityHashMap<?, ?>[count];
-      mask = count - 1;
-    }
-
-    V get(K key) {
-      IdentityHashMap<K, V> segment = segments[index(key)];
-      return segment == null ? null : segment.get(key);
-    }
-
-    V put(K key, V value) {
-      int index = index(key);
-      IdentityHashMap<K, V> segment = segments[index];
-      if (segment == null) segments[index] = segment = new IdentityHashMap<>(8);
-      return segment.put(key, value);
-    }
-
-    V remove(K key) {
-      IdentityHashMap<K, V> segment = segments[index(key)];
-      return segment == null ? null : segment.remove(key);
-    }
-
-    private int index(K key) {
-      int hash = System.identityHashCode(key);
-      hash ^= hash >>> 16;
-      return hash & mask;
-    }
-  }
-
-  /**
-   * Four-way set-associative weak identity cache. It is intentionally bounded:
-   * missed setter events are repaired by the incremental audit, while entries
-   * from evicted locations cannot accumulate for the lifetime of the campaign.
-   */
-  private static final class WeakIdentityOwnerCache {
-    private static final int WAYS = 4;
-    private final WeakReference<JumpPointAPI.JumpDestination>[] keys;
-    private final WeakReference<PointRecord>[] values;
-    private final int[] stamps;
-    private final byte[] nextWay;
-    private final int setMask;
-    private int epoch = 1;
-
-    @SuppressWarnings("unchecked")
-    WeakIdentityOwnerCache(int requestedCapacity) {
-      int sets = 1;
-      int requestedSets = Math.max(1, requestedCapacity / WAYS);
-      while (sets < requestedSets) sets <<= 1;
-      keys = (WeakReference<JumpPointAPI.JumpDestination>[]) new WeakReference<?>[sets * WAYS];
-      values = (WeakReference<PointRecord>[]) new WeakReference<?>[sets * WAYS];
-      stamps = new int[sets * WAYS];
-      nextWay = new byte[sets];
-      setMask = sets - 1;
-    }
-
-    PointRecord get(JumpPointAPI.JumpDestination key) {
-      if (key == null) return null;
-      int base = setBase(key);
-      for (int way = 0; way < WAYS; way++) {
-        int slot = base + way;
-        if (stamps[slot] != epoch) continue;
-        WeakReference<JumpPointAPI.JumpDestination> keyReference = keys[slot];
-        if (keyReference == null || keyReference.get() != key) continue;
-        WeakReference<PointRecord> valueReference = values[slot];
-        return valueReference == null ? null : valueReference.get();
-      }
-      return null;
-    }
-
-    void put(JumpPointAPI.JumpDestination key, PointRecord value) {
-      if (key == null || value == null) return;
-      int base = setBase(key);
-      int selected = -1;
-      for (int way = 0; way < WAYS; way++) {
-        int slot = base + way;
-        if (stamps[slot] != epoch) {
-          if (selected < 0) selected = slot;
-          continue;
-        }
-        WeakReference<JumpPointAPI.JumpDestination> keyReference = keys[slot];
-        JumpPointAPI.JumpDestination existing = keyReference == null ? null : keyReference.get();
-        WeakReference<PointRecord> valueReference = values[slot];
-        if (existing == key) {
-          values[slot] = new WeakReference<>(value);
-          return;
-        }
-        if (selected < 0 && (existing == null || valueReference == null || valueReference.get() == null)) {
-          selected = slot;
-        }
-      }
-      if (selected < 0) {
-        int set = base / WAYS;
-        selected = base + (nextWay[set]++ & (WAYS - 1));
-      }
-      keys[selected] = new WeakReference<>(key);
-      values[selected] = new WeakReference<>(value);
-      stamps[selected] = epoch;
-    }
-
-    void clear() {
-      epoch++;
-      if (epoch == 0) {
-        Arrays.fill(stamps, 0);
-        epoch = 1;
-      }
-    }
-
-    private int setBase(Object key) {
-      int hash = System.identityHashCode(key);
-      hash ^= hash >>> 16;
-      return (hash & setMask) * WAYS;
-    }
-  }
 }
