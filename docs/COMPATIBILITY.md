@@ -406,18 +406,39 @@ ULP fixtures входят в actual-agent regression suite.
   `2000f * mapScale` step после starscape guard. Radar constant не меняется.
 - `EventsPanel.addMissingIconsAndRows`: entity local берётся из результата
   `H.getIntelIconEntity`; missing-list должен быть свежим локальным `ArrayList`.
+- `patch.intelCallbackCache` and `patch.mapHitTest` on class `A` apply only through the unified
+  `mapInteractionPlan` owner. The two member surfaces are genuinely disjoint — the Intel callback
+  site sits in `o00000(Lcom/fs/starfarer/util/A/new;)V` while the hit test owns `OO0000(FFF)` —
+  but they share the class's method inventory: the hit-test member renames `OO0000` and adds the
+  dispatch wrapper, so call-site members must see the preserved original body rather than the
+  wrapper. The two keys form a feature mask; either member may run alone. Both member surfaces are
+  proven on the same incoming bytes, then applied to an isolated candidate in the explicit order
+  callback → hit-test; the combined postcondition covers whichever mask was requested. One
+  ownership marker and a private static final mask commit in a single transaction; a member that
+  cannot match rejects the whole plan, and legacy split markers or unowned partial state are
+  refused rather than adopted. The `intelCallbackCache` patch on `EventsPanel` is a genuinely
+  disjoint surface on a different class and keeps its own id — the regression proving neither can
+  be silently skipped by the other is the class-A plan-rejection check that still transforms
+  `EventsPanel`.
 - `CampaignEngine.advance`: receiver — `this`; backing systems/hyperspace fields выводятся из
   реализации `readdChangeListeners` и передаются hook напрямую.
-- `patch.entityLookupIndexRepair` owns the same `CampaignEngine.advance(FLcom/fs/starfarer/util/A/new;)V`
-  listener boundary as `patch.campaignListenerThrottle`. Application order is explicit in the
-  transformer: entity-index repair first, listener throttle second. The repair matcher accepts the
-  raw virtual `readdChangeListeners()V` boundary and its valid throttled static post-state; the later
-  throttle consumes the repair's current bytes. Generic composition validation re-runs the repair
-  postcondition after the throttle and rolls the whole class back to incoming bytes if either
-  postcondition no longer holds. The repair also structurally reads the private
-  `rebuildIDToEntityMap()V`, its `getEntityById(String)` call/data flow and the map allocation/write
-  region; it inserts only a private transient synthetic readiness bit and a guarded rebuild directly
-  after the listener boundary.
+- `patch.entityLookupIndexRepair` and `patch.campaignListenerThrottle` share the
+  `CampaignEngine.advance(FLcom/fs/starfarer/util/A/new;)V` listener-restoration boundary and apply
+  only through the unified `campaignListenerPlan` owner. The two keys form a feature mask; either
+  member may run alone. Both member surfaces are proven on the same incoming bytes, then applied to
+  an isolated candidate in the explicit order repair → throttle: the repair anchors its guarded
+  rebuild after the raw `readdChangeListeners()V` call and the throttle rewrites that call in place.
+  The repair matcher recognizes both the raw virtual boundary and its throttled static post-state,
+  so the combined postcondition holds under either member order. One ownership marker and a private
+  static final mask commit in a single transaction; a member that cannot match rejects the whole
+  plan, and legacy split markers or unowned partial state are refused rather than adopted. The
+  repair also structurally reads the private `rebuildIDToEntityMap()V`, its `getEntityById(String)`
+  call/data flow and the map allocation/write region; it inserts only a private transient synthetic
+  readiness bit and a guarded rebuild directly after the listener boundary. The other
+  `CampaignEngine` patch ids (`coreWorldsExtentCache`, `campaignCacheLifecycle`, `marketScheduler`)
+  stay separate because their surfaces are genuinely disjoint from the listener-restoration
+  boundary; the regression proving neither the plan nor they can be silently skipped by the other
+  is the member-rejection check that still applies them on the rejected plan's class.
 - `BaseLocation.advance` и `advanceEvenIfPaused`: matcher требует соответственно ровно три и два
   `new ArrayList(Collection)`, каждый результат должен сразу записываться в отдельный local.
   Data-flow разрешает только ожидаемые вызовы `List.iterator()` от этого local (один на snapshot,
@@ -469,6 +490,14 @@ ULP fixtures входят в actual-agent regression suite.
   scope с
   очисткой на каждом normal/exceptional exit; catch-all handler получает явный `F_FULL` frame
   с исходными locals.
+- `DynamicParticleGroup.advance(F)V` и `Ship.advance(F)V`: `match` связывает receivers
+  scratch collection calls с непосредственными `ASTORE` исходных allocations до изменения
+  bytecode. Между store и call не допускается повторный `ASTORE` в тот же slot;
+  последующее переиспользование slot разрешено. Particle требует один `List.add`, Ship —
+  три scratch `List.add`, один `Set.add` и один `Set.addAll`; четвёртый vanilla `List.add`
+  Ship остаётся без замены. Plan содержит подтверждённые call sites. Неподходящий receiver,
+  включая `ACONST_NULL` при сохранённых counts, отвергается в `match` без изменения candidate.
+  Для исходных game jars transformation и postconditions остаются прежними.
 - Два internal-read sites `HyperspaceTerrainPlugin` могут читать `HyperspaceAutomaton.cells`
   напрямую только для точного vanilla runtime owner и только когда buffer-reuse transformation
   подтверждена. Для subclass, неподтверждённого patch state или недоступного поля используется
@@ -571,17 +600,36 @@ relationship snapshot — раз в `route.indexTtlMs`. Это сохраняе�
 видимость прямой мутации сторонним модом. Значение TTL `0` отключает runtime index; в
 `profiles/safe.properties` route patch отключён полностью.
 
+Компоненты `StrategicModule` — lazy hostile-market score и budgeted destination index —
+применяются только через единый `strategicJumpDestinationPlan` с одним ownership marker и feature
+mask. Публичные ключи `patch.strategicJumpDestinationFirst` и `patch.strategicJumpDestinationIndex`
+выбирают компоненты mask; index-only конфигурация нормализуется в disabled, потому что
+index-компонент определён над post-state destination-first. Оба компонента проверяются на
+одинаковых входных bytes и применяются к изолированному candidate в явном порядке
+destination-first → index: matcher второго компонента видит фактическое преобразованное состояние
+candidate, поэтому результат не зависит от dispatch order. Несовместимость любого запрошенного
+компонента отклоняет весь plan: класс остаётся полностью vanilla со `SKIPPED_STRUCTURAL`, а не
+получает частичное преобразование. Legacy split markers `strategicJumpDestinationFirst`/
+`strategicJumpDestinationIndex` и unowned hook-shaped state не принимаются и не мигрируются.
+
 `patch.strategicJumpDestinationFirst` не использует route index, TTL или runtime helper. Это
-самостоятельная inline-трансформация `StrategicModule.findNearestSafeJumpPoint`: accepted destination
+inline-компонент `StrategicModule.findNearestSafeJumpPoint`: accepted destination
 predicate остаётся vanilla, а `getNumHostileMarkets` лениво выполняется не более одного раза на
 принятый jump point. Поэтому патч не зависит от `patch.routeJumpPointIndex` и не делит с ним
 transformation surface. Несовпадение radius/multiplier/control-flow либо foreign lazy-state оставляет
 весь класс без изменений со `SKIPPED_STRUCTURAL`.
 
-`patch.strategicJumpDestinationIndex` имеет явную structural-зависимость от destination-first и
-потребляет его уже преобразованный post-state. Он также требует owned lifecycle-maintenance hook,
+Index-компонент также требует owned lifecycle-maintenance hook,
 `JumpPoint` destination mutators, `JumpDestination.setDestination` и membership hooks `BaseLocation`.
 До загрузки всех поверхностей capability остаётся `PENDING`, partial index не публикуется.
+
+`strategicJumpDestinationIndex` остаётся отдельным patch id на `JumpPoint`,
+`JumpPointAPI$JumpDestination` и `BaseLocation`: эти topology surfaces genuinely disjoint от
+`StrategicModule` destination plan — они находятся в других классах и ни один из них не читает и
+не изменяет `findNearestSafeJumpPoint`/`updateJumpPlanTo`. Регрессия, доказывающая, что ни один
+из них не может быть молча пропущен из-за другого, — проверка в
+`StrategicJumpDestinationIndexTransformerTest`, где отклонённый `StrategicModule` plan не блокирует
+независимое применение `JumpPoint` topology patch.
 
 Runtime не использует route-widget cache и не определяет тип current location. Каждый запрошенный
 `LocationAPI` принимается одинаково, с bounded admission rate и bounded LRU. Первый lookup только

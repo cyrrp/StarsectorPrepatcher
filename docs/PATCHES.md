@@ -29,24 +29,22 @@ classfile или JAR не участвует в решении.
 |---|---|---|---|
 | `patch.mapRenderStuff` | map `A.H.renderStuff` | atomic linear reconciliation plus reusable entity/class collections under one scratch scope | all three semantic sites, ownership marker, non-escape contracts and scope must match together; `LinkedHashMap` order and equality-aware fallback remain |
 | `patch.labelSpatialCandidates` | map labels | spatial candidate buckets | original exact overlap checks остаются |
-| `patch.intelCallbackCache` | Intel map locations | short TTL для `getMapLocation` | miss/error вызывает callback |
+| `patch.intelCallbackCache` | `EventsPanel` Intel map locations | short TTL для `getMapLocation` | miss/error вызывает callback; class-A instance belongs to `mapInteractionPlan` |
 | `patch.intelEntityIndex` | Intel synthetic entities | identity index | generation/TTL/fallback |
 | `patch.intelReconciliation` | `EventsPanel.addMissingIconsAndRows` | atomic missing-plugin hash membership plus direct existing-icon candidates under one scratch scope | both semantic sites, scope and ownership marker must match together; vanilla equality and full-scan fallback remain |
-| `patch.mapHitTest` | map `A.OO0000(FFF)` hit test | atomic reusable hit list/point plus bounded exact-result cache wrapper | original method, two non-escaping allocations, one scratch scope, wrapper and vanilla fallback must match together |
+| `patch.intelCallbackCache` + `patch.mapHitTest` | class-A `o00000(A/new;)` Intel callback site и `A.OO0000(FFF)` hit test | one atomic `mapInteractionPlan`: short-TTL `getMapLocation` cache plus reusable hit list/point and bounded exact-result cache wrapper | both keys form a feature mask; either member may run alone; the two member surfaces are disjoint methods on one class and commit or roll back together; original method, two non-escaping allocations, one scratch scope, wrapper and vanilla fallback must match together |
 | `patch.systemNebulaCache` | map construction | immutable system metadata cache | synthetic entities создаются заново |
 | `patch.sampleCacheClearThrottle` | map construction | suppress rapid repeated clear | configurable interval |
 | `patch.gridLineCap` | huge sector map | dynamic grid spacing | визуальный LOD only |
 | `patch.intelArrowRendering` | `Z.o00000(FF)` Intel arrows | atomic `getArrowData` TTL cache plus two reusable internal vectors under one scratch scope | callback, both non-escaping allocations, scope and ownership marker must match together; miss/error calls plugin |
 | internal lifecycle | `CampaignEngine.set/resetInstance`, `CampaignEngine.advance`, save boundary | generation reset plus throttled UI-cache/scratch maintenance | two-phase generation boundary; maintenance runs only on campaign thread and forced save sweep still honors idle/grace thresholds |
-| `patch.campaignListenerThrottle` | campaign advance | skip unchanged internal repository listener sweep | public method untouched, periodic audit |
-| `patch.entityLookupIndexRepair` | first campaign advance after construction/load | rebuild the vanilla transient entity-id map once after repository listeners are restored | private transient readiness bit; exact vanilla rebuild; no steady full scan |
+| `patch.entityLookupIndexRepair` + `patch.campaignListenerThrottle` | `CampaignEngine.advance` listener-restoration boundary | one atomic listener plan: rebuild the vanilla transient entity-id map once after the boundary, plus skip unchanged internal repository listener sweep | both keys form a feature mask; either member may run alone; private transient readiness bit; exact vanilla rebuild; no steady full scan; public method untouched, periodic audit |
 | `patch.campaignSnapshotReuse` | `BaseLocation` | reusable eager snapshots | point-in-time order/mutation isolation |
 | `patch.entityScriptSnapshotReuse` | entity scripts | inline empty fast return; non-empty fresh vanilla snapshot | no scratch scope for empty lists; mutation isolation unchanged |
 | `patch.emptyMemoryAdvanceFastPath` | `Memory.advance` | inline return when expire+require are empty | restoration/pause and non-empty loops remain vanilla |
 | `patch.coreWorldsExtentCache` | `CoreScript.advance(F)V`, `CampaignEngine.create/removeStarSystem`, `BaseLocation.add/remove/clearTags` | one campaign snapshot, weak system/core index, O(C+B) steady validation, unchanged-write suppression and optional fast-forward skip | all three structural surfaces must apply; missing mutation hook fails closed to vanilla; bounded audit covers direct live-tag additions |
 | `patch.routeJumpPointIndex` | route widget | ordered jump/system candidates | original filter/distance/tie loop |
-| `patch.strategicJumpDestinationFirst` | `StrategicModule.findNearestSafeJumpPoint` | lazy hostile-market score only after the original destination predicate accepts a jump point | exact target/hyperspace fallback, one score per jump point, candidate order/sort/early return unchanged |
-| `patch.strategicJumpDestinationIndex` | `StrategicModule.findNearestSafeJumpPoint`, expired `JumpPlan`, jump/location topology mutators | budgeted ordered index keyed by destination `LocationAPI` identity | requires destination-first; no location type/size admission rule; cold/dirty work is deferred under one global frame budget |
+| `patch.strategicJumpDestinationFirst` + `patch.strategicJumpDestinationIndex` | `StrategicModule.findNearestSafeJumpPoint`, expired `JumpPlan`, jump/location topology mutators | one atomic destination plan: lazy hostile-market score plus budgeted ordered index keyed by destination `LocationAPI` identity | both keys form a feature mask; index requires first and index-only normalizes to disabled; no location type/size admission rule; cold/dirty work is deferred under one global frame budget |
 | `patch.economyLocationCache` | `Economy.advance` | omit only redundant automatic dirty write | explicit mod dirty state authoritative |
 | `patch.marketScheduler` | `Economy.advance`, `BaseCampaignEntity.advance`, pre-save boundary | one stable-phase scheduler for all transformed engine-owned market updates with exact accumulated amount | one identity state and policy; direct mod calls immediate; hot markets full-rate; callback cadence intentionally changes |
 | `patch.aotdEconomyRestoreCoordination` | exact `CoreLifecyclePluginImpl.econPostSaveRestore()V` successful tail | publishes one O(1) loader-neutral completion signal after all industry restore and market reapply work | exact public-static method, unique calls/order, sole successful `RETURN`, loader visibility and verified V10 callback; structural mismatch keeps bit 11 unavailable, ordinary callback failures are contained and retryable with sampled logging, and only `LinkageError` removes bit 11 after negotiation |
@@ -209,9 +207,23 @@ maintenance hook, scheduler flush, component registration и scheduler capabilit
 Таким образом, необязательная allocation-оптимизация больше не влияет на correctness/readiness
 планировщика.
 
-### Destination-first strategic jump filtering
+### Unified strategic jump destination plan
 
-`patch.strategicJumpDestinationFirst` изменяет только локальный порядок вычислений в
+`StrategicModule.findNearestSafeJumpPoint(CampaignFleetAPI, LocationAPI)` и expired-plan ветвь
+`updateJumpPlanTo` имеют одного structural-владельца `strategicJumpDestinationPlan`. Публичные
+переключатели `patch.strategicJumpDestinationFirst` и `patch.strategicJumpDestinationIndex` образуют
+feature mask: первый включает lazy hostile-market score, второй — budgeted destination index.
+Index-компонент определён только над post-state destination-first, поэтому конфигурация
+`index=true, first=false` нормализуется в disabled с warning. Оба компонента проверяются на
+одинаковых входных bytes, затем изолированный candidate строится в явном порядке destination-first
+→ destination index: index matcher потребляет фактический преобразованный post-state первого
+компонента на candidate, а не отдельный ownership marker. Fields, methods и hooks коммитятся одной
+транзакцией. Один ownership marker `smo$patched$strategicJumpDestinationPlan` и private static final
+mask подтверждаются общей postcondition; legacy split markers и unowned partial state не
+принимаются. Несовместимость любого запрошенного компонента оставляет весь `StrategicModule`
+неизменённым.
+
+Destination-first компонент изменяет только локальный порядок вычислений в
 `StrategicModule.findNearestSafeJumpPoint(CampaignFleetAPI, LocationAPI)`. Vanilla сначала для
 каждого допустимого `JumpPoint` вызывает `Misc.getNumHostileMarkets(..., 4000f)`, а уже затем
 проверяет его `JumpDestination`. Патч записывает sentinel в исходный `int` local и переносит
@@ -220,18 +232,16 @@ maintenance hook, scheduler flush, component registration и scheduler capabilit
 вычисляется один раз. Фильтры star anchor/unstable/wormhole, `getNumUnsafeFleetsAround`, candidate
 allocation, insertion order, comparator, `Collections.sort` и ранний return `< 2000` не меняются.
 
-Transformation surface ограничена одним методом и прямым value-flow hostile-market score → candidate
-unsafe field. Других патчей этого класса нет. Matcher требует точные descriptors, общий continue для
+Transformation surface этого компонента ограничена одним методом и прямым value-flow hostile-market
+score → candidate unsafe field. Matcher требует точные descriptors, общий continue для
 трёх reject-ветвей, схождение exact/fallback ветвей, radius `4000f`, multiplier `2`, unsafe-fleet
 arguments `fleet/jumpPoint/750f` и последующее `IADD`. Owned post-state требует sentinel, один
-`IF_ICMPNE` guard и один hostile-market call; похожий foreign lazy-state без marker получает
+`IF_ICMPNE` guard и один hostile-market call; похожий foreign lazy-state без unified marker получает
 `SKIPPED_STRUCTURAL`.
 
-### Strategic destination-location index
-
-`patch.strategicJumpDestinationIndex` применяется после destination-first и атомарно меняет две
-части `StrategicModule`: источник внешнего цикла `findNearestSafeJumpPoint` и ветвь истечения
-существующего `JumpPlan` в `updateJumpPlanTo`. Runtime не классифицирует current location как
+Index-компонент атомарно меняет две части `StrategicModule` внутри того же candidate: источник
+внешнего цикла `findNearestSafeJumpPoint` и ветвь истечения существующего `JumpPlan` в
+`updateJumpPlanTo`. Runtime не классифицирует current location как
 hyperspace/system и не использует размер списка как admission-эвристику. Hyperspace остаётся только
 частью исходного vanilla-предиката exact-target/fallback, который патч не изменяет.
 
@@ -284,10 +294,10 @@ budget overrun, размеры work/audit/retry queues, phase gauges, deferred-p
 deferred ages и максимальную latency до READY. Это позволяет отделить устранённый CPU hotpath от
 возможного gameplay latency debt после загрузки.
 
-Structural capability считается READY только при наличии owned post-state destination-first,
-maintenance hook и всех topology hooks. Matcher повторно проверяет lazy hostile-market guard после
-source rewrite и требует точную expired-plan deferral; mixed/foreign state получает fail-open
-`SKIPPED_STRUCTURAL` без частичного изменения класса.
+Structural capability считается READY только при наличии owned unified destination-plan state,
+maintenance hook и всех topology hooks. Combined postcondition повторно проверяет lazy
+hostile-market guard после source rewrite и требует точную expired-plan deferral; mixed/foreign
+state получает fail-open `SKIPPED_STRUCTURAL` без частичного изменения класса.
 
 ### Campaign cache maintenance and scratch retention
 

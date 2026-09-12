@@ -32,6 +32,29 @@ function Find-GameRoot([string] $startPath) {
 }
 $gameRoot = Find-GameRoot $modRoot
 $core = Join-Path $gameRoot 'starsector-core'
+
+# Only the legacy Faster Rendering layout ships the custom system loader inside fr.jar; the Agent
+# layout keeps the javaagent in fr.agent.jar. The presence of fr.jar alone does not imply the
+# legacy loader, so layout detection mirrors install-agent.ps1 and inspects the entry itself.
+$frLegacyLoaderEntry = 'com/genir/renderer/loaders/AppClassLoader.class'
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+# 'Legacy', 'Other' or 'Unreadable'. A jar we cannot open must not masquerade as some other layout:
+# that would turn a broken installation into a quiet SKIPPED instead of a gate failure.
+function Get-FrLegacyLoaderState {
+    param([string] $Core)
+    $frRuntimeJar = Join-Path $Core 'fr.jar'
+    if (-not (Test-Path -LiteralPath $frRuntimeJar -PathType Leaf)) { return 'Unreadable' }
+    $archive = $null
+    try {
+        $archive = [IO.Compression.ZipFile]::OpenRead($frRuntimeJar)
+        if ($null -ne $archive.GetEntry($frLegacyLoaderEntry)) { return 'Legacy' }
+        return 'Other'
+    } catch {
+        return 'Unreadable'
+    } finally {
+        if ($null -ne $archive) { $archive.Dispose() }
+    }
+}
 $build = Join-Path $modRoot '.build'
 $agentClasses = Join-Path $build 'agent-raw-classes'
 $testClasses = Join-Path $build 'test-classes'
@@ -53,6 +76,7 @@ $testCp = @(
     (Join-Path $modRoot 'lib\asm-tree-9.10.1.jar'),
     (Join-Path $modRoot 'lib\asm-analysis-9.10.1.jar'),
     (Join-Path $modRoot 'lib\asm-util-9.10.1.jar'),
+    (Join-Path $modRoot 'lib\asm-commons-9.10.1.jar'),
     (Join-Path $core 'starfarer.api.jar'),
     (Join-Path $core 'starfarer_obf.jar'),
     (Join-Path $core 'fs.common_obf.jar'),
@@ -722,6 +746,7 @@ $runtimeCp = @(
     (Join-Path $modRoot 'lib\asm-tree-9.10.1.jar'),
     (Join-Path $modRoot 'lib\asm-analysis-9.10.1.jar'),
     (Join-Path $modRoot 'lib\asm-util-9.10.1.jar'),
+    (Join-Path $modRoot 'lib\asm-commons-9.10.1.jar'),
     (Join-Path $core 'starfarer.api.jar'),
     (Join-Path $core 'starfarer_obf.jar'),
     (Join-Path $core 'fs.common_obf.jar'),
@@ -850,7 +875,29 @@ $startupAuditLines
 if ($startupAuditExitCode -ne 0) { throw 'Startup audit coverage test failed.' }
 
 $mainAgentJar = Join-Path $modRoot 'agent\StarsectorPrepatcherAgent.jar'
-$java27 = Join-Path $gameRoot 'jdk-27+22\bin\java.exe'
+# JavaCompatibilityRoute selects JAVA27_STANDARD for any runtime feature >= 27, so the gate
+# discovers the installed JDK by that contract instead of pinning one exact build directory.
+$java27 = Join-Path $gameRoot 'jdk-27+\bin\java.exe'
+foreach ($candidateHome in (Get-ChildItem -LiteralPath $gameRoot -Directory -Filter 'jdk-*' -ErrorAction SilentlyContinue | Sort-Object Name)) {
+    $candidate = Join-Path $candidateHome.FullName 'bin\java.exe'
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+    # -XshowSettings writes to stderr, and under ErrorActionPreference Stop redirecting a native
+    # command's stderr turns ordinary output into a terminating error. Relax it for this probe only.
+    $probePreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $settings = @(& $candidate -XshowSettings:properties -version 2>&1)
+    } finally {
+        $ErrorActionPreference = $probePreference
+    }
+    $featureLine = $settings | Where-Object { $_ -match 'java\.specification\.version\s*=\s*(\d+)' } | Select-Object -First 1
+    if ($null -eq $featureLine) { continue }
+    if ([int] $Matches[1] -ge 27) {
+        $java27 = $candidate
+        "Java >= 27 route runtime: $java27 (feature $($Matches[1]))"
+        break
+    }
+}
 if (Test-Path -LiteralPath $java27 -PathType Leaf) {
     $java27StandardReport = Join-Path $reportDir 'java27-standard-route.txt'
     $ErrorActionPreference = 'Continue'
@@ -931,9 +978,14 @@ if (Test-Path -LiteralPath $java27 -PathType Leaf) {
         if (Test-Path -LiteralPath $legacyFrRuntime -PathType Leaf) {
             $newFrCpEntries += $legacyFrRuntime
         }
+        # Faster Rendering logs from premain, so log4j must resolve before anything else is touched.
+        $newFrCpEntries += (Join-Path $core 'log4j-1.2.9.jar')
         $newFrCpEntries += $runtimeCp
         $newFrCp = $newFrCpEntries -join [IO.Path]::PathSeparator
         $ErrorActionPreference = 'Continue'
+        # It also hashes starfarer_obf.jar through a relative path, so the process must run from
+        # starsector-core exactly as the real launcher does. Every path handed to the JVM is absolute.
+        Push-Location -LiteralPath $core
         try {
             $java27FrAgentOutput = @(& $java27 -Xverify:all `
                 "-javaagent:$realFrAgent" `
@@ -943,6 +995,7 @@ if (Test-Path -LiteralPath $java27 -PathType Leaf) {
                 @java27UiArgs 2>&1)
             $java27FrAgentExitCode = $LASTEXITCODE
         } finally {
+            Pop-Location
             $ErrorActionPreference = $savedErrorActionPreference
         }
         $java27FrAgentLines = @(
@@ -1006,7 +1059,17 @@ if (Test-Path -LiteralPath $java27 -PathType Leaf) {
         $java27NegativeReport, [string[]] $java27NegativeLines, $utf8)
 
     $legacyFrJar = Join-Path $core 'fr.jar'
-    if (Test-Path -LiteralPath $legacyFrJar -PathType Leaf) {
+    $legacyState = Get-FrLegacyLoaderState $core
+    if ($legacyState -eq 'Unreadable' -and (Test-Path -LiteralPath $legacyFrJar -PathType Leaf)) {
+        throw "$legacyFrJar exists but could not be read; refusing to call that a non-legacy layout."
+    }
+    if ($legacyState -ne 'Legacy') {
+        $java27LegacyRouteReport = Join-Path $reportDir 'java27-legacy-fr-route-probes.txt'
+        $legacySkipLines = @(
+            "SKIPPED legacy Faster Rendering route probes: $legacyFrJar has no $frLegacyLoaderEntry")
+        $legacySkipLines
+        [IO.File]::WriteAllLines($java27LegacyRouteReport, [string[]] $legacySkipLines, $utf8)
+    } else {
         $java27LegacyRouteReport = Join-Path $reportDir 'java27-legacy-fr-route-probes.txt'
         $legacyCp = @($legacyFrJar, $runtimeCp) -join [IO.Path]::PathSeparator
         $legacyRouteLines = [System.Collections.Generic.List[string]]::new()
@@ -1544,8 +1607,18 @@ if ($startupExitCode -ne 0) { throw 'Javaagent startup smoke failed.' }
 
 $frSmokeReport = Join-Path $reportDir 'faster-rendering-loader-smoke.txt'
 $frJar = Join-Path $core 'fr.jar'
+$frSmokeLegacyState = Get-FrLegacyLoaderState $core
+if ($frSmokeLegacyState -eq 'Unreadable' -and (Test-Path -LiteralPath $frJar -PathType Leaf)) {
+    throw "$frJar exists but could not be read; refusing to call that a non-legacy layout."
+}
 if (-not (Test-Path -LiteralPath $frJar -PathType Leaf)) {
     $frSmokeLines = @("SKIPPED Faster Rendering loader smoke: fr.jar not found at $frJar")
+    $frSmokeLines
+    [IO.File]::WriteAllLines($frSmokeReport, [string[]] $frSmokeLines, $utf8)
+} elseif ($frSmokeLegacyState -ne 'Legacy') {
+    $frSmokeLines = @(
+        "SKIPPED Faster Rendering loader smoke: $frJar has no $frLegacyLoaderEntry; " +
+        'this is the Agent layout, covered by the fr.agent.jar routes')
     $frSmokeLines
     [IO.File]::WriteAllLines($frSmokeReport, [string[]] $frSmokeLines, $utf8)
 } else {

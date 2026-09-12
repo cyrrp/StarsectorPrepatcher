@@ -36,12 +36,27 @@ AGGRESSIVE_CONFIG_JAVA="$(java_native_path "$MOD_ROOT/profiles/aggressive.proper
 # after relocating ASM into the private Prepatcher namespace.
 # This array is kept (empty) so the existing "${EXPORTS[@]}" expansions remain valid no-ops.
 EXPORTS=()
+# Only the legacy Faster Rendering layout ships the custom system loader inside fr.jar; the Agent
+# layout keeps the javaagent in fr.agent.jar. The presence of fr.jar alone does not imply the
+# legacy loader, so layout detection mirrors install-agent.ps1 and inspects the entry itself.
+FR_LEGACY_LOADER_ENTRY='com/genir/renderer/loaders/AppClassLoader.class'
+# 0 = legacy layout present, 1 = readable but not the legacy layout, 2 = no jar or unreadable.
+# A jar we cannot open must not masquerade as "some other layout": that would turn a broken
+# installation into a quiet SKIPPED instead of a gate failure.
+fr_legacy_loader_state() {
+  [[ -f "$CORE/fr.jar" ]] || return 2
+  local listing
+  if ! listing="$(jar tf "$CORE/fr.jar" 2>/dev/null)"; then
+    return 2
+  fi
+  grep -qxF "$FR_LEGACY_LOADER_ENTRY" <<<"$listing"
+}
 
 bash "$MOD_ROOT/build-agent.sh"
 rm -rf "$TEST_CLASSES" "$FR_SMOKE_CLASSES"
 mkdir -p "$TEST_CLASSES" "$FR_SMOKE_CLASSES" "$REPORT_DIR"
 
-TEST_CP="$AGENT_CLASSES:$MOD_ROOT/lib/asm-9.10.1.jar:$MOD_ROOT/lib/asm-tree-9.10.1.jar:$MOD_ROOT/lib/asm-analysis-9.10.1.jar:$MOD_ROOT/lib/asm-util-9.10.1.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
+TEST_CP="$AGENT_CLASSES:$MOD_ROOT/lib/asm-9.10.1.jar:$MOD_ROOT/lib/asm-tree-9.10.1.jar:$MOD_ROOT/lib/asm-analysis-9.10.1.jar:$MOD_ROOT/lib/asm-util-9.10.1.jar:$MOD_ROOT/lib/asm-commons-9.10.1.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
 FR_SMOKE_SOURCE="$MOD_ROOT/source/test/com/starsector/prepatcher/fr/FasterRenderingLoaderSmokeTest.java"
 find "$MOD_ROOT/source/test" -name '*.java' ! -path "$FR_SMOKE_SOURCE" -print0 | \
   xargs -0 javac -encoding UTF-8 --release 17 \
@@ -268,9 +283,9 @@ else
 fi
 
 java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
-  com.starsector.prepatcher.agent.StrategicJumpDestinationFirstTransformerTest \
+  com.starsector.prepatcher.agent.StrategicJumpDestinationPlanTransformerTest \
   "$VERIFICATION_CONFIG" "$CORE/starfarer_obf.jar" \
-  2>&1 | tee "$REPORT_DIR/strategic-jump-destination-first.txt"
+  2>&1 | tee "$REPORT_DIR/strategic-jump-destination-plan.txt"
 
 java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
   com.starsector.prepatcher.agent.StrategicJumpDestinationIndexTransformerTest \
@@ -290,7 +305,7 @@ java "${EXPORTS[@]}" -cp "$TEST_CLASSES:$TEST_CP" \
   com.starsector.prepatcher.agent.DirectMarketObserveTransformerTest \
   2>&1 | tee "$REPORT_DIR/direct-market-transformer.txt"
 
-RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$MOD_ROOT/lib/asm-9.10.1.jar:$MOD_ROOT/lib/asm-tree-9.10.1.jar:$MOD_ROOT/lib/asm-analysis-9.10.1.jar:$MOD_ROOT/lib/asm-util-9.10.1.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
+RUNTIME_CP="$TEST_CLASSES:$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar:$MOD_ROOT/lib/asm-9.10.1.jar:$MOD_ROOT/lib/asm-tree-9.10.1.jar:$MOD_ROOT/lib/asm-analysis-9.10.1.jar:$MOD_ROOT/lib/asm-util-9.10.1.jar:$MOD_ROOT/lib/asm-commons-9.10.1.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"
 java -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.runtime.AoTDEconomyRestoreRuntimeTest \
   2>&1 | tee "$REPORT_DIR/aotd-economy-restore-runtime.txt"
@@ -357,7 +372,22 @@ java "${EXPORTS[@]}" -cp "$RUNTIME_CP" \
   com.starsector.prepatcher.agent.StartupAuditCoverageTest \
   2>&1 | tee "$REPORT_DIR/startup-audit-coverage.txt"
 
-JAVA27="$GAME_ROOT/jdk-27+22/bin/java"
+# JavaCompatibilityRoute selects JAVA27_STANDARD for any runtime feature >= 27, so the gate
+# discovers the installed JDK by that contract instead of pinning one exact build directory.
+JAVA27="$GAME_ROOT/jdk-27+/bin/java (no runtime with feature >= 27 installed)"
+for candidate_home in "$GAME_ROOT"/jdk-*; do
+  [[ -d "$candidate_home" ]] || continue
+  candidate="$candidate_home/bin/java.exe"
+  [[ -x "$candidate" ]] || candidate="$candidate_home/bin/java"
+  [[ -x "$candidate" ]] || continue
+  candidate_feature="$("$candidate" -XshowSettings:properties -version 2>&1 \
+    | sed -n 's/.*java\.specification\.version = \([0-9][0-9]*\).*/\1/p' | head -1)"
+  if [[ -n "$candidate_feature" && "$candidate_feature" -ge 27 ]]; then
+    JAVA27="$candidate"
+    echo "Java >= 27 route runtime: $JAVA27 (feature $candidate_feature)"
+    break
+  fi
+done
 if [[ -x "$JAVA27" ]]; then
   "$JAVA27" -Xverify:all \
     "-javaagent:$AGENT_JAR_JAVA" \
@@ -393,17 +423,22 @@ if [[ -x "$JAVA27" ]]; then
 
   REAL_FR_AGENT="$CORE/fr.agent.jar"
   if [[ -f "$REAL_FR_AGENT" ]]; then
-    new_fr_cp="$RUNTIME_CP"
+    # The Faster Rendering agent logs from premain, so log4j must be resolvable before the
+    # game classpath is otherwise touched; without it FR aborts the JVM during -javaagent.
+    new_fr_cp="$CORE/log4j-1.2.9.jar:$RUNTIME_CP"
     if [[ -f "$CORE/fr.jar" ]]; then
       new_fr_cp="$CORE/fr.jar:$new_fr_cp"
     fi
-    "$JAVA27" -Xverify:all \
+    # The Faster Rendering agent hashes starfarer_obf.jar through a relative path, so it only
+    # resolves when the process runs from starsector-core, exactly as the real launcher does.
+    # Every path handed to the JVM below is absolute, so the working directory change is local.
+    ( cd "$CORE" && "$JAVA27" -Xverify:all \
       "-javaagent:$REAL_FR_AGENT" \
       "-javaagent:$AGENT_JAR_JAVA=config=$AGGRESSIVE_CONFIG_JAVA" \
       -cp "$new_fr_cp" \
       com.starsector.prepatcher.runtime.UiEconomyActualAgentSmokeTest \
       "${java27_ui_args[@]}" \
-      2>&1 | tee "$REPORT_DIR/java27-fr-agent-ui-economy.txt"
+      2>&1 ) | tee "$REPORT_DIR/java27-fr-agent-ui-economy.txt"
     grep -q 'Java compatibility route: FR_AGENT_CHAIN' \
       "$REPORT_DIR/java27-fr-agent-ui-economy.txt"
     grep -q 'OK actual-agent UI economy contracts' \
@@ -442,7 +477,17 @@ if [[ -x "$JAVA27" ]]; then
       tee -a "$REPORT_DIR/java27-route-negative-probes.txt"
   done
 
-  if [[ -f "$CORE/fr.jar" ]]; then
+  fr_legacy_loader_state || legacy_state=$?
+  legacy_state="${legacy_state:-0}"
+  if [[ "$legacy_state" == 2 && -f "$CORE/fr.jar" ]]; then
+    echo "$CORE/fr.jar exists but could not be read; refusing to call that a non-legacy layout." >&2
+    exit 1
+  fi
+  if [[ "$legacy_state" != 0 ]]; then
+    printf 'SKIPPED legacy Faster Rendering route probes: %s has no %s\n' \
+      "$CORE/fr.jar" "$FR_LEGACY_LOADER_ENTRY" \
+      | tee "$REPORT_DIR/java27-legacy-fr-route-probes.txt"
+  else
     : > "$REPORT_DIR/java27-legacy-fr-route-probes.txt"
     for route_case in not-preloaded preloaded-retransform; do
       preload=()
@@ -704,8 +749,18 @@ java \
 
 FR_JAR="$CORE/fr.jar"
 FR_SMOKE_REPORT="$REPORT_DIR/faster-rendering-loader-smoke.txt"
+smoke_legacy_state=0
+fr_legacy_loader_state || smoke_legacy_state=$?
+if [[ "$smoke_legacy_state" == 2 && -f "$FR_JAR" ]]; then
+  echo "$FR_JAR exists but could not be read; refusing to call that a non-legacy layout." >&2
+  exit 1
+fi
 if [[ ! -f "$FR_JAR" ]]; then
   echo "SKIPPED Faster Rendering loader smoke: fr.jar not found at $FR_JAR" | \
+    tee "$FR_SMOKE_REPORT"
+elif [[ "$smoke_legacy_state" != 0 ]]; then
+  echo "SKIPPED Faster Rendering loader smoke: $FR_JAR has no $FR_LEGACY_LOADER_ENTRY;" \
+    "this is the Agent layout, covered by the fr.agent.jar routes" | \
     tee "$FR_SMOKE_REPORT"
 else
   # Agent classes must not appear here. FR must keep the javaagent in its

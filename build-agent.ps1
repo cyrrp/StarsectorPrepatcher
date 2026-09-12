@@ -68,8 +68,8 @@ foreach ($classFile in Get-ChildItem -LiteralPath $agentClasses -Filter *.class 
 $utf8 = New-Object Text.UTF8Encoding($false)
 $agentManifest = Join-Path $build 'agent.mf'
 $bootstrapManifest = Join-Path $build 'bootstrap.mf'
-[IO.File]::WriteAllText($agentManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Agent`nImplementation-Version: 0.18.4`nPremain-Class: com.starsector.prepatcher.agent.PrepatcherAgent`nCan-Redefine-Classes: false`nCan-Retransform-Classes: true`n`n", $utf8)
-[IO.File]::WriteAllText($bootstrapManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Bootstrap`nImplementation-Version: 0.18.4`n`n", $utf8)
+[IO.File]::WriteAllText($agentManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Agent`nImplementation-Version: 0.19.0`nPremain-Class: com.starsector.prepatcher.agent.PrepatcherAgent`nCan-Redefine-Classes: false`nCan-Retransform-Classes: true`n`n", $utf8)
+[IO.File]::WriteAllText($bootstrapManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Bootstrap`nImplementation-Version: 0.19.0`n`n", $utf8)
 $agentJar = Join-Path $modRoot 'agent\StarsectorPrepatcherAgent.jar'
 & jar --create --file $agentJar --manifest $agentManifest --date=2026-01-01T00:00:00Z -C $agentClasses .
 if ($LASTEXITCODE -ne 0) { throw 'Agent JAR creation failed.' }

@@ -2,7 +2,7 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Текущая версия: **0.18.4**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
+Текущая версия: **0.19.0**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
 
 [![Без препатчера и с ним](media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 

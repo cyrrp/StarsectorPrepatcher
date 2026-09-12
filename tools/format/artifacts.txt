@@ -1,0 +1,16 @@
+# Eclipse JDT formatter dependencies, fetched on demand into .build/format/lib.
+# Format: <jar file name> <path under the Maven Central repository root>
+# Checksums for these files live in SHA256SUMS.txt next to this file; fetch.sh and fetch.ps1
+# refuse any download whose SHA-256 does not match, so the pinned versions below are what the
+# formatter runs and nothing else can be substituted for them.
+ecj-3.41.0.jar org/eclipse/jdt/ecj/3.41.0/ecj-3.41.0.jar
+org.eclipse.jdt.core-3.41.0.jar org/eclipse/jdt/org.eclipse.jdt.core/3.41.0/org.eclipse.jdt.core-3.41.0.jar
+org.eclipse.text-3.14.300.jar org/eclipse/platform/org.eclipse.text/3.14.300/org.eclipse.text-3.14.300.jar
+org.eclipse.equinox.common-3.20.0.jar org/eclipse/platform/org.eclipse.equinox.common/3.20.0/org.eclipse.equinox.common-3.20.0.jar
+org.eclipse.equinox.preferences-3.11.300.jar org/eclipse/platform/org.eclipse.equinox.preferences/3.11.300/org.eclipse.equinox.preferences-3.11.300.jar
+org.eclipse.core.runtime-3.33.0.jar org/eclipse/platform/org.eclipse.core.runtime/3.33.0/org.eclipse.core.runtime-3.33.0.jar
+org.eclipse.core.jobs-3.15.600.jar org/eclipse/platform/org.eclipse.core.jobs/3.15.600/org.eclipse.core.jobs-3.15.600.jar
+org.eclipse.core.contenttype-3.9.600.jar org/eclipse/platform/org.eclipse.core.contenttype/3.9.600/org.eclipse.core.contenttype-3.9.600.jar
+org.eclipse.osgi-3.22.0.jar org/eclipse/platform/org.eclipse.osgi/3.22.0/org.eclipse.osgi-3.22.0.jar
+org.eclipse.core.resources-3.22.100.jar org/eclipse/platform/org.eclipse.core.resources/3.22.100/org.eclipse.core.resources-3.22.100.jar
+org.osgi.service.prefs-1.1.2.jar org/osgi/org.osgi.service.prefs/1.1.2/org.osgi.service.prefs-1.1.2.jar

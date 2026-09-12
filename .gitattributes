@@ -1,0 +1,14 @@
+# Line endings are decided here rather than by each contributor's core.autocrlf, so a checkout and
+# the ZIP built from it look the same on every machine. Everything text is LF in the repository and
+# in the working copy.
+* text=auto eol=lf
+
+# cmd.exe is the one consumer that genuinely wants CRLF, and players run this file directly.
+*.bat text eol=crlf
+
+# Binary payloads: never translated, never diffed as text.
+*.jar binary
+*.gif binary
+*.png binary
+*.webm binary
+*.zip binary
