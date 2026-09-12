@@ -297,11 +297,13 @@ public final class LifecycleGcRegressionTest {
 
   private static void assertExactPackagedStructures() throws Exception {
     Set<String> actualMapFields = new HashSet<>();
-    for (Field field : StarsectorPrepatcherHooks.class.getDeclaredFields()) {
-      if (Modifier.isStatic(field.getModifiers()) && Map.class.isAssignableFrom(field.getType())) {
-        require(Modifier.isVolatile(field.getModifiers()),
-            field.getName() + " must be volatile for lock-free lifecycle detachment");
-        actualMapFields.add(field.getName());
+    for (Class<?> owner : runtimeClasses()) {
+      for (Field field : owner.getDeclaredFields()) {
+        if (Modifier.isStatic(field.getModifiers()) && Map.class.isAssignableFrom(field.getType())) {
+          require(Modifier.isVolatile(field.getModifiers()),
+              field.getName() + " must be volatile for lock-free lifecycle detachment");
+          actualMapFields.add(field.getName());
+        }
       }
     }
     require(actualMapFields.equals(new HashSet<>(MAP_CACHE_FIELDS)),
@@ -318,12 +320,12 @@ public final class LifecycleGcRegressionTest {
     Field nebulaSlot = staticField("nebulaCacheSlot");
     require(
         Modifier.isVolatile(nebulaSlot.getModifiers())
-            && nebulaSlot.getType().getName().endsWith("StarsectorPrepatcherHooks$NebulaCacheSlot"),
+            && nebulaSlot.getType().getName().endsWith("StarsectorPrepatcherMapRuntime$NebulaCacheSlot"),
         "nebulaCacheSlot packaged shape changed");
     Field nebulaValue = instanceField(nebulaSlot.getType(), "value");
     require(
         Modifier.isVolatile(nebulaValue.getModifiers())
-            && nebulaValue.getType().getName().endsWith("StarsectorPrepatcherHooks$NebulaCache"),
+            && nebulaValue.getType().getName().endsWith("StarsectorPrepatcherMapRuntime$NebulaCache"),
         "NebulaCacheSlot.value packaged shape changed");
 
     Field generationActive = staticField("campaignCacheGenerationActive");
@@ -440,10 +442,25 @@ public final class LifecycleGcRegressionTest {
     ((Map) instanceField(owner.getClass(), name).get(owner)).put(value, Boolean.TRUE);
   }
 
+  private static List<Class<?>> runtimeClasses() throws Exception {
+    List<Class<?>> classes = new ArrayList<>(List.of(StarsectorPrepatcherHooks.class));
+    for (String owner : List.of("CampaignCaches", "CampaignListeners", "CommodityTemporal", "EconomyRuntime",
+        "IntelRuntime", "MapRuntime", "MarketScheduler", "Metrics", "RouteIndex", "Scratch", "StartupRuntime",
+        "StrategicJumpHooks")) {
+      classes.add(Class.forName("com.fs.starfarer.api.StarsectorPrepatcher" + owner));
+    }
+    return classes;
+  }
+
   private static Field staticField(String name) throws Exception {
-    Field field = StarsectorPrepatcherHooks.class.getDeclaredField(name);
-    field.setAccessible(true);
-    return field;
+    for (Class<?> owner : runtimeClasses()) {
+      try {
+        Field field = owner.getDeclaredField(name);
+        field.setAccessible(true);
+        return field;
+      } catch (NoSuchFieldException ignored) {}
+    }
+    throw new NoSuchFieldException(name);
   }
 
   private static Field instanceField(Class<?> type, String name) throws Exception {

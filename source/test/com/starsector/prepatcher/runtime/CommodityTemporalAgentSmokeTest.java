@@ -137,7 +137,7 @@ public final class CommodityTemporalAgentSmokeTest {
   }
 
   private static long counter(String name) throws Exception {
-    Field f = field(StarsectorPrepatcherHooks.class, name);
+    Field f = field(Class.forName("com.fs.starfarer.api.StarsectorPrepatcherMetrics"), name);
     Object adder = f.get(null);
     return (long) adder.getClass().getMethod("sum").invoke(adder);
   }

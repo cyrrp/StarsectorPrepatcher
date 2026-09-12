@@ -158,7 +158,7 @@ public final class Exp6RuntimeRegressionTest {
 
   @SuppressWarnings("unchecked")
   private static IdentityHashMap<Object, Boolean> scratchIdentityMembership(int frameIndex) throws Exception {
-    Field scratchField = StarsectorPrepatcherHooks.class.getDeclaredField("SCRATCH");
+    Field scratchField = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherScratch").getDeclaredField("SCRATCH");
     scratchField.setAccessible(true);
     ThreadLocal<?> threadLocal = (ThreadLocal<?>) scratchField.get(null);
     Object scratch = threadLocal.get();
