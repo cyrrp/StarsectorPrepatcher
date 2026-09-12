@@ -97,7 +97,7 @@ foreach ($entry in $requiredRuntimePayload) {
         throw "Required target-loader runtime payload is missing from the agent JAR: $entry"
     }
 }
-$expectedRuntimePayloadCount = 113
+$expectedRuntimePayloadCount = 115
 $runtimePayloadEntries = @($agentEntries | Where-Object {
     $_ -cmatch '^com/fs/starfarer/api/StarsectorPrepatcher[^/]*\.class$'
 })
