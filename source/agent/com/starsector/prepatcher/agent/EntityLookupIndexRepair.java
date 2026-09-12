@@ -33,6 +33,10 @@ import static com.starsector.prepatcher.agent.Queries.*;
  * once, immediately after the first repository-listener restoration. The bit
  * is deliberately transient so every loaded CampaignEngine receives the same
  * repair, while steady-state ticks pay one private boolean read and branch.
+ *
+ * This member runs inside CampaignListenerPlan: it anchors after the listener
+ * boundary proven on the same plan candidate, in either the raw or the
+ * throttled call shape.
  */
 final class EntityLookupIndexRepair implements StructuredPatch<EntityLookupIndexRepair.Plan> {
   private static final String ENTITY_LOOKUP_INDEX_REPAIR_FIELD = "spp$entityLookupIndexReady";

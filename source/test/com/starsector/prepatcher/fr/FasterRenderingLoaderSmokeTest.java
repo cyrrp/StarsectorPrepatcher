@@ -99,10 +99,10 @@ public final class FasterRenderingLoaderSmokeTest {
     require("APPLIED".equals(presentationPatchStatus),
         "FR did not apply presentation coalescing before the structural transformer: status="
             + presentationPatchStatus);
-    String entityLookupRepairStatus =
-        System.getProperty("starsector.prepatcher.patchStatus." + CAMPAIGN_ENGINE + ".entityLookupIndexRepair");
-    require("APPLIED".equals(entityLookupRepairStatus),
-        "FR did not apply the post-load entity-index repair: status=" + entityLookupRepairStatus);
+    String listenerPlanStatus =
+        System.getProperty("starsector.prepatcher.patchStatus." + CAMPAIGN_ENGINE + ".campaignListenerPlan");
+    require("APPLIED".equals(listenerPlanStatus),
+        "FR did not apply the unified listener plan: status=" + listenerPlanStatus);
     String apiPresentationPatchStatus =
         System.getProperty("starsector.prepatcher.patchStatus." + BASE_TERRAIN + ".fastForwardPresentation");
     require("APPLIED".equals(apiPresentationPatchStatus),
@@ -145,8 +145,8 @@ public final class FasterRenderingLoaderSmokeTest {
     System.out.println("OK transformed economy target " + COMMODITY_ON_MARKET + " commodityEventModDirtyCache="
         + commodityPatchStatus);
     System.out.println(
-        "OK ordered overlapping target " + CAMPAIGN_ENGINE + " fastForwardPresentation=" + presentationPatchStatus);
-    System.out.println("OK entity-index actual-loader transform status=" + entityLookupRepairStatus);
+        "OK atomic overlapping target " + CAMPAIGN_ENGINE + " fastForwardPresentation=" + presentationPatchStatus);
+    System.out.println("OK listener-plan actual-loader transform status=" + listenerPlanStatus);
     System.out.println(
         "OK FR API-container target " + BASE_TERRAIN + " fastForwardPresentation=" + apiPresentationPatchStatus);
     System.out.println("OK FR upstream-mutated target " + HYPERSPACE_TERRAIN + " fastForwardPresentation="

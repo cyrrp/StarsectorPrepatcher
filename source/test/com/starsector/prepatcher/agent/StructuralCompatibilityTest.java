@@ -130,7 +130,7 @@ public final class StructuralCompatibilityTest {
     runNegativeIntelArrowRenderingTests(Path.of(args[1]).toAbsolutePath().normalize());
     runNegativeEventsPanelReconciliationTests(Path.of(args[1]).toAbsolutePath().normalize());
     runNegativeLifecycleTests(config, Path.of(args[1]).toAbsolutePath().normalize());
-    runEntityLookupIndexRepairStructuralTests(config, Path.of(args[1]).toAbsolutePath().normalize());
+    runCampaignListenerPlanStructuralTests(config, Path.of(args[1]).toAbsolutePath().normalize());
     runExp6OwnershipTests(config, Path.of(args[1]).toAbsolutePath().normalize());
     runInlineFastPathNegativeTests(config, Path.of(args[1]).toAbsolutePath().normalize());
     runExp8OwnershipTests(config, suppliedJars);
@@ -1557,19 +1557,26 @@ public final class StructuralCompatibilityTest {
         "wrong setInstance singleton source");
   }
 
-  private static void runEntityLookupIndexRepairStructuralTests(PrepatcherConfig config, Path jarPath)
-      throws Exception {
+  private static void runCampaignListenerPlanStructuralTests(PrepatcherConfig config, Path jarPath) throws Exception {
     byte[] original;
     try (JarFile jar = new JarFile(jarPath.toFile())) {
       original = jar.getInputStream(jar.getJarEntry(PrepatcherTransformer.CAMPAIGN_ENGINE + ".class")).readAllBytes();
     }
     String status = "starsector.prepatcher.patchStatus." + PrepatcherTransformer.CAMPAIGN_ENGINE.replace('/', '.')
-        + ".entityLookupIndexRepair";
+        + ".campaignListenerPlan";
 
     byte[] patched =
         new PrepatcherTransformer(config).transform(null, PrepatcherTransformer.CAMPAIGN_ENGINE, null, null, original);
-    require(patched != null, "CampaignEngine entity-index repair did not compose");
+    require(patched != null, "CampaignEngine unified listener plan did not apply");
     ClassNode repaired = read(patched);
+    require(hasOwnershipMarker(repaired, "campaignListenerPlan"),
+        "CampaignEngine unified listener-plan marker is missing");
+    require(
+        !hasOwnershipMarker(repaired, "entityLookupIndexRepair")
+            && !hasOwnershipMarker(repaired, "campaignListenerThrottle"),
+        "CampaignEngine emitted legacy split listener markers");
+    FieldNode planMask = requireField(repaired, "smo$campaignListenerPlanMask", "I");
+    require(planMask.value instanceof Integer mask && mask == 3, "CampaignEngine listener-plan mask field changed");
     FieldNode readiness = null;
     for (FieldNode field : repaired.fields) {
       if (!field.name.equals(ENTITY_LOOKUP_INDEX_REPAIR_FIELD)) continue;
@@ -1585,29 +1592,49 @@ public final class StructuralCompatibilityTest {
     require(countCalls(advance, Opcodes.INVOKEVIRTUAL, PrepatcherTransformer.CAMPAIGN_ENGINE, "rebuildIDToEntityMap",
         "()V") == 2, "entity-index repair did not add exactly one guarded vanilla rebuild");
     require(new PrepatcherTransformer(config).transform(null, PrepatcherTransformer.CAMPAIGN_ENGINE, null, null,
-        patched) == null, "entity-index repair is not idempotent");
+        patched) == null, "unified listener plan is not idempotent");
     verifyBytecode(patched);
 
+    // Every non-empty feature mask commits atomically: one marker, one mask
+    // field, and exactly the requested members — no member can be silently
+    // skipped because of the other.
     Constructor<PrepatcherConfig> constructor = PrepatcherConfig.class.getDeclaredConstructor(Properties.class);
     constructor.setAccessible(true);
-    for (boolean listenerThrottle : new boolean[]{false, true}) {
+    for (int mask = 1; mask <= 3; mask++) {
+      boolean repair = (mask & 1) != 0;
+      boolean throttle = (mask & 2) != 0;
       Properties properties = new Properties();
-      properties.setProperty("patch.entityLookupIndexRepair", "true");
-      properties.setProperty("patch.campaignListenerThrottle", Boolean.toString(listenerThrottle));
+      properties.setProperty("patch.entityLookupIndexRepair", Boolean.toString(repair));
+      properties.setProperty("patch.campaignListenerThrottle", Boolean.toString(throttle));
       PrepatcherConfig isolated = constructor.newInstance(properties);
       byte[] composed = new PrepatcherTransformer(isolated).transform(null, PrepatcherTransformer.CAMPAIGN_ENGINE, null,
           null, original);
-      require(composed != null, "entity-index repair failed with listenerThrottle=" + listenerThrottle);
-      MethodNode composedAdvance = method(read(composed), "advance", "(FLcom/fs/starfarer/util/A/new;)V");
-      require(countCalls(composedAdvance, Opcodes.INVOKEVIRTUAL, PrepatcherTransformer.CAMPAIGN_ENGINE,
-          "rebuildIDToEntityMap", "()V") == 2, "listener composition changed entity-index rebuild count");
+      require(composed != null, "listener plan did not apply mask=" + mask);
+      ClassNode composedNode = read(composed);
+      require(hasOwnershipMarker(composedNode, "campaignListenerPlan"),
+          "listener plan ownership marker missing mask=" + mask);
+      FieldNode composedMask = requireField(composedNode, "smo$campaignListenerPlanMask", "I");
+      require(composedMask.value instanceof Integer value && value == mask,
+          "listener plan mask field changed mask=" + mask);
+      MethodNode composedAdvance = method(composedNode, "advance", "(FLcom/fs/starfarer/util/A/new;)V");
+      require(
+          countCalls(composedAdvance, Opcodes.INVOKEVIRTUAL, PrepatcherTransformer.CAMPAIGN_ENGINE,
+              "rebuildIDToEntityMap", "()V") == (repair ? 2 : 1),
+          "listener plan entity-index rebuild count changed mask=" + mask);
       require(
           countCalls(composedAdvance, Opcodes.INVOKESTATIC, HOOKS, "readdChangeListenersIfNeeded",
-              "(Ljava/lang/Object;Ljava/util/List;Ljava/lang/Object;)V") == (listenerThrottle ? 1 : 0),
-          "listener composition state does not match configuration");
+              "(Ljava/lang/Object;Ljava/util/List;Ljava/lang/Object;)V") == (throttle ? 1 : 0),
+          "listener plan throttle state does not match mask=" + mask);
+      require(
+          composedNode.fields.stream().anyMatch(field -> field.name.equals(ENTITY_LOOKUP_INDEX_REPAIR_FIELD)) == repair,
+          "listener plan readiness field does not match mask=" + mask);
+      require(new PrepatcherTransformer(isolated).transform(null, PrepatcherTransformer.CAMPAIGN_ENGINE, null, null,
+          composed) == null, "listener plan was not idempotent mask=" + mask);
       verifyBytecode(composed);
     }
 
+    // A broken repair-member surface rejects the whole plan; the throttle
+    // member must not survive alone and the class emits no plan state.
     ClassNode changedRebuild = read(original);
     MethodNode rebuild = method(changedRebuild, "rebuildIDToEntityMap", "()V");
     rebuild.access = (rebuild.access & ~Opcodes.ACC_PRIVATE) | Opcodes.ACC_PUBLIC;
@@ -1615,11 +1642,47 @@ public final class StructuralCompatibilityTest {
     byte[] independent = new PrepatcherTransformer(config).transform(null, PrepatcherTransformer.CAMPAIGN_ENGINE, null,
         null, write(changedRebuild));
     require(independent != null, "changed entity-index rebuild blocked independent CampaignEngine patches");
-    require(read(independent).fields.stream().noneMatch(field -> field.name.equals(ENTITY_LOOKUP_INDEX_REPAIR_FIELD)),
+    ClassNode independentNode = read(independent);
+    require(independentNode.fields.stream().noneMatch(field -> field.name.equals(ENTITY_LOOKUP_INDEX_REPAIR_FIELD)),
         "changed entity-index rebuild was accepted by the repair matcher");
+    require(!hasOwnershipMarker(independentNode, "campaignListenerPlan"),
+        "broken repair member left the listener plan applied");
+    require(
+        countCalls(method(independentNode, "advance", "(FLcom/fs/starfarer/util/A/new;)V"), Opcodes.INVOKESTATIC, HOOKS,
+            "readdChangeListenersIfNeeded", "(Ljava/lang/Object;Ljava/util/List;Ljava/lang/Object;)V") == 0,
+        "broken repair member left the throttle member applied alone");
     require("SKIPPED_STRUCTURAL".equals(System.getProperty(status)),
         "changed entity-index rebuild did not fail open locally");
     verifyBytecode(independent);
+
+    // A broken throttle-member surface rejects the whole plan symmetrically:
+    // the repair member must not be committed without the throttle. The write
+    // is stack-neutral so the class stays verifiable and independent patches
+    // still apply.
+    ClassNode changedThrottle = read(original);
+    MethodNode readd = method(changedThrottle, "readdChangeListeners", "()V");
+    AbstractInsnNode readdReturn = null;
+    for (AbstractInsnNode insn : readd.instructions.toArray()) {
+      if (insn.getOpcode() == Opcodes.RETURN) {
+        readdReturn = insn;
+      }
+    }
+    require(readdReturn != null, "readdChangeListeners has no RETURN");
+    readd.instructions.insertBefore(readdReturn, new InsnNode(Opcodes.ICONST_0));
+    readd.instructions.insertBefore(readdReturn,
+        new FieldInsnNode(Opcodes.PUTSTATIC, PrepatcherTransformer.CAMPAIGN_ENGINE, "smo$testWrite", "I"));
+    System.clearProperty(status);
+    byte[] throttleOnly = new PrepatcherTransformer(config).transform(null, PrepatcherTransformer.CAMPAIGN_ENGINE, null,
+        null, write(changedThrottle));
+    require(throttleOnly != null, "changed listener sweep blocked independent CampaignEngine patches");
+    ClassNode throttleOnlyNode = read(throttleOnly);
+    require(!hasOwnershipMarker(throttleOnlyNode, "campaignListenerPlan"),
+        "broken throttle member left the listener plan applied");
+    require(throttleOnlyNode.fields.stream().noneMatch(field -> field.name.equals(ENTITY_LOOKUP_INDEX_REPAIR_FIELD)),
+        "broken throttle member left the repair member applied alone");
+    require("SKIPPED_STRUCTURAL".equals(System.getProperty(status)),
+        "changed listener sweep did not fail open locally");
+    verifyBytecode(throttleOnly);
 
     ClassNode partial = read(patched);
     require(partial.fields.removeIf(field -> field.name.equals(ENTITY_LOOKUP_INDEX_REPAIR_FIELD)),
@@ -1629,6 +1692,23 @@ public final class StructuralCompatibilityTest {
         write(partial)) == null, "partial entity-index repair state was rewritten");
     require("SKIPPED_STRUCTURAL".equals(System.getProperty(status)),
         "partial entity-index repair state was not rejected structurally");
+
+    // Legacy split markers are not adopted by the unified owner; disjoint
+    // CampaignEngine patches still apply on the rejected plan's class.
+    for (String legacy : List.of("entityLookupIndexRepair", "campaignListenerThrottle")) {
+      ClassNode legacyNode = read(original);
+      legacyNode.fields.add(new FieldNode(Opcodes.ASM8,
+          Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_SYNTHETIC, "smo$patched$" + legacy,
+          "Ljava/lang/String;", null, "StarsectorPrepatcher:patch-v1:" + legacy));
+      System.clearProperty(status);
+      byte[] legacyResult = new PrepatcherTransformer(config).transform(null, PrepatcherTransformer.CAMPAIGN_ENGINE,
+          null, null, write(legacyNode));
+      require(legacyResult != null, "legacy split marker blocked independent CampaignEngine patches: " + legacy);
+      require(!hasOwnershipMarker(read(legacyResult), "campaignListenerPlan"),
+          "legacy split marker was adopted by the unified plan: " + legacy);
+      require("SKIPPED_STRUCTURAL".equals(System.getProperty(status)),
+          "legacy split marker did not report SKIPPED_STRUCTURAL: " + legacy);
+    }
   }
 
   private static void runExp6OwnershipTests(PrepatcherConfig config, Path jarPath) throws Exception {
@@ -2339,6 +2419,16 @@ public final class StructuralCompatibilityTest {
         assertHookCount(bytes, CORE_WORLDS_RUNTIME, "starSystemRemoved", 1);
         require(hasOwnershipMarker(read(bytes), "coreWorldsExtentCache"),
             "CampaignEngine core-worlds marker is missing");
+        ClassNode engine = read(bytes);
+        require(hasOwnershipMarker(engine, "campaignListenerPlan"),
+            "CampaignEngine unified listener-plan marker is missing");
+        require(
+            !hasOwnershipMarker(engine, "entityLookupIndexRepair")
+                && !hasOwnershipMarker(engine, "campaignListenerThrottle"),
+            "CampaignEngine emitted legacy split listener markers");
+        FieldNode listenerMask = requireField(engine, "smo$campaignListenerPlanMask", "I");
+        require(listenerMask.value instanceof Integer mask && mask == 3,
+            "CampaignEngine listener-plan mask field changed");
       }
       case PrepatcherTransformer.COURSE_WIDGET -> {
         expected.put("routeJumpPointsForSystem", 3);

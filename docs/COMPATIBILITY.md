@@ -408,16 +408,23 @@ ULP fixtures входят в actual-agent regression suite.
   `H.getIntelIconEntity`; missing-list должен быть свежим локальным `ArrayList`.
 - `CampaignEngine.advance`: receiver — `this`; backing systems/hyperspace fields выводятся из
   реализации `readdChangeListeners` и передаются hook напрямую.
-- `patch.entityLookupIndexRepair` owns the same `CampaignEngine.advance(FLcom/fs/starfarer/util/A/new;)V`
-  listener boundary as `patch.campaignListenerThrottle`. Application order is explicit in the
-  transformer: entity-index repair first, listener throttle second. The repair matcher accepts the
-  raw virtual `readdChangeListeners()V` boundary and its valid throttled static post-state; the later
-  throttle consumes the repair's current bytes. Generic composition validation re-runs the repair
-  postcondition after the throttle and rolls the whole class back to incoming bytes if either
-  postcondition no longer holds. The repair also structurally reads the private
-  `rebuildIDToEntityMap()V`, its `getEntityById(String)` call/data flow and the map allocation/write
-  region; it inserts only a private transient synthetic readiness bit and a guarded rebuild directly
-  after the listener boundary.
+- `patch.entityLookupIndexRepair` and `patch.campaignListenerThrottle` share the
+  `CampaignEngine.advance(FLcom/fs/starfarer/util/A/new;)V` listener-restoration boundary and apply
+  only through the unified `campaignListenerPlan` owner. The two keys form a feature mask; either
+  member may run alone. Both member surfaces are proven on the same incoming bytes, then applied to
+  an isolated candidate in the explicit order repair → throttle: the repair anchors its guarded
+  rebuild after the raw `readdChangeListeners()V` call and the throttle rewrites that call in place.
+  The repair matcher recognizes both the raw virtual boundary and its throttled static post-state,
+  so the combined postcondition holds under either member order. One ownership marker and a private
+  static final mask commit in a single transaction; a member that cannot match rejects the whole
+  plan, and legacy split markers or unowned partial state are refused rather than adopted. The
+  repair also structurally reads the private `rebuildIDToEntityMap()V`, its `getEntityById(String)`
+  call/data flow and the map allocation/write region; it inserts only a private transient synthetic
+  readiness bit and a guarded rebuild directly after the listener boundary. The other
+  `CampaignEngine` patch ids (`coreWorldsExtentCache`, `campaignCacheLifecycle`, `marketScheduler`)
+  stay separate because their surfaces are genuinely disjoint from the listener-restoration
+  boundary; the regression proving neither the plan nor they can be silently skipped by the other
+  is the member-rejection check that still applies them on the rejected plan's class.
 - `BaseLocation.advance` и `advanceEvenIfPaused`: matcher требует соответственно ровно три и два
   `new ArrayList(Collection)`, каждый результат должен сразу записываться в отдельный local.
   Data-flow разрешает только ожидаемые вызовы `List.iterator()` от этого local (один на snapshot,

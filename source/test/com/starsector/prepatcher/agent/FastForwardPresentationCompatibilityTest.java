@@ -31,10 +31,10 @@ public final class FastForwardPresentationCompatibilityTest {
   private static final String PATCH_MARKER_PREFIX = "smo$patched$";
 
   private static final Map<String, Expected> EXPECTED = expectedTargets();
-  private static final Map<String, Set<String>> CHAIN_MARKERS = Map.of("com/fs/starfarer/campaign/CampaignState",
-      Set.of("smo$patched$marketScheduler"), "com/fs/starfarer/campaign/CampaignEngine",
-      Set.of("smo$patched$campaignCacheLifecycle", "smo$patched$coreWorldsExtentCache", "smo$patched$marketScheduler",
-          "smo$patched$entityLookupIndexRepair", "smo$patched$campaignListenerThrottle"),
+  private static final Map<String, Set<String>> CHAIN_MARKERS = Map.of(
+      "com/fs/starfarer/campaign/CampaignState", Set.of("smo$patched$marketScheduler"),
+      "com/fs/starfarer/campaign/CampaignEngine", Set.of("smo$patched$campaignCacheLifecycle",
+          "smo$patched$coreWorldsExtentCache", "smo$patched$marketScheduler", "smo$patched$campaignListenerPlan"),
       "com/fs/starfarer/campaign/BaseLocation",
       Set.of("smo$patched$campaignSnapshotReuse", "smo$patched$coreWorldsExtentCache",
           "smo$patched$strategicJumpDestinationIndex"),

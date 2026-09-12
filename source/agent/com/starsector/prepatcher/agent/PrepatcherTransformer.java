@@ -116,6 +116,9 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
   static final String STRATEGIC_JUMP_DESTINATION_PLAN_PATCH_ID = "strategicJumpDestinationPlan";
   static final int STRATEGIC_JUMP_FEATURE_DESTINATION_FIRST = 1;
   static final int STRATEGIC_JUMP_FEATURE_DESTINATION_INDEX = 2;
+  static final String CAMPAIGN_LISTENER_PLAN_PATCH_ID = "campaignListenerPlan";
+  static final int CAMPAIGN_LISTENER_FEATURE_ENTITY_INDEX_REPAIR = 1;
+  static final int CAMPAIGN_LISTENER_FEATURE_THROTTLE = 2;
   static final int SAVE_METHOD_FEATURE_CACHE_MAINTENANCE = 1;
   static final int SAVE_METHOD_FEATURE_MARKET_SCHEDULER_FLUSH = 2;
   private static final String SAVE_OUTPUT_BUFFER_DEDUP_PATCH_ID = "saveOutputBufferDedup";
@@ -236,13 +239,8 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
         apply(state, CORE_WORLDS_PATCH_ID, config.coreWorldsExtentCache, structured(new CoreWorldsTopologyHooks()));
         apply(state, "campaignCacheLifecycle", campaignCacheLifecycleEnabled(), this::patchCampaignCacheLifecycle);
         apply(state, "marketScheduler", config.marketScheduler, structured(new CampaignEngineMarketSchedulerTick()));
-        // Explicit overlapping-surface order: the entity-index repair owns the
-        // post-listener boundary first; the throttle then replaces that boundary and
-        // the generic composition gate revalidates the repair against the new call.
-        apply(state, "entityLookupIndexRepair", config.entityLookupIndexRepair,
-            structured(new EntityLookupIndexRepair()));
-        apply(state, "campaignListenerThrottle", config.campaignListenerThrottle,
-            structured(new CampaignListenerThrottle()));
+        apply(state, CAMPAIGN_LISTENER_PLAN_PATCH_ID, campaignListenerPlanEnabled(),
+            structured(new CampaignListenerPlan(requestedCampaignListenerFeatureMask())));
       }
       case COURSE_WIDGET ->
         apply(state, "routeJumpPointIndex", config.routeJumpPointIndex, structured(new RouteJumpPointIndex()));
@@ -601,8 +599,8 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       case Z -> config.intelArrowRendering;
       case EVENTS -> config.intelCallbackCache || config.intelReconciliation;
       case CAMPAIGN_STATE -> config.marketScheduler;
-      case CAMPAIGN_ENGINE -> config.coreWorldsExtentCache || campaignCacheLifecycleEnabled()
-          || config.campaignListenerThrottle || config.entityLookupIndexRepair;
+      case CAMPAIGN_ENGINE ->
+        config.coreWorldsExtentCache || campaignCacheLifecycleEnabled() || campaignListenerPlanEnabled();
       case COURSE_WIDGET -> config.routeJumpPointIndex;
       case STRATEGIC_MODULE -> strategicJumpDestinationPlanEnabled();
       case JUMP_POINT, JUMP_DESTINATION -> config.strategicJumpDestinationIndex;
@@ -706,6 +704,21 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     }
     if (config.strategicJumpDestinationIndex) {
       mask |= STRATEGIC_JUMP_FEATURE_DESTINATION_INDEX;
+    }
+    return mask;
+  }
+
+  private boolean campaignListenerPlanEnabled() {
+    return config.entityLookupIndexRepair || config.campaignListenerThrottle;
+  }
+
+  private int requestedCampaignListenerFeatureMask() {
+    int mask = 0;
+    if (config.entityLookupIndexRepair) {
+      mask |= CAMPAIGN_LISTENER_FEATURE_ENTITY_INDEX_REPAIR;
+    }
+    if (config.campaignListenerThrottle) {
+      mask |= CAMPAIGN_LISTENER_FEATURE_THROTTLE;
     }
     return mask;
   }

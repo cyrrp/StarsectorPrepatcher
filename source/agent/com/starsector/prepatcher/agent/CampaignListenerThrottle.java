@@ -16,6 +16,12 @@ import static com.starsector.prepatcher.agent.Mutations.*;
 import static com.starsector.prepatcher.agent.Names.*;
 import static com.starsector.prepatcher.agent.Queries.*;
 
+/**
+ * Replaces the unconditional readdChangeListeners() sweep in
+ * CampaignEngine.advance with the incremental runtime hook. This member runs
+ * inside CampaignListenerPlan: it rewrites the listener boundary in place on
+ * the same plan candidate the entity-index repair anchors to.
+ */
 final class CampaignListenerThrottle implements StructuredPatch<CampaignListenerThrottle.Plan> {
   private static final String HYPERSPACE_DESC = "Lcom/fs/starfarer/campaign/Hyperspace;";
 
