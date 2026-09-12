@@ -486,9 +486,9 @@ public final class StrategicJumpDestinationIndexRuntimeTest {
         prefix + "com.fs.starfarer.api.campaign.JumpPointAPI$JumpDestination." + "strategicJumpDestinationIndex";
     String[] keys = {maintenance, plan, point, location, destination};
     String[] previous = new String[keys.length];
-    Field cached = StarsectorPrepatcherHooks.class.getDeclaredField("strategicJumpRuntimeCapability");
+    Field cached = StarsectorPrepatcherStrategicJumpHooks.class.getDeclaredField("strategicJumpRuntimeCapability");
     cached.setAccessible(true);
-    Method capability = StarsectorPrepatcherHooks.class.getDeclaredMethod("strategicJumpIndexCapability");
+    Method capability = StarsectorPrepatcherStrategicJumpHooks.class.getDeclaredMethod("strategicJumpIndexCapability");
     capability.setAccessible(true);
     try {
       for (int i = 0; i < keys.length; i++) previous[i] = System.getProperty(keys[i]);

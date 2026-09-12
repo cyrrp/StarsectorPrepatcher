@@ -224,7 +224,8 @@ public final class PersistentEconomyRuntimeRegressionTest {
 
   @SuppressWarnings("unchecked")
   private static java.util.Map<ReachEconomy, Object> economyStates() throws Exception {
-    Field field = StarsectorPrepatcherHooks.class.getDeclaredField("ECONOMY_LOCATION_STATES");
+    Field field = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherEconomyRuntime")
+        .getDeclaredField("ECONOMY_LOCATION_STATES");
     field.setAccessible(true);
     return (java.util.Map<ReachEconomy, Object>) field.get(null);
   }
@@ -233,7 +234,8 @@ public final class PersistentEconomyRuntimeRegressionTest {
     long transition = StarsectorPrepatcherHooks.beginCampaignEngineChange(engine);
     require(transition >= 0L, "test engine switch did not open a cache generation");
     StarsectorPrepatcherHooks.completeCampaignEngineChange(engine, transition);
-    Field owner = StarsectorPrepatcherHooks.class.getDeclaredField("activeReachEconomy");
+    Field owner =
+        Class.forName("com.fs.starfarer.api.StarsectorPrepatcherCampaignCaches").getDeclaredField("activeReachEconomy");
     owner.setAccessible(true);
     owner.set(null, new java.lang.ref.WeakReference<>(economy));
   }

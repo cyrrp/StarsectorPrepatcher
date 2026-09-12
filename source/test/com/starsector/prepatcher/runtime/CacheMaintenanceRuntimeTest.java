@@ -33,7 +33,7 @@ public final class CacheMaintenanceRuntimeTest {
   public static void main(String[] args) throws Exception {
     PrepatcherConfig config = config();
     installConfig(config);
-    installClock(StarsectorPrepatcherHooks.class, CLOCK::get);
+    installClock(runtimeClass("CampaignCaches"), CLOCK::get);
     installClock(StarsectorPrepatcherHyperspaceHooks.class, CLOCK::get);
     configureHyperspace(config);
     activateCampaign(new Object());
@@ -51,7 +51,7 @@ public final class CacheMaintenanceRuntimeTest {
       testGenerationIsolation(config);
       System.out.println("CacheMaintenanceRuntimeTest PASSED");
     } finally {
-      installClock(StarsectorPrepatcherHooks.class, System::nanoTime);
+      installClock(runtimeClass("CampaignCaches"), System::nanoTime);
       installClock(StarsectorPrepatcherHyperspaceHooks.class, System::nanoTime);
       Object engine = activeEngineFixture;
       long transition = StarsectorPrepatcherHooks.beginCampaignEngineChange(null);
@@ -63,9 +63,9 @@ public final class CacheMaintenanceRuntimeTest {
 
   private static void testOwnerIdleBoundaries(PrepatcherConfig config) throws Exception {
     CLOCK.set(10_000L * MS);
-    IdentityHashMap<Object, Object> labels = ownerMap("LABEL_INDEXES");
-    IdentityHashMap<Object, Object> intel = ownerMap("INTEL_ENTITY_INDEXES");
-    IdentityHashMap<Object, Object> hits = ownerMap("HIT_CACHES");
+    IdentityHashMap<Object, Object> labels = ownerMap(runtimeClass("IntelRuntime"), "LABEL_INDEXES");
+    IdentityHashMap<Object, Object> intel = ownerMap(runtimeClass("IntelRuntime"), "INTEL_ENTITY_INDEXES");
+    IdentityHashMap<Object, Object> hits = ownerMap(runtimeClass("MapRuntime"), "HIT_CACHES");
 
     BoundaryCase label = populateBoundary(labels, "label", config.labelOwnerIdleTtlMs);
     BoundaryCase entity = populateBoundary(intel, "intel", config.intelEntityIndexOwnerIdleTtlMs);
@@ -142,7 +142,7 @@ public final class CacheMaintenanceRuntimeTest {
     map.put(oldest, oldestValue);
     map.put(newest, newestValue);
 
-    Method method = findMethod(StarsectorPrepatcherHooks.class, "evictIdleAndLruForInsert", 7);
+    Method method = findMethod(runtimeClass("CampaignCaches"), "evictIdleAndLruForInsert", 7);
     LongAdder idle = new LongAdder();
     LongAdder limit = new LongAdder();
     boolean accepted = (boolean) method.invoke(null, map, inserting, CLOCK.get(), idleTtlMs, 3, idle, limit);
@@ -180,7 +180,7 @@ public final class CacheMaintenanceRuntimeTest {
   @SuppressWarnings("unchecked")
   private static void testHoverCellPruning(PrepatcherConfig config) throws Exception {
     CLOCK.set(30_000L * MS);
-    IdentityHashMap<Object, Object> hits = ownerMap("HIT_CACHES");
+    IdentityHashMap<Object, Object> hits = ownerMap(runtimeClass("MapRuntime"), "HIT_CACHES");
     hits.clear();
     Object owner = new Object();
     Object cache = newOwnerValue("hit", CLOCK.get());
@@ -207,7 +207,7 @@ public final class CacheMaintenanceRuntimeTest {
   }
 
   private static void testHoverTtlBoundary(PrepatcherConfig config) throws Exception {
-    Method fresh = findMethod(StarsectorPrepatcherHooks.class, "hoverCellFresh", 3);
+    Method fresh = findMethod(runtimeClass("CampaignCaches"), "hoverCellFresh", 3);
     long now = 35_000L * MS;
     long ttl = config.hoverCellTtlMs * MS;
     require((boolean) fresh.invoke(null, now, now - ttl + 1L, config.hoverCellTtlMs),
@@ -220,7 +220,7 @@ public final class CacheMaintenanceRuntimeTest {
 
   @SuppressWarnings({"rawtypes", "unchecked"})
   private static void testScratchClearedPeak(PrepatcherConfig config) throws Exception {
-    removeThreadLocal(StarsectorPrepatcherHooks.class, "SCRATCH");
+    removeThreadLocal(runtimeClass("Scratch"), "SCRATCH");
     CLOCK.set(36_000L * MS);
     StarsectorPrepatcherHooks.beginScratchScope();
     ArrayList pooled = StarsectorPrepatcherHooks.borrowShipList();
@@ -230,7 +230,7 @@ public final class CacheMaintenanceRuntimeTest {
     pooled.clear();
     StarsectorPrepatcherHooks.endScratchScope();
 
-    Object scratch = threadLocalValue("SCRATCH");
+    Object scratch = threadLocalValue(runtimeClass("Scratch"), "SCRATCH");
     Object frame = ((List<?>) read(scratch, "frames")).get(0);
     int retainedPeak = ((List<Integer>) read(frame, "pooledListHighWaters")).get(0);
     require(retainedPeak >= 64, "scratch list did not retain a peak observed before caller clear()");
@@ -249,11 +249,11 @@ public final class CacheMaintenanceRuntimeTest {
   }
 
   private static void testScratchDepthTrimming(PrepatcherConfig config) throws Exception {
-    removeThreadLocal(StarsectorPrepatcherHooks.class, "SCRATCH");
+    removeThreadLocal(runtimeClass("Scratch"), "SCRATCH");
     CLOCK.set(38_000L * MS);
     for (int i = 0; i < 64; i++) StarsectorPrepatcherHooks.beginScratchScope();
     for (int i = 0; i < 64; i++) StarsectorPrepatcherHooks.endScratchScope();
-    Object scratch = threadLocalValue("SCRATCH");
+    Object scratch = threadLocalValue(runtimeClass("Scratch"), "SCRATCH");
     List<?> frames = (List<?>) read(scratch, "frames");
     require(frames.size() == 64, "deep scratch setup did not allocate 64 frames");
 
@@ -268,26 +268,26 @@ public final class CacheMaintenanceRuntimeTest {
   }
 
   private static void testScratchGaugeAggregationAndReset(PrepatcherConfig config) throws Exception {
-    removeThreadLocal(StarsectorPrepatcherHooks.class, "SCRATCH");
+    removeThreadLocal(runtimeClass("Scratch"), "SCRATCH");
     CLOCK.set(39_000L * MS);
     StarsectorPrepatcherHooks.beginScratchScope();
     StarsectorPrepatcherHooks.endScratchScope();
     StarsectorPrepatcherHooks.runCacheMaintenance(true);
 
-    Object scratch = threadLocalValue("SCRATCH");
+    Object scratch = threadLocalValue(runtimeClass("Scratch"), "SCRATCH");
     Object frame = ((List<?>) read(scratch, "frames")).get(0);
     long expectedLists = readLong(frame, "entityListHighWater") + readLong(frame, "hitListHighWater")
         + readLong(frame, "labelCandidatesHighWater");
     long expectedSets = readLong(frame, "classSetHighWater") + readLong(frame, "equalityMembershipHighWater")
         + readLong(frame, "containsSetHighWater");
-    Object gauges = staticField(StarsectorPrepatcherHooks.class, "SCRATCH_GAUGES");
+    Object gauges = staticField(runtimeClass("Scratch"), "SCRATCH_GAUGES");
     require(readLong(gauges, "retainedListCapacity") >= expectedLists,
         "scratch list gauge reports one maximum instead of per-list sum");
     require(readLong(gauges, "retainedSetCapacity") >= expectedSets,
         "scratch set gauge reports one maximum instead of per-set sum");
 
     activateCampaign(new Object());
-    Object reset = staticField(StarsectorPrepatcherHooks.class, "SCRATCH_GAUGES");
+    Object reset = staticField(runtimeClass("Scratch"), "SCRATCH_GAUGES");
     require(readLong(reset, "retainedListCapacity") == 0L && readLong(reset, "retainedSetCapacity") == 0L
         && readLong(reset, "retainedIdentityCapacity") == 0L && ((Number) read(reset, "frameCount")).intValue() == 0,
         "scratch gauges retained detached generation capacity");
@@ -375,13 +375,13 @@ public final class CacheMaintenanceRuntimeTest {
 
   private static void testGenerationIsolation(PrepatcherConfig config) throws Exception {
     CLOCK.set(40_000L * MS);
-    IdentityHashMap<Object, Object> oldLabels = ownerMap("LABEL_INDEXES");
+    IdentityHashMap<Object, Object> oldLabels = ownerMap(runtimeClass("IntelRuntime"), "LABEL_INDEXES");
     oldLabels.clear();
     Object oldOwner = owner("label", 40);
     oldLabels.put(oldOwner, newOwnerValue("label", CLOCK.get() - config.labelOwnerIdleTtlMs * MS - 1L));
 
     activateCampaign(new Object());
-    IdentityHashMap<Object, Object> current = ownerMap("LABEL_INDEXES");
+    IdentityHashMap<Object, Object> current = ownerMap(runtimeClass("IntelRuntime"), "LABEL_INDEXES");
     require(current != oldLabels, "campaign generation did not replace owner cache map");
     Object currentOwner = owner("label", 41);
     current.put(currentOwner, newOwnerValue("label", CLOCK.get()));
@@ -408,7 +408,7 @@ public final class CacheMaintenanceRuntimeTest {
     } finally {
       StarsectorPrepatcherHooks.endScratchScope();
     }
-    Object scratch = threadLocalValue("SCRATCH");
+    Object scratch = threadLocalValue(runtimeClass("Scratch"), "SCRATCH");
     List<?> frames = (List<?>) read(scratch, "frames");
     Object oversized = frames.get(0);
     require(((List<?>) read(oversized, "pooledLists")).size() <= config.scratchTrimMaxPooledCollections,
@@ -494,6 +494,10 @@ public final class CacheMaintenanceRuntimeTest {
     method.invoke(null, config);
   }
 
+  private static Class<?> runtimeClass(String simpleName) throws ClassNotFoundException {
+    return Class.forName("com.fs.starfarer.api.StarsectorPrepatcher" + simpleName);
+  }
+
   private static void installClock(Class<?> owner, LongSupplier clock) throws Exception {
     Field field = owner.getDeclaredField("NANO_CLOCK");
     field.setAccessible(true);
@@ -513,7 +517,7 @@ public final class CacheMaintenanceRuntimeTest {
 
   private static void requireCampaignFixtureActive() {
     try {
-      Field field = StarsectorPrepatcherHooks.class.getDeclaredField("activeCampaignEngine");
+      Field field = runtimeClass("CampaignCaches").getDeclaredField("activeCampaignEngine");
       field.setAccessible(true);
       WeakReference<?> active = (WeakReference<?>) field.get(null);
       require(active.get() == activeEngineFixture, "test campaign fixture is no longer strongly reachable");
@@ -523,8 +527,8 @@ public final class CacheMaintenanceRuntimeTest {
   }
 
   @SuppressWarnings("unchecked")
-  private static IdentityHashMap<Object, Object> ownerMap(String name) throws Exception {
-    Field field = StarsectorPrepatcherHooks.class.getDeclaredField(name);
+  private static IdentityHashMap<Object, Object> ownerMap(Class<?> owner, String name) throws Exception {
+    Field field = owner.getDeclaredField(name);
     field.setAccessible(true);
     return (IdentityHashMap<Object, Object>) field.get(null);
   }
@@ -538,10 +542,10 @@ public final class CacheMaintenanceRuntimeTest {
   }
 
   private static Object newOwnerValue(String kind, long access) throws Exception {
-    Class<?> type = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherHooks$" + switch (kind) {
-      case "label" -> "LabelIndex";
-      case "intel" -> "IntelEntityIndex";
-      case "hit" -> "HitCache";
+    Class<?> type = Class.forName(switch (kind) {
+      case "label" -> "com.fs.starfarer.api.StarsectorPrepatcherIntelRuntime$LabelIndex";
+      case "intel" -> "com.fs.starfarer.api.StarsectorPrepatcherIntelRuntime$IntelEntityIndex";
+      case "hit" -> "com.fs.starfarer.api.StarsectorPrepatcherMapRuntime$HitCache";
       default -> throw new IllegalArgumentException(kind);
     });
     Object value;
@@ -564,7 +568,7 @@ public final class CacheMaintenanceRuntimeTest {
   }
 
   private static Object newCell(long atNanos) throws Exception {
-    Class<?> type = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherHooks$CellHit");
+    Class<?> type = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherMapRuntime$CellHit");
     Constructor<?> c = type.getDeclaredConstructor(SectorEntityToken.class, long.class);
     c.setAccessible(true);
     return c.newInstance(null, atNanos);
@@ -581,7 +585,7 @@ public final class CacheMaintenanceRuntimeTest {
   }
 
   private static Object threadLocalValue(String fieldName) throws Exception {
-    return threadLocalValue(StarsectorPrepatcherHooks.class, fieldName);
+    return threadLocalValue(runtimeClass("Scratch"), fieldName);
   }
 
   private static Object threadLocalValue(Class<?> owner, String fieldName) throws Exception {
@@ -635,7 +639,7 @@ public final class CacheMaintenanceRuntimeTest {
   }
 
   private static long metric(String name) throws Exception {
-    Field field = StarsectorPrepatcherHooks.class.getDeclaredField(name);
+    Field field = runtimeClass("Metrics").getDeclaredField(name);
     field.setAccessible(true);
     return ((LongAdder) field.get(null)).sum();
   }

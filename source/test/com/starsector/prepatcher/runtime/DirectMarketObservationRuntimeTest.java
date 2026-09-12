@@ -178,7 +178,8 @@ public final class DirectMarketObservationRuntimeTest {
   }
 
   private static Object directMarketObserver() throws Exception {
-    var observerField = StarsectorPrepatcherHooks.class.getDeclaredField("DIRECT_MARKET_OBSERVER");
+    var observerField = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherMarketScheduler")
+        .getDeclaredField("DIRECT_MARKET_OBSERVER");
     observerField.setAccessible(true);
     Object observer = observerField.get(null);
     require(observer != null, "direct-market observer was not configured");

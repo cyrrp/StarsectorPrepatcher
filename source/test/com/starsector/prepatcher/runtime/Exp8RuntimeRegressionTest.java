@@ -179,7 +179,7 @@ public final class Exp8RuntimeRegressionTest {
     MutableMarket second = new MutableMarket("m2", secondLocation.proxy);
     ArrayList<MarketAPI> markets = new ArrayList<>(List.of(first.proxy, second.proxy));
 
-    Class<?> stateClass = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherHooks$EconomyLocationState");
+    Class<?> stateClass = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherEconomyRuntime$EconomyLocationState");
     Method capture = stateClass.getDeclaredMethod("capture", List.class);
     Method matches = stateClass.getDeclaredMethod("matches", List.class);
     capture.setAccessible(true);
@@ -257,7 +257,7 @@ public final class Exp8RuntimeRegressionTest {
       systems.add(system.proxy);
     }
 
-    Class<?> indexClass = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherHooks$CommRelaySystemIndex");
+    Class<?> indexClass = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherIntelRuntime$CommRelaySystemIndex");
     Method build = indexClass.getDeclaredMethod("build", List.class, long.class, float.class);
     Method collect = indexClass.getDeclaredMethod("collect", float.class, float.class, float.class, List.class);
     Method matches = indexClass.getDeclaredMethod("matches", List.class, long.class, int.class, float.class);
@@ -281,8 +281,8 @@ public final class Exp8RuntimeRegressionTest {
     Object movedIndex = build.invoke(null, systems, builtAt + 251_000_000L, radius);
     ArrayList<Object> movedEntries = new ArrayList<>();
     collect.invoke(movedIndex, 250f, 0f, radius, movedEntries);
-    Field movedSystem =
-        Class.forName("com.fs.starfarer.api.StarsectorPrepatcherHooks$CommRelaySystemEntry").getDeclaredField("system");
+    Field movedSystem = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherIntelRuntime$CommRelaySystemEntry")
+        .getDeclaredField("system");
     movedSystem.setAccessible(true);
     boolean movedFound = false;
     for (Object entry : movedEntries) {
@@ -293,10 +293,11 @@ public final class Exp8RuntimeRegressionTest {
 
     ArrayList<Object> entries = new ArrayList<>();
     collect.invoke(index, 250f, 0f, radius, entries);
-    Field comparatorField = StarsectorPrepatcherHooks.class.getDeclaredField("COMM_RELAY_ENTRY_ORDER");
+    Field comparatorField = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherIntelRuntime")
+        .getDeclaredField("COMM_RELAY_ENTRY_ORDER");
     comparatorField.setAccessible(true);
     entries.sort((Comparator) comparatorField.get(null));
-    Class<?> entryClass = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherHooks$CommRelaySystemEntry");
+    Class<?> entryClass = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherIntelRuntime$CommRelaySystemEntry");
     Field ordinal = entryClass.getDeclaredField("ordinal");
     Field systemField = entryClass.getDeclaredField("system");
     ordinal.setAccessible(true);
@@ -387,7 +388,8 @@ public final class Exp8RuntimeRegressionTest {
 
   @SuppressWarnings("unchecked")
   private static Map<ReachEconomy, Object> economyStates() throws Exception {
-    Field field = StarsectorPrepatcherHooks.class.getDeclaredField("ECONOMY_LOCATION_STATES");
+    Field field = Class.forName("com.fs.starfarer.api.StarsectorPrepatcherEconomyRuntime")
+        .getDeclaredField("ECONOMY_LOCATION_STATES");
     field.setAccessible(true);
     return (Map<ReachEconomy, Object>) field.get(null);
   }
@@ -396,7 +398,8 @@ public final class Exp8RuntimeRegressionTest {
     long transition = StarsectorPrepatcherHooks.beginCampaignEngineChange(engine);
     require(transition >= 0L, "test engine switch did not open a cache generation");
     StarsectorPrepatcherHooks.completeCampaignEngineChange(engine, transition);
-    Field owner = StarsectorPrepatcherHooks.class.getDeclaredField("activeReachEconomy");
+    Field owner =
+        Class.forName("com.fs.starfarer.api.StarsectorPrepatcherCampaignCaches").getDeclaredField("activeReachEconomy");
     owner.setAccessible(true);
     owner.set(null, new WeakReference<>(economy));
   }

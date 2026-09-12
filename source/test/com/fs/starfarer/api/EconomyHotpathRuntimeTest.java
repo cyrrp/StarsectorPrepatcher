@@ -189,11 +189,11 @@ public final class EconomyHotpathRuntimeTest {
   }
 
   private static void activateCampaign(ReachEconomy economy, Object engine, long generation) throws Exception {
-    setStatic(StarsectorPrepatcherHooks.class, "campaignCacheGeneration", generation);
-    setStatic(StarsectorPrepatcherHooks.class, "campaignCacheGenerationActive", true);
-    setStatic(StarsectorPrepatcherHooks.class, "campaignEngineObserved", true);
-    setStatic(StarsectorPrepatcherHooks.class, "activeCampaignEngine", new WeakReference<>(engine));
-    setStatic(StarsectorPrepatcherHooks.class, "activeReachEconomy", new WeakReference<>(economy));
+    setStatic(StarsectorPrepatcherCampaignCaches.class, "campaignCacheGeneration", generation);
+    setStatic(StarsectorPrepatcherCampaignCaches.class, "campaignCacheGenerationActive", true);
+    setStatic(StarsectorPrepatcherCampaignCaches.class, "campaignEngineObserved", true);
+    setStatic(StarsectorPrepatcherCampaignCaches.class, "activeCampaignEngine", new WeakReference<>(engine));
+    setStatic(StarsectorPrepatcherCampaignCaches.class, "activeReachEconomy", new WeakReference<>(economy));
   }
 
   private static int groupIndexKeyCount(Object state) throws Exception {

@@ -140,7 +140,7 @@ public final class EconomyHotpathActualAgentSmokeTest {
   }
 
   private static void setStatic(String name, Object value) throws Exception {
-    Field field = findField(StarsectorPrepatcherHooks.class, name);
+    Field field = findField(Class.forName("com.fs.starfarer.api.StarsectorPrepatcherCampaignCaches"), name);
     if (field.getType() == boolean.class) {
       field.setBoolean(null, (Boolean) value);
     } else if (field.getType() == long.class) {

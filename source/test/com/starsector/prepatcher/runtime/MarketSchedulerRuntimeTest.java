@@ -154,7 +154,7 @@ public final class MarketSchedulerRuntimeTest {
   }
 
   private static void assertIdentityStateMaps() throws Exception {
-    Field field = StarsectorPrepatcherHooks.class.getDeclaredField("MARKET_SCHEDULER_STATES");
+    Field field = runtimeClass("MarketScheduler").getDeclaredField("MARKET_SCHEDULER_STATES");
     field.setAccessible(true);
     Object map = field.get(null);
     require(map.getClass().getSimpleName().equals("WeakIdentityMap"),
@@ -173,7 +173,7 @@ public final class MarketSchedulerRuntimeTest {
     }
 
     Method stablePhase =
-        StarsectorPrepatcherHooks.class.getDeclaredMethod("stableMarketPhase", MarketAPI.class, int.class);
+        runtimeClass("MarketScheduler").getDeclaredMethod("stableMarketPhase", MarketAPI.class, int.class);
     stablePhase.setAccessible(true);
 
     int frames = 13;
@@ -339,7 +339,7 @@ public final class MarketSchedulerRuntimeTest {
         "per-simulation-tick opt-out did not expose its exact callback cost");
     require(metric("MARKET_SCHEDULER_PER_SIMULATION_TICK_CALLS") == callsBefore + 11L,
         "per-simulation-tick callbacks were not counted");
-    Method count = StarsectorPrepatcherHooks.class.getDeclaredMethod("countPerSimulationTickMarkets");
+    Method count = runtimeClass("MarketScheduler").getDeclaredMethod("countPerSimulationTickMarkets");
     count.setAccessible(true);
     require((Integer) count.invoke(null) == 1, "known per-simulation-tick market count is incorrect");
   }
@@ -365,7 +365,7 @@ public final class MarketSchedulerRuntimeTest {
     MutableMarket hidden = new MutableMarket("hidden", remote.proxy, false, true);
 
     Method stablePhase =
-        StarsectorPrepatcherHooks.class.getDeclaredMethod("stableMarketPhase", MarketAPI.class, int.class);
+        runtimeClass("MarketScheduler").getDeclaredMethod("stableMarketPhase", MarketAPI.class, int.class);
     stablePhase.setAccessible(true);
     int phase = (Integer) stablePhase.invoke(null, hidden.proxy, 8);
 
@@ -402,7 +402,7 @@ public final class MarketSchedulerRuntimeTest {
     sector.interactionMarket = null;
 
     Method stablePhase =
-        StarsectorPrepatcherHooks.class.getDeclaredMethod("stableMarketPhase", MarketAPI.class, int.class);
+        runtimeClass("MarketScheduler").getDeclaredMethod("stableMarketPhase", MarketAPI.class, int.class);
     stablePhase.setAccessible(true);
 
     ArrayList<MutableMarket> remoteMarkets = new ArrayList<>();
@@ -1126,7 +1126,7 @@ public final class MarketSchedulerRuntimeTest {
 
   private static void assertConstructionBuildingReasonClassification() throws Exception {
     Method method =
-        StarsectorPrepatcherHooks.class.getDeclaredMethod("constructionBuildingReason", boolean.class, Boolean.class);
+        runtimeClass("MarketScheduler").getDeclaredMethod("constructionBuildingReason", boolean.class, Boolean.class);
     method.setAccessible(true);
     require((Integer) method.invoke(null, true, null) == 2, "non-BaseIndustry isBuilding fallback was not preserved");
     require((Integer) method.invoke(null, false, null) == 0, "inactive non-BaseIndustry was classified as building");
@@ -1380,7 +1380,7 @@ public final class MarketSchedulerRuntimeTest {
 
 
   private static Object schedulerState(MarketAPI market) throws Exception {
-    Field field = StarsectorPrepatcherHooks.class.getDeclaredField("MARKET_SCHEDULER_STATES");
+    Field field = runtimeClass("MarketScheduler").getDeclaredField("MARKET_SCHEDULER_STATES");
     field.setAccessible(true);
     Object map = field.get(null);
     Method get = map.getClass().getDeclaredMethod("get", Object.class);
@@ -1397,7 +1397,7 @@ public final class MarketSchedulerRuntimeTest {
   }
 
   private static int schedulerStateSize() throws Exception {
-    Field field = StarsectorPrepatcherHooks.class.getDeclaredField("MARKET_SCHEDULER_STATES");
+    Field field = runtimeClass("MarketScheduler").getDeclaredField("MARKET_SCHEDULER_STATES");
     field.setAccessible(true);
     Object map = field.get(null);
     Method size = map.getClass().getDeclaredMethod("size");
@@ -1488,10 +1488,32 @@ public final class MarketSchedulerRuntimeTest {
     return config;
   }
 
+  private static Class<?> runtimeClass(String simpleName) throws ClassNotFoundException {
+    return Class.forName("com.fs.starfarer.api.StarsectorPrepatcher" + simpleName);
+  }
+
+  private static Field runtimeField(String name) throws Exception {
+    for (String owner : List.of("Hooks", "CampaignCaches", "CampaignListeners", "CommodityTemporal", "EconomyRuntime",
+        "IntelRuntime", "MapRuntime", "MarketScheduler", "Metrics", "RouteIndex", "Scratch", "StartupRuntime",
+        "StrategicJumpHooks")) {
+      try {
+        return runtimeClass(owner).getDeclaredField(name);
+      } catch (NoSuchFieldException ignored) {}
+    }
+    throw new NoSuchFieldException(name);
+  }
+
   private static Object invokePrivateStatic(String methodName) throws Exception {
-    Method method = StarsectorPrepatcherHooks.class.getDeclaredMethod(methodName);
-    method.setAccessible(true);
-    return method.invoke(null);
+    for (String owner : List.of("Hooks", "CampaignCaches", "CampaignListeners", "CommodityTemporal", "EconomyRuntime",
+        "IntelRuntime", "MapRuntime", "MarketScheduler", "Metrics", "RouteIndex", "Scratch", "StartupRuntime",
+        "StrategicJumpHooks")) {
+      try {
+        Method method = runtimeClass(owner).getDeclaredMethod(methodName);
+        method.setAccessible(true);
+        return method.invoke(null);
+      } catch (NoSuchMethodException ignored) {}
+    }
+    throw new NoSuchMethodException(methodName);
   }
 
   private static int recordInt(Object record, String accessor) throws Exception {
@@ -1501,13 +1523,13 @@ public final class MarketSchedulerRuntimeTest {
   }
 
   private static Object staticField(String fieldName) throws Exception {
-    Field field = StarsectorPrepatcherHooks.class.getDeclaredField(fieldName);
+    Field field = runtimeField(fieldName);
     field.setAccessible(true);
     return field.get(null);
   }
 
   private static void setStaticField(String fieldName, Object value) throws Exception {
-    Field field = StarsectorPrepatcherHooks.class.getDeclaredField(fieldName);
+    Field field = runtimeField(fieldName);
     field.setAccessible(true);
     field.set(null, value);
   }
@@ -1532,7 +1554,7 @@ public final class MarketSchedulerRuntimeTest {
   }
 
   private static long metric(String fieldName) throws Exception {
-    Field field = StarsectorPrepatcherHooks.class.getDeclaredField(fieldName);
+    Field field = runtimeClass("Metrics").getDeclaredField(fieldName);
     field.setAccessible(true);
     return ((LongAdder) field.get(null)).sum();
   }
@@ -1557,7 +1579,7 @@ public final class MarketSchedulerRuntimeTest {
   }
 
   private static long schedulerFrame() throws Exception {
-    Field field = StarsectorPrepatcherHooks.class.getDeclaredField("marketSchedulerRenderBatch");
+    Field field = runtimeClass("MarketScheduler").getDeclaredField("marketSchedulerRenderBatch");
     field.setAccessible(true);
     return field.getLong(null);
   }
@@ -1802,7 +1824,7 @@ public final class MarketSchedulerRuntimeTest {
 
     private int currentSchedulerFrame() {
       try {
-        Field field = StarsectorPrepatcherHooks.class.getDeclaredField("marketSchedulerRenderBatch");
+        Field field = runtimeClass("MarketScheduler").getDeclaredField("marketSchedulerRenderBatch");
         field.setAccessible(true);
         return (int) field.getLong(null);
       } catch (ReflectiveOperationException failure) {
