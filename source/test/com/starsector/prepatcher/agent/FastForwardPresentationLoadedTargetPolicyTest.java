@@ -3,6 +3,7 @@ package com.starsector.prepatcher.agent;
 import java.lang.instrument.Instrumentation;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import com.starsector.prepatcher.agent.presentation.FastForwardPresentationTransformer;
 
 /** Verifies that late presentation-only classes never disable structural startup. */
 public final class FastForwardPresentationLoadedTargetPolicyTest {

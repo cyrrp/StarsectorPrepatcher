@@ -38,6 +38,8 @@ import java.util.Set;
 import java.util.Map;
 import java.util.Properties;
 import java.util.jar.JarFile;
+import com.starsector.prepatcher.agent.hyperspace.HyperspacePatches;
+import com.starsector.prepatcher.agent.hyperspace.HyperspaceViewportBounds;
 
 /** In-memory regression harness; it never writes modified game classes. */
 public final class StructuralCompatibilityTest {

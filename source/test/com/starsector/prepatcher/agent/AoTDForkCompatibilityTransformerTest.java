@@ -19,6 +19,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
+import com.starsector.prepatcher.agent.aotd.AoTDForkCompatibilityTransformer;
 
 /**
  * Exact-JAR regression coverage for the fork-owned construction-start

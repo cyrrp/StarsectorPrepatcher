@@ -10,6 +10,8 @@ import java.util.jar.*;
 import org.objectweb.asm.*;
 import org.objectweb.asm.tree.*;
 import org.objectweb.asm.tree.analysis.*;
+import com.starsector.prepatcher.agent.hyperspace.AutomatonBufferReuse;
+import com.starsector.prepatcher.agent.hyperspace.HyperspacePatches;
 
 public final class HyperspaceCompatibilityTest {
   public static void main(String[] a) throws Exception {

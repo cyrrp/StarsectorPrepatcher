@@ -14,6 +14,7 @@ import org.objectweb.asm.tree.analysis.BasicVerifier;
 
 import java.nio.file.Path;
 import java.util.jar.JarFile;
+import com.starsector.prepatcher.agent.uieconomy.IndustryMarketMutationTransformer;
 
 /** Exact vanilla industry mutation wrappers and shared-helper fail-closed guard. */
 public final class IndustryMarketMutationTransformerTest {

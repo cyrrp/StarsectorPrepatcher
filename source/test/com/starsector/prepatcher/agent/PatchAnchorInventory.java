@@ -46,7 +46,8 @@ import java.util.stream.Stream;
 public final class PatchAnchorInventory {
   private static final String AGENT_ROOT = "com/starsector/prepatcher/";
   private static final String PT = "com/starsector/prepatcher/agent/PrepatcherTransformer";
-  private static final String FF = "com/starsector/prepatcher/agent/FastForwardPresentationTransformer";
+  private static final String ENVELOPE = "com/starsector/prepatcher/agent/StructuralPatchEnvelope";
+  private static final String FF = "com/starsector/prepatcher/agent/presentation/FastForwardPresentationTransformer";
 
   private PatchAnchorInventory() {}
 
@@ -58,7 +59,7 @@ public final class PatchAnchorInventory {
 
   /** Dispatch outside PrepatcherTransformer: patch key -> entry methods. */
   static {
-    String roi = "com/starsector/prepatcher/agent/ReadOnlyUiEconomyStepTransformer";
+    String roi = "com/starsector/prepatcher/agent/uieconomy/ReadOnlyUiEconomyStepTransformer";
     wholeFile("commandTabNoGlobalEconomyStep", roi);
     KEY_TARGETS.put("commandTabNoGlobalEconomyStep", "com/fs/starfarer/campaign/command/F");
     wholeFile("commodityDetailNoGlobalEconomyStep", roi);
@@ -69,17 +70,17 @@ public final class PatchAnchorInventory {
     KEY_TARGETS.put("marketDefensesNoGlobalEconomyStep", "com/fs/starfarer/api/impl/campaign/rulecmd/salvage/MarketCMD;"
         + "com/fs/starfarer/api/impl/campaign/rulecmd/salvage/Nex_MarketCMD");
 
-    wholeFile("uiMarketMutationRefresh", "com/starsector/prepatcher/agent/MarketOverviewMutationTransformer",
-        "com/starsector/prepatcher/agent/TradeMarketMutationTransformer",
-        "com/starsector/prepatcher/agent/IndustryMarketMutationTransformer",
-        "com/starsector/prepatcher/agent/CommodityMarketDataContractTransformer");
+    wholeFile("uiMarketMutationRefresh", "com/starsector/prepatcher/agent/uieconomy/MarketOverviewMutationTransformer",
+        "com/starsector/prepatcher/agent/uieconomy/TradeMarketMutationTransformer",
+        "com/starsector/prepatcher/agent/uieconomy/IndustryMarketMutationTransformer",
+        "com/starsector/prepatcher/agent/uieconomy/CommodityMarketDataContractTransformer");
     KEY_TARGETS.put("uiMarketMutationRefresh",
         "com/fs/starfarer/campaign/ui/marketinfo/s;com/fs/starfarer/campaign/ui/class;"
             + "industry dialog+panel (see file);" + "com/fs/starfarer/campaign/econ/reach/CommodityMarketData");
 
     wholeFile("campaignCargoNoGlobalEconomyStep",
-        "com/starsector/prepatcher/agent/VanillaDetachedCargoEconomyContractTransformer",
-        "com/starsector/prepatcher/agent/AoTDDetachedCargoContextTransformer");
+        "com/starsector/prepatcher/agent/uieconomy/VanillaDetachedCargoEconomyContractTransformer",
+        "com/starsector/prepatcher/agent/aotd/AoTDDetachedCargoContextTransformer");
     KEY_TARGETS.put("campaignCargoNoGlobalEconomyStep",
         "com/fs/starfarer/campaign/econ/Economy;com/fs/starfarer/campaign/ui/class");
     KEY_ENTRIES.put("lootTransferNoGlobalEconomyStep", KEY_ENTRIES.get("campaignCargoNoGlobalEconomyStep"));
@@ -87,28 +88,28 @@ public final class PatchAnchorInventory {
         "com/fs/starfarer/campaign/econ/Economy;com/fs/starfarer/campaign/ui/class");
 
     wholeFile("planetConditionMarketOpenNoGlobalEconomyStep",
-        "com/starsector/prepatcher/agent/AoTDMarketOpenContextTransformer");
+        "com/starsector/prepatcher/agent/aotd/AoTDMarketOpenContextTransformer");
     KEY_TARGETS.put("planetConditionMarketOpenNoGlobalEconomyStep", "com/fs/starfarer/campaign/CampaignEngine");
 
     wholeFile("vanillaMarketOpenLocalization",
-        "com/starsector/prepatcher/agent/VanillaMarketOpenLocalizationContractTransformer",
-        "com/starsector/prepatcher/agent/AoTDMarketOpenContextTransformer",
-        "com/starsector/prepatcher/agent/AoTDDetachedCargoContextTransformer");
+        "com/starsector/prepatcher/agent/uieconomy/VanillaMarketOpenLocalizationContractTransformer",
+        "com/starsector/prepatcher/agent/aotd/AoTDMarketOpenContextTransformer",
+        "com/starsector/prepatcher/agent/aotd/AoTDDetachedCargoContextTransformer");
     KEY_TARGETS.put("vanillaMarketOpenLocalization",
         "com/fs/starfarer/campaign/econ/Economy;" + "com/fs/starfarer/campaign/econ/reach/ReachEconomy;"
             + "com/fs/starfarer/campaign/CampaignEngine;" + "com/fs/starfarer/campaign/ui/class");
 
     wholeFile("aotdEconomyRestoreCoordination",
-        "com/starsector/prepatcher/agent/AoTDEconomyRestoreCompletionTransformer");
+        "com/starsector/prepatcher/agent/aotd/AoTDEconomyRestoreCompletionTransformer");
     KEY_TARGETS.put("aotdEconomyRestoreCoordination", "com/fs/starfarer/api/impl/campaign/CoreLifecyclePluginImpl");
 
     wholeFile("marketScheduler@AoTDForkCompatibilityTransformer",
-        "com/starsector/prepatcher/agent/AoTDForkCompatibilityTransformer");
+        "com/starsector/prepatcher/agent/aotd/AoTDForkCompatibilityTransformer");
     KEY_TARGETS.put("marketScheduler@AoTDForkCompatibilityTransformer",
         "data/kaysaar/aotd/tot/industries/AoTDConstructionSite (AoTD fork)");
 
     wholeFile("marketScheduler@DirectMarketObserveTransformer",
-        "com/starsector/prepatcher/agent/DirectMarketObserveTransformer");
+        "com/starsector/prepatcher/agent/economy/DirectMarketObserveTransformer");
     KEY_TARGETS.put("marketScheduler@DirectMarketObserveTransformer",
         "com/fs/starfarer/campaign/econ/Market (+ any market subclass)");
   }
@@ -172,10 +173,10 @@ public final class PatchAnchorInventory {
           }
         }
       } else if (insn instanceof MethodInsnNode call) {
-        if (call.getOpcode() == Opcodes.INVOKESPECIAL && call.name.equals("<init>") && call.owner.startsWith(PT + "$")
+        if (call.getOpcode() == Opcodes.INVOKESPECIAL && call.name.equals("<init>") && call.owner.startsWith(AGENT_ROOT)
             && isStructuredPatch(agentClasses.get(call.owner))) {
           windowConstructed.add(call.owner);
-        } else if (call.name.equals("apply") && call.owner.equals(PT)) {
+        } else if (call.name.equals("apply") && call.owner.equals(ENVELOPE)) {
           // apply(state, patchId, enabled, action): patchId is the last
           // string before the call.
           int patchIdIndex = windowStrings.size() - 1;
@@ -303,8 +304,8 @@ public final class PatchAnchorInventory {
     for (org.objectweb.asm.tree.FieldNode f : agentClasses.get(FF).fields) {
       if (f.value instanceof Integer i) ffBitConsts.put(f.name, i);
     }
-    String ffSource = Files.readString(
-        repoRoot.resolve("source/agent/com/starsector/prepatcher/agent/" + "FastForwardPresentationTransformer.java"));
+    String ffSource = Files.readString(repoRoot.resolve(
+        "source/agent/com/starsector/prepatcher/agent/presentation/" + "FastForwardPresentationTransformer.java"));
     List<FfPlan> plans = extractFastForwardPlans(ffSource, ffBitConsts);
     Map<Integer, Set<String>> bitToTargets = new LinkedHashMap<>();
     Map<Integer, List<String[]>> bitToSites = new LinkedHashMap<>();
@@ -523,7 +524,8 @@ public final class PatchAnchorInventory {
   }
 
   private static boolean isStructuredPatch(ClassNode node) {
-    return node != null && node.interfaces != null && node.interfaces.contains(PT + "$StructuredPatch");
+    return node != null && node.interfaces != null
+        && node.interfaces.contains("com/starsector/prepatcher/agent/patch/StructuredPatch");
   }
 
   private record SiteRow(int bit, String[] strings) {

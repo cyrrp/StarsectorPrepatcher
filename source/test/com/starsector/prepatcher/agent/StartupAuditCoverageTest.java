@@ -20,6 +20,12 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import com.starsector.prepatcher.agent.economy.DirectMarketObserveTransformer;
+import com.starsector.prepatcher.agent.presentation.FastForwardPresentationTransformer;
+import com.starsector.prepatcher.agent.uieconomy.IndustryMarketMutationTransformer;
+import com.starsector.prepatcher.agent.uieconomy.MarketOverviewMutationTransformer;
+import com.starsector.prepatcher.agent.uieconomy.ReadOnlyUiEconomyStepTransformer;
+import com.starsector.prepatcher.agent.uieconomy.TradeMarketMutationTransformer;
 
 /**
  * Guards the inventory boundary between non-retransformable transformer

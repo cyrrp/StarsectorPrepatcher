@@ -12,13 +12,21 @@ import org.objectweb.asm.tree.VarInsnNode;
 import org.objectweb.asm.tree.analysis.Analyzer;
 import org.objectweb.asm.tree.analysis.BasicVerifier;
 import org.objectweb.asm.tree.analysis.SourceValue;
+import com.starsector.prepatcher.agent.bytecode.ClassIO;
+import com.starsector.prepatcher.agent.bytecode.Contract;
+import com.starsector.prepatcher.agent.bytecode.Flow;
+import com.starsector.prepatcher.agent.patch.Match;
+import com.starsector.prepatcher.agent.bytecode.Queries;
+import com.starsector.prepatcher.agent.combat.ShipAdvanceScratch;
+import com.starsector.prepatcher.agent.patch.StructuralMismatchException;
+import com.starsector.prepatcher.agent.patch.StructuredPatch;
 
 /** Verifier-valid receivers must be refused by match before any candidate mutation. */
 final class ScratchReceiverApplicabilityTest {
   public static void main(String[] args) throws Exception {
     if (args.length == 0 || args[0].equals("particle")) {
-      var constructor = Class.forName("com.starsector.prepatcher.agent.PrepatcherTransformer$DynamicParticleCleanup")
-          .getDeclaredConstructor();
+      var constructor =
+          Class.forName("com.starsector.prepatcher.agent.combat.DynamicParticleCleanup").getDeclaredConstructor();
       constructor.setAccessible(true);
       check((StructuredPatch<?>) constructor.newInstance(), "com/fs/graphics/particle/DynamicParticleGroup",
           "java/util/List", "particle scratch List.add receiver changed");

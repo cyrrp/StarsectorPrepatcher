@@ -30,6 +30,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Properties;
 import java.util.stream.Stream;
+import com.starsector.prepatcher.agent.economy.DirectMarketObserveTransformer;
 
 /** Structural and synchronous-behavior test for arbitrary mod call-site observation. */
 public final class DirectMarketObserveTransformerTest {

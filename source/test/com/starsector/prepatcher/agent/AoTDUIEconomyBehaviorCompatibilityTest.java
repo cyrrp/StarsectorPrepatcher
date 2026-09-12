@@ -20,6 +20,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.jar.JarFile;
+import com.starsector.prepatcher.agent.uieconomy.ReadOnlyUiEconomyStepTransformer;
 
 /**
  * Release gate for the owned AoTD single-market UI economy path.

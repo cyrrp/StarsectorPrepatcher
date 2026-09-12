@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.jar.JarFile;
+import com.starsector.prepatcher.agent.uieconomy.ReadOnlyUiEconomyStepTransformer;
 
 /** Exact structural, negative and idempotency gate for read-only UI removals. */
 public final class ReadOnlyUiEconomyStepTransformerTest {

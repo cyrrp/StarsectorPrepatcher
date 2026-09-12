@@ -14,6 +14,8 @@ import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import com.starsector.prepatcher.agent.uieconomy.MarketOverviewMutationTransformer;
+import com.starsector.prepatcher.agent.uieconomy.TradeMarketMutationTransformer;
 
 /** Structural and idempotency checks for Java 27 illegal obfuscator-name repair. */
 public final class FasterRenderingIllegalNameRepairTest {

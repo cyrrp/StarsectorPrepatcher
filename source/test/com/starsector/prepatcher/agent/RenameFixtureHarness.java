@@ -111,9 +111,9 @@ public final class RenameFixtureHarness {
     emit("UNIVERSE impl=" + implClasses.size() + " api=" + apiClasses.size());
 
     List<PatchProbe> probes = List.of(
-        new PatchProbe("gridLineCap", "com.starsector.prepatcher.agent.PrepatcherTransformer$GridLineCap",
-            PrepatcherTransformer.H, RenameFixtureHarness::classifyGridLineCap),
-        new PatchProbe("mapHitTest", "com.starsector.prepatcher.agent.MapHitTest", PrepatcherTransformer.A,
+        new PatchProbe("gridLineCap", "com.starsector.prepatcher.agent.mapintel.GridLineCap", PrepatcherTransformer.H,
+            RenameFixtureHarness::classifyGridLineCap),
+        new PatchProbe("mapHitTest", "com.starsector.prepatcher.agent.mapintel.MapHitTest", PrepatcherTransformer.A,
             RenameFixtureHarness::classifyMapHitTest));
 
     Map<String, String> s2 = buildMap(implClasses);

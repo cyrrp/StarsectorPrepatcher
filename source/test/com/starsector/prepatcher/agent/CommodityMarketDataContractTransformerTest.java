@@ -11,6 +11,7 @@ import org.objectweb.asm.tree.VarInsnNode;
 
 import java.nio.file.Path;
 import java.util.jar.JarFile;
+import com.starsector.prepatcher.agent.uieconomy.CommodityMarketDataContractTransformer;
 
 /** Exact constructor argument/data-flow contract and future-drift rejection. */
 public final class CommodityMarketDataContractTransformerTest {

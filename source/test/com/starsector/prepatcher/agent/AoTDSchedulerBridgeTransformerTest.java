@@ -29,6 +29,7 @@ import java.util.function.Function;
 import java.util.jar.JarFile;
 
 import sun.misc.Unsafe;
+import com.starsector.prepatcher.agent.aotd.AoTDSchedulerBridgeTransformer;
 
 public final class AoTDSchedulerBridgeTransformerTest {
   private static final String BRIDGE_ENTRY = "data/kaysaar/aotd/tot/compat/SchedulerBridge.class";

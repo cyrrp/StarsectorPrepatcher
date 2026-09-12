@@ -20,6 +20,8 @@ import org.objectweb.asm.tree.analysis.BasicVerifier;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.jar.JarFile;
+import com.starsector.prepatcher.agent.aotd.AoTDDetachedCargoContextTransformer;
+import com.starsector.prepatcher.agent.uieconomy.TradeMarketMutationTransformer;
 
 /** Exact trade guard/fallback and same-class Cargo composition contract. */
 public final class TradeMarketMutationTransformerTest {

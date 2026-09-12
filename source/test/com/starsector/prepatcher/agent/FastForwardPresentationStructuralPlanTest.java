@@ -23,6 +23,7 @@ import java.lang.reflect.Constructor;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
+import com.starsector.prepatcher.agent.presentation.FastForwardPresentationTransformer;
 
 /** Synthetic structural-plan coverage that does not require the game JARs. */
 public final class FastForwardPresentationStructuralPlanTest {

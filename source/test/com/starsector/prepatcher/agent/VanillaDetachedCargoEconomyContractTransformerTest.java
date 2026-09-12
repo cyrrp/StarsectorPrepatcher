@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.jar.JarFile;
+import com.starsector.prepatcher.agent.uieconomy.VanillaDetachedCargoEconomyContractTransformer;
 
 /** Exact-body gate for the vanilla detached-Cargo economy skip. */
 public final class VanillaDetachedCargoEconomyContractTransformerTest {

@@ -16,6 +16,7 @@ import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.function.Consumer;
 import java.util.jar.JarFile;
+import com.starsector.prepatcher.agent.aotd.AoTDEconomyRestoreCompletionTransformer;
 
 /** Exact-current CoreLifecycle successful-tail transformation and drift fixtures. */
 public final class AoTDEconomyRestoreCompletionTransformerTest {

@@ -12,6 +12,21 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import com.starsector.prepatcher.agent.aotd.AoTDDetachedCargoContextTransformer;
+import com.starsector.prepatcher.agent.aotd.AoTDEconomyRestoreCompletionTransformer;
+import com.starsector.prepatcher.agent.aotd.AoTDForkCompatibilityTransformer;
+import com.starsector.prepatcher.agent.aotd.AoTDForkMarkerScanner;
+import com.starsector.prepatcher.agent.aotd.AoTDMarketOpenContextTransformer;
+import com.starsector.prepatcher.agent.aotd.AoTDSchedulerBridgeTransformer;
+import com.starsector.prepatcher.agent.uieconomy.CommodityMarketDataContractTransformer;
+import com.starsector.prepatcher.agent.economy.DirectMarketObserveTransformer;
+import com.starsector.prepatcher.agent.presentation.FastForwardPresentationTransformer;
+import com.starsector.prepatcher.agent.uieconomy.IndustryMarketMutationTransformer;
+import com.starsector.prepatcher.agent.uieconomy.MarketOverviewMutationTransformer;
+import com.starsector.prepatcher.agent.uieconomy.ReadOnlyUiEconomyStepTransformer;
+import com.starsector.prepatcher.agent.uieconomy.TradeMarketMutationTransformer;
+import com.starsector.prepatcher.agent.uieconomy.VanillaDetachedCargoEconomyContractTransformer;
+import com.starsector.prepatcher.agent.uieconomy.VanillaMarketOpenLocalizationContractTransformer;
 
 public final class PrepatcherAgent {
   public static final String VERSION = "0.18.4";

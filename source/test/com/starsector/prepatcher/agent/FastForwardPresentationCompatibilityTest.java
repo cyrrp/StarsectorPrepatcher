@@ -23,6 +23,8 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.jar.JarFile;
+import com.starsector.prepatcher.agent.presentation.FastForwardPresentationTransformer;
+import com.starsector.prepatcher.agent.presentation.PresentationStructuralContract;
 
 /** Offline structural verification for fast-forward presentation coalescing. */
 public final class FastForwardPresentationCompatibilityTest {

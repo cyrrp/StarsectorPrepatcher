@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.jar.JarFile;
+import com.starsector.prepatcher.agent.uieconomy.VanillaMarketOpenLocalizationContractTransformer;
 
 /** Raw/final exact-body gate and future fail-closed coverage for market-open localization. */
 public final class VanillaMarketOpenLocalizationContractTransformerTest {

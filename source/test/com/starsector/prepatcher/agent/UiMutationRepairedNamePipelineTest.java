@@ -16,6 +16,9 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.jar.JarFile;
+import com.starsector.prepatcher.agent.aotd.AoTDDetachedCargoContextTransformer;
+import com.starsector.prepatcher.agent.uieconomy.MarketOverviewMutationTransformer;
+import com.starsector.prepatcher.agent.uieconomy.TradeMarketMutationTransformer;
 
 /** Route-level regression for raw and Java-27-repaired UI market field names. */
 public final class UiMutationRepairedNamePipelineTest {

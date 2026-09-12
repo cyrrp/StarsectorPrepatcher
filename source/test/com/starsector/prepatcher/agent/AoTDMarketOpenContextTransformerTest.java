@@ -17,6 +17,7 @@ import org.objectweb.asm.tree.analysis.BasicVerifier;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.jar.JarFile;
+import com.starsector.prepatcher.agent.aotd.AoTDMarketOpenContextTransformer;
 
 /** Exact structural coverage for the direct market-open economy guard. */
 public final class AoTDMarketOpenContextTransformerTest {

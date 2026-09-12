@@ -19,6 +19,7 @@ import org.objectweb.asm.tree.analysis.BasicVerifier;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.jar.JarFile;
+import com.starsector.prepatcher.agent.aotd.AoTDDetachedCargoContextTransformer;
 
 /** Exact structural coverage for Cargo skip/local guard and global fallback. */
 public final class AoTDDetachedCargoContextTransformerTest {
