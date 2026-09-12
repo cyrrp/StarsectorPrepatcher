@@ -214,134 +214,126 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     TransformState state = new TransformState(className, classfileBuffer, presentationComposition);
     switch (className) {
       case H -> {
-        apply(state, "mapRenderStuff", config.mapRenderStuff, structured(new MapRenderReconciliation()));
-        apply(state, "labelSpatialCandidates", config.labelSpatialCandidates, structured(new NearbyLabelIconLookup()));
-        apply(state, "intelEntityIndex", config.intelEntityIndex, structured(new IntelIconEntityIndex()));
-        apply(state, "systemNebulaCache", config.systemNebulaCache, structured(new SystemNebulaUpdateCache()));
-        apply(state, "sampleCacheClearThrottle", config.sampleCacheClearThrottle,
-            structured(new SampleCacheClearThrottle()));
-        apply(state, "gridLineCap", config.gridLineCap, structured(new GridLineCap()));
+        apply(state, "mapRenderStuff", config.mapRenderStuff, new MapRenderReconciliation());
+        apply(state, "labelSpatialCandidates", config.labelSpatialCandidates, new NearbyLabelIconLookup());
+        apply(state, "intelEntityIndex", config.intelEntityIndex, new IntelIconEntityIndex());
+        apply(state, "systemNebulaCache", config.systemNebulaCache, new SystemNebulaUpdateCache());
+        apply(state, "sampleCacheClearThrottle", config.sampleCacheClearThrottle, new SampleCacheClearThrottle());
+        apply(state, "gridLineCap", config.gridLineCap, new GridLineCap());
       }
       case A -> apply(state, MAP_INTERACTION_PLAN_PATCH_ID, mapInteractionPlanEnabled(),
-          structured(new MapInteractionPlan(requestedMapInteractionFeatureMask())));
-      case Z -> apply(state, "intelArrowRendering", config.intelArrowRendering, structured(new IntelArrowRendering()));
+          new MapInteractionPlan(requestedMapInteractionFeatureMask()));
+      case Z -> apply(state, "intelArrowRendering", config.intelArrowRendering, new IntelArrowRendering());
       case EVENTS -> {
-        apply(state, "intelCallbackCache", config.intelCallbackCache, structured(new IntelMapLocationCache(7)));
-        apply(state, "intelReconciliation", config.intelReconciliation,
-            structured(new IntelMissingIconReconciliation()));
+        apply(state, "intelCallbackCache", config.intelCallbackCache, new IntelMapLocationCache(7));
+        apply(state, "intelReconciliation", config.intelReconciliation, new IntelMissingIconReconciliation());
       }
       case CAMPAIGN_STATE ->
-        apply(state, "marketScheduler", config.marketScheduler, structured(new CampaignStateRenderBatchProtocol()));
+        apply(state, "marketScheduler", config.marketScheduler, new CampaignStateRenderBatchProtocol());
       case CAMPAIGN_ENGINE -> {
         // The incremental core-worlds contract spans three independent classes.
         // This CampaignEngine surface owns authoritative system add/remove events.
-        apply(state, CORE_WORLDS_PATCH_ID, config.coreWorldsExtentCache, structured(new CoreWorldsTopologyHooks()));
-        apply(state, "campaignCacheLifecycle", campaignCacheLifecycleEnabled(),
-            structured(new CampaignCacheLifecycle()));
-        apply(state, "marketScheduler", config.marketScheduler, structured(new CampaignEngineMarketSchedulerTick()));
+        apply(state, CORE_WORLDS_PATCH_ID, config.coreWorldsExtentCache, new CoreWorldsTopologyHooks());
+        apply(state, "campaignCacheLifecycle", campaignCacheLifecycleEnabled(), new CampaignCacheLifecycle());
+        apply(state, "marketScheduler", config.marketScheduler, new CampaignEngineMarketSchedulerTick());
         apply(state, CAMPAIGN_LISTENER_PLAN_PATCH_ID, campaignListenerPlanEnabled(),
-            structured(new CampaignListenerPlan(requestedCampaignListenerFeatureMask())));
+            new CampaignListenerPlan(requestedCampaignListenerFeatureMask()));
       }
-      case COURSE_WIDGET ->
-        apply(state, "routeJumpPointIndex", config.routeJumpPointIndex, structured(new RouteJumpPointIndex()));
+      case COURSE_WIDGET -> apply(state, "routeJumpPointIndex", config.routeJumpPointIndex, new RouteJumpPointIndex());
       case STRATEGIC_MODULE ->
         apply(state, STRATEGIC_JUMP_DESTINATION_PLAN_PATCH_ID, strategicJumpDestinationPlanEnabled(),
-            structured(new StrategicJumpDestinationPlan(requestedStrategicJumpDestinationFeatureMask())));
+            new StrategicJumpDestinationPlan(requestedStrategicJumpDestinationFeatureMask()));
       case JUMP_POINT -> apply(state, STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID, config.strategicJumpDestinationIndex,
-          structured(new StrategicJumpDestinationInvalidation()));
+          new StrategicJumpDestinationInvalidation());
       case JUMP_DESTINATION -> apply(state, STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID,
-          config.strategicJumpDestinationIndex, structured(new StrategicJumpDestinationRetarget()));
+          config.strategicJumpDestinationIndex, new StrategicJumpDestinationRetarget());
       case BASE_LOCATION -> {
         // BaseLocation owns authoritative addTag/removeTag/clearTags events.
-        apply(state, CORE_WORLDS_PATCH_ID, config.coreWorldsExtentCache, structured(new CoreWorldsTagHooks()));
-        apply(state, "campaignSnapshotReuse", config.campaignSnapshotReuse, structured(new CampaignSnapshotReuse()));
+        apply(state, CORE_WORLDS_PATCH_ID, config.coreWorldsExtentCache, new CoreWorldsTagHooks());
+        apply(state, "campaignSnapshotReuse", config.campaignSnapshotReuse, new CampaignSnapshotReuse());
         apply(state, STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID, config.strategicJumpDestinationIndex,
-            structured(new StrategicJumpLocationMutation()));
+            new StrategicJumpLocationMutation());
       }
       case BASE_CAMPAIGN_ENTITY -> {
-        apply(state, "entityScriptSnapshotReuse", config.entityScriptSnapshotReuse,
-            structured(new EntityScriptSnapshotReuse()));
-        apply(state, "marketScheduler", config.marketScheduler, structured(new EntityMarketSchedulerSource()));
+        apply(state, "entityScriptSnapshotReuse", config.entityScriptSnapshotReuse, new EntityScriptSnapshotReuse());
+        apply(state, "marketScheduler", config.marketScheduler, new EntityMarketSchedulerSource());
       }
-      case MEMORY -> apply(state, "emptyMemoryAdvanceFastPath", config.emptyMemoryAdvanceFastPath,
-          structured(new EmptyMemoryAdvanceFastPath()));
-      case CORE_SCRIPT ->
-        apply(state, CORE_WORLDS_PATCH_ID, config.coreWorldsExtentCache, structured(new CoreWorldsExtentCache()));
+      case MEMORY ->
+        apply(state, "emptyMemoryAdvanceFastPath", config.emptyMemoryAdvanceFastPath, new EmptyMemoryAdvanceFastPath());
+      case CORE_SCRIPT -> apply(state, CORE_WORLDS_PATCH_ID, config.coreWorldsExtentCache, new CoreWorldsExtentCache());
       case ECONOMY -> apply(state, ECONOMY_ADVANCE_PLAN_PATCH_ID, economyAdvancePlanEnabled(),
-          structured(new EconomyAdvancePlan(requestedEconomyAdvanceFeatureMask(), config.economyStructureAuditMs)));
+          new EconomyAdvancePlan(requestedEconomyAdvanceFeatureMask(), config.economyStructureAuditMs));
       case MARKET -> {
         apply(state, MARKET_ADVANCE_PLAN_PATCH_ID, marketAdvancePlanEnabled(),
-            structured(new MarketAdvancePlan(requestedMarketAdvanceFeatureMask(), config.marketStructureAuditFrames,
-                this::patchDirectMarketObservationEntry)));
-        apply(state, "economyGroupIndexMarketMutation", config.economyGroupIndex,
-            structured(new MarketEconGroupMutationBarrier()));
+            new MarketAdvancePlan(requestedMarketAdvanceFeatureMask(), config.marketStructureAuditFrames,
+                this::patchDirectMarketObservationEntry));
+        apply(state, "economyGroupIndexMarketMutation", config.economyGroupIndex, new MarketEconGroupMutationBarrier());
       }
       case LOCAL_RESOURCES_SUBMARKET -> {
         apply(state, "localResourcesNoColdMarketData", config.localResourcesNoColdMarketData,
-            structured(new LocalResourcesColdMarketDataElision()));
+            new LocalResourcesColdMarketDataElision());
         apply(state, "localResourcesTooltipSnapshot", config.localResourcesTooltipSnapshot,
-            structured(new LocalResourcesTooltipSnapshot()));
+            new LocalResourcesTooltipSnapshot());
       }
-      case REACH_ECONOMY -> apply(state, "economyGroupIndexReachEconomy", config.economyGroupIndex,
-          structured(new ReachEconomyGroupIndex()));
+      case REACH_ECONOMY ->
+        apply(state, "economyGroupIndexReachEconomy", config.economyGroupIndex, new ReachEconomyGroupIndex());
       case COMMODITY_MARKET_DATA -> {
         // Both patches touch the same class. The linear wrapper is installed first;
         // put-elision then consumes that current state and composition validation
         // rechecks the wrapper before the class is committed.
         apply(state, MARKET_SHARE_LINEAR_PATCH_ID, config.marketShareLinearAggregation,
-            structured(new MarketShareLinearAggregation()));
+            new MarketShareLinearAggregation());
         apply(state, MARKET_SHARE_DATA_PUT_ELISION_PATCH_ID, config.marketShareDataPutElision,
-            structured(new MarketShareDataPutElision()));
+            new MarketShareDataPutElision());
       }
       case PUNITIVE_EXPEDITION_MANAGER -> apply(state, PUNITIVE_PLAYER_SHARE_PATCH_ID,
-          config.punitivePlayerShareLocalCache, structured(new PunitivePlayerShareLocalCache()));
+          config.punitivePlayerShareLocalCache, new PunitivePlayerShareLocalCache());
       case NEX_PUNITIVE_EXPEDITION_MANAGER -> apply(state, PUNITIVE_PLAYER_SHARE_PATCH_ID,
-          config.nexPunitivePlayerShareLocalCache, structured(new PunitivePlayerShareLocalCache()));
+          config.nexPunitivePlayerShareLocalCache, new PunitivePlayerShareLocalCache());
       case BASE_INDUSTRY -> {
-        apply(state, AOTD_DEFICIT_PATCH_ID, config.aotdCleanDeficitPath,
-            structured(new BaseIndustryCleanDeficitPath()));
+        apply(state, AOTD_DEFICIT_PATCH_ID, config.aotdCleanDeficitPath, new BaseIndustryCleanDeficitPath());
         apply(state, "marketNoOpCallbacks", config.marketNoOpCallbacks && config.marketNoOpIndustryAuditFrames > 0,
-            structured(new BaseIndustryDormantFastPath(config.marketNoOpIndustryAuditFrames)));
+            new BaseIndustryDormantFastPath(config.marketNoOpIndustryAuditFrames));
         apply(state, "marketConstructionMutationBarriers", config.marketScheduler,
-            structured(new BaseIndustryConstructionBarriers()));
+            new BaseIndustryConstructionBarriers());
       }
-      case MILITARY_BASE -> apply(state, "marketStepReplayMilitaryBase", config.marketScheduler,
-          structured(new MarketComponentStepReplay(1)));
-      case LIONS_GUARD_HQ -> apply(state, "marketStepReplayLionsGuardHQ", config.marketScheduler,
-          structured(new MarketComponentStepReplay(2)));
-      case RECENT_UNREST -> apply(state, "marketStepReplayRecentUnrest", config.marketScheduler,
-          structured(new MarketComponentStepReplay(3)));
+      case MILITARY_BASE ->
+        apply(state, "marketStepReplayMilitaryBase", config.marketScheduler, new MarketComponentStepReplay(1));
+      case LIONS_GUARD_HQ ->
+        apply(state, "marketStepReplayLionsGuardHQ", config.marketScheduler, new MarketComponentStepReplay(2));
+      case RECENT_UNREST ->
+        apply(state, "marketStepReplayRecentUnrest", config.marketScheduler, new MarketComponentStepReplay(3));
       case CONSTRUCTION_QUEUE -> apply(state, "marketConstructionMutationBarriers", config.marketScheduler,
-          structured(new ConstructionQueueMutationBarriers()));
+          new ConstructionQueueMutationBarriers());
       case COMMODITY_ON_MARKET -> apply(state, "commodityEventModDirtyCache", config.commodityEventModDirtyCache,
-          structured(new CommodityEventModDirtyCache()));
-      case MUTABLE_STAT -> apply(state, "commodityTemporalBinding", config.commodityTemporalFastPath,
-          structured(new CommodityTemporalBaseBinding()));
+          new CommodityEventModDirtyCache());
+      case MUTABLE_STAT ->
+        apply(state, "commodityTemporalBinding", config.commodityTemporalFastPath, new CommodityTemporalBaseBinding());
       case MUTABLE_STAT_WITH_TEMP_MODS -> apply(state, "tempModExpiryScheduler",
-          config.tempModExpiryScheduler || config.commodityTemporalFastPath, structured(new TempModExpiryScheduler()));
+          config.tempModExpiryScheduler || config.commodityTemporalFastPath, new TempModExpiryScheduler());
       case INTEL_MANAGER ->
-        apply(state, "commRelaySystemIndex", config.commRelaySystemIndex, structured(new CommRelaySystemIndex()));
-      case SHIP -> apply(state, "shipAdvanceScratch", config.shipAdvanceScratch, structured(new ShipAdvanceScratch()));
+        apply(state, "commRelaySystemIndex", config.commRelaySystemIndex, new CommRelaySystemIndex());
+      case SHIP -> apply(state, "shipAdvanceScratch", config.shipAdvanceScratch, new ShipAdvanceScratch());
       case DYNAMIC_PARTICLE_GROUP ->
-        apply(state, "particleCleanup", config.particleCleanup, structured(new DynamicParticleCleanup()));
+        apply(state, "particleCleanup", config.particleCleanup, new DynamicParticleCleanup());
       case LOADING_UTILS -> {
-        apply(state, "loadingTextReader", config.loadingTextReader, structured(new LoadingTextReader()));
-        apply(state, "startupLogAggregation", config.startupLogAggregation, structured(new LoadingUtilsStartupLogs()));
+        apply(state, "loadingTextReader", config.loadingTextReader, new LoadingTextReader());
+        apply(state, "startupLogAggregation", config.startupLogAggregation, new LoadingUtilsStartupLogs());
       }
       case SCRIPT_STORE_RUNNER ->
-        apply(state, "startupLogAggregation", config.startupLogAggregation, structured(new StartupInfoBlockSuppression(
+        apply(state, "startupLogAggregation", config.startupLogAggregation, new StartupInfoBlockSuppression(
             "] already loaded (perhaps from jar file, or due to a reference from another class), skipping compilation.",
-            1, 2, true, "alreadyLoadedScriptInfo")));
+            1, 2, true, "alreadyLoadedScriptInfo"));
       case RULES -> {
         apply(state, "startupLogAggregation", config.startupLogAggregation,
-            structured(new StartupInfoBlockSuppression("Loading rule: ", 1, 3, true, "perRuleInfo")));
-        apply(state, "rulesLiteralParser", config.rulesLiteralParser, structured(new RulesLiteralParser()));
+            new StartupInfoBlockSuppression("Loading rule: ", 1, 3, true, "perRuleInfo"));
+        apply(state, "rulesLiteralParser", config.rulesLiteralParser, new RulesLiteralParser());
       }
       case SPEC_STORE ->
-        apply(state, "startupLogAggregation", config.startupLogAggregation, structured(new SpecStoreStartupLogs()));
-      case TEXTURE_LOADER -> apply(state, "startupLogAggregation", config.startupLogAggregation,
-          structured(new StartupInfoBlockSuppression("Cleaned buffer for texture %s (using reflection)", 1, 5, true,
-              "textureCleanupInfo")));
+        apply(state, "startupLogAggregation", config.startupLogAggregation, new SpecStoreStartupLogs());
+      case TEXTURE_LOADER ->
+        apply(state, "startupLogAggregation", config.startupLogAggregation, new StartupInfoBlockSuppression(
+            "Cleaned buffer for texture %s (using reflection)", 1, 5, true, "textureCleanupInfo"));
       case SOUND -> {
         // sound.Sound is parent-loaded by Faster Rendering and cannot resolve
         // the typed runtime installed in FR's child system loader. Removing
@@ -350,37 +342,35 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
         // of ownership/idempotency truth; only the optional runtime counter is
         // intentionally absent for this one parent-owned target.
         apply(state, "startupLogAggregation", config.startupLogAggregation,
-            structured(new StartupInfoBlockSuppression("Loading sound [", 1, 6, false, "soundLoadInfo")));
+            new StartupInfoBlockSuppression("Loading sound [", 1, 6, false, "soundLoadInfo"));
       }
       case PROGRESS_INPUT -> apply(state, "saveLoadProgressThrottle", config.saveLoadProgressThrottle,
-          structured(new SaveLoadProgressThrottle("super")));
+          new SaveLoadProgressThrottle("super"));
       case PROGRESS_OUTPUT -> apply(state, "saveLoadProgressThrottle", config.saveLoadProgressThrottle,
-          structured(new SaveLoadProgressThrottle("o00000")));
+          new SaveLoadProgressThrottle("o00000"));
       case CAMPAIGN_GAME_MANAGER -> {
         apply(state, SAVE_METHOD_PLAN_PATCH_ID, saveMethodPlanEnabled(),
-            structured(new SaveMethodPlan(requestedSaveMethodFeatureMask(), this::patchCacheMaintenanceBeforeSave)));
+            new SaveMethodPlan(requestedSaveMethodFeatureMask(), this::patchCacheMaintenanceBeforeSave));
         // The output-chain allocation rewrite is optional and deliberately
         // ordered after the correctness-critical pre-save barrier. A layout
         // mismatch may skip deduplication without disabling scheduler readiness.
-        apply(state, SAVE_OUTPUT_BUFFER_DEDUP_PATCH_ID, config.saveOutputBufferDedup,
-            structured(new SaveOutputBufferDedup()));
+        apply(state, SAVE_OUTPUT_BUFFER_DEDUP_PATCH_ID, config.saveOutputBufferDedup, new SaveOutputBufferDedup());
       }
       case PLANET_SURVEY_PANEL, LUDDIC_PATH_BASE_INTEL, PIRATE_BASE_INTEL, DECIV_TRACKER, PK_CMD ->
-        apply(state, "marketScheduler", config.marketScheduler, structured(new CoreMarketEventSynchronization()));
+        apply(state, "marketScheduler", config.marketScheduler, new CoreMarketEventSynchronization());
       case HyperspacePatches.BASE_TILED -> {
-        apply(state, "hyperspaceViewportBounds", config.hyperspaceViewportBounds,
-            structured(new HyperspaceViewportBounds()));
-        apply(state, "terrainRandomReuse", config.terrainRandomReuse, structured(new TerrainRandomReuse(3)));
+        apply(state, "hyperspaceViewportBounds", config.hyperspaceViewportBounds, new HyperspaceViewportBounds());
+        apply(state, "terrainRandomReuse", config.terrainRandomReuse, new TerrainRandomReuse(3));
       }
       case HyperspacePatches.HYPER_TERRAIN -> {
-        apply(state, "skipNoOpTerrainLayer", config.skipNoOpTerrainLayer, structured(new NoOpTerrainLayerSkip()));
-        apply(state, "terrainRandomReuse", config.terrainRandomReuse, structured(new TerrainRandomReuse(1)));
-        apply(state, "automatonInternalReads", config.automatonBufferReuse, structured(new AutomatonInternalReads()));
+        apply(state, "skipNoOpTerrainLayer", config.skipNoOpTerrainLayer, new NoOpTerrainLayerSkip());
+        apply(state, "terrainRandomReuse", config.terrainRandomReuse, new TerrainRandomReuse(1));
+        apply(state, "automatonInternalReads", config.automatonBufferReuse, new AutomatonInternalReads());
       }
       case HyperspacePatches.AUTOMATON ->
-        apply(state, "automatonBufferReuse", config.automatonBufferReuse, structured(new AutomatonBufferReuse()));
-      case HyperspacePatches.STARFIELD -> apply(state, "starfieldCleanupBuffers", config.starfieldCleanupBuffers,
-          structured(new StarfieldCleanupBuffers()));
+        apply(state, "automatonBufferReuse", config.automatonBufferReuse, new AutomatonBufferReuse());
+      case HyperspacePatches.STARFIELD ->
+        apply(state, "starfieldCleanupBuffers", config.starfieldCleanupBuffers, new StarfieldCleanupBuffers());
       default -> {
         return null;
       }
@@ -402,17 +392,21 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return state.bytes;
   }
 
-  private void apply(TransformState state, String patchId, boolean enabled, PatchAction action) {
+  private <P> void apply(TransformState state, String patchId, boolean enabled, StructuredPatch<P> patch) {
     if (!enabled) return;
     boolean markerPresent = false;
-    boolean matchCompleted = false;
-    PatchPostcondition postcondition = postconditionFor(action, patchId);
+    boolean actionCompleted = false;
+    PatchPostcondition postcondition = postconditionFor(patch, patchId);
     try {
       ClassNode node = readClass(state.bytes);
       Set<String> publicApi = publicApi(node);
       markerPresent = hasPatchMarker(node, patchId);
-      PatchReport report = action.apply(node);
-      matchCompleted = true;
+      Match<P> match = patch.match(node);
+      if (match.alreadyApplied) throw already(match.reason);
+      if (match.plan == null) throw mismatch(match.reason);
+      PatchReport report = patch.mutate(match.plan);
+      patch.verify(match.plan, node);
+      actionCompleted = true;
       if (report.total == 0) { throw mismatch("patch reported no changed sites"); }
       if (markerPresent) { throw mismatch("optimizer marker is present but the structural postcondition is not"); }
       addPatchMarker(node, patchId);
@@ -448,7 +442,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     } catch (CompositionMismatchException ex) {
       recordCompositionSkip(state, patchId, ex.getMessage());
     } catch (StructuralMismatchException ex) {
-      if (!matchCompleted && wasApplicableBeforeEarlierPatches(state, patchId, action)) {
+      if (!actionCompleted && wasApplicableBeforeEarlierPatches(state, patchId, patch)) {
         recordCompositionSkip(state, patchId,
             "the patch matched the incoming class but no longer matches after earlier " + "patches: "
                 + ex.getMessage());
@@ -471,21 +465,24 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     PrepatcherLog.warn("SKIPPED_STRUCTURAL " + patchId + " in " + className + ": " + reason);
   }
 
-  private static PatchPostcondition postconditionFor(PatchAction action, String patchId) {
-    return bytes -> verifyPatchPostcondition(action, bytes, patchId);
+  private static PatchPostcondition postconditionFor(StructuredPatch<?> patch, String patchId) {
+    return bytes -> verifyPatchPostcondition(patch, bytes, patchId);
   }
 
-  private static void verifyPatchPostcondition(PatchAction action, byte[] bytes, String patchId) {
+  private static void verifyPatchPostcondition(StructuredPatch<?> patch, byte[] bytes, String patchId) {
     ClassNode validationNode = readClass(bytes);
     if (!hasPatchMarker(validationNode, patchId)) {
       throw mismatch(patchId + " structural marker is missing from the candidate class");
     }
     try {
-      PatchReport repeated = action.apply(validationNode);
-      throw mismatch(patchId + " remains patchable after serialization: " + repeated);
+      Match<?> match = patch.match(validationNode);
+      if (match.plan != null) { throw mismatch(patchId + " remains patchable after serialization"); }
+      if (!match.alreadyApplied) { throw mismatch(match.reason); }
     } catch (AlreadyPatchedException expected) {
-      // Validation runs on a separate ClassNode. Any accidental mutation by a matcher
-      // cannot affect the candidate bytes or another patch's validation.
+      // Match proves the contract without mutating, so the throwaway ClassNode is
+      // needed only as match's input: it cannot corrupt the candidate bytes.
+      // Composite plans may still surface the boundary signal from a component
+      // probe; both refusal shapes mean the postcondition holds.
     }
   }
 
@@ -545,15 +542,13 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     }
   }
 
-  private static boolean wasApplicableBeforeEarlierPatches(TransformState state, String patchId, PatchAction action) {
+  private static boolean wasApplicableBeforeEarlierPatches(TransformState state, String patchId,
+      StructuredPatch<?> patch) {
     if (!state.changed || state.applied.isEmpty()) return false;
     try {
       ClassNode baseline = readClass(state.incomingBytes);
       if (hasPatchMarker(baseline, patchId)) return false;
-      PatchReport report = action.apply(baseline);
-      return report.total > 0;
-    } catch (AlreadyPatchedException | StructuralMismatchException ex) {
-      return false;
+      return patch.match(baseline).plan != null;
     } catch (Throwable ex) {
       return false;
     }
