@@ -22,7 +22,6 @@ final class StarsectorPrepatcherRouteIndex {
   static volatile Map<LocationAPI, RouteJumpIndex> ROUTE_JUMP_INDEXES =
       Collections.synchronizedMap(new WeakHashMap<>());
   static volatile Map<Object, RouteSystemIndex> ROUTE_SYSTEM_INDEXES = Collections.synchronizedMap(new WeakHashMap<>());
-  // ---------------------------------------------------------------------
   // Route/pathfinding indexes.
   //
   // O0Oo.getNextStep() and getLastLegDistance() preserve all of their original
@@ -30,7 +29,6 @@ final class StarsectorPrepatcherRouteIndex {
   // candidate source: an O(all hyperspace jump points) list becomes the same
   // ordered subset whose first destination belongs to the requested system.
   // Cache misses and malformed/custom data fall back to the vanilla full list.
-  // ---------------------------------------------------------------------
 
   @SuppressWarnings({"rawtypes", "unchecked"})
   public static List routeJumpPointsForSystem(LocationAPI hyperspace, Object system) {

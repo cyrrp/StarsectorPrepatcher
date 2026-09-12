@@ -11,7 +11,6 @@ import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
-
 import static com.starsector.prepatcher.agent.bytecode.Allocations.*;
 import static com.starsector.prepatcher.agent.bytecode.ClassIO.*;
 import static com.starsector.prepatcher.agent.bytecode.Contract.*;
@@ -28,7 +27,6 @@ import static com.starsector.prepatcher.agent.bytecode.Queries.*;
 import com.starsector.prepatcher.agent.patch.Match;
 import com.starsector.prepatcher.agent.patch.PatchReport;
 import com.starsector.prepatcher.agent.patch.StructuredPatch;
-
 
 public final class LoadingTextReader implements StructuredPatch<LoadingTextReader.Plan> {
   record Plan(MethodNode method) {
@@ -121,4 +119,3 @@ public final class LoadingTextReader implements StructuredPatch<LoadingTextReade
   }
 
 }
-

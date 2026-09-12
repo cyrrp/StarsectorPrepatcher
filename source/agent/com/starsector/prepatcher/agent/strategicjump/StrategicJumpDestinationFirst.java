@@ -24,7 +24,8 @@ import com.starsector.prepatcher.agent.patch.StructuredPatch;
 /**
  * Transformation surface: StrategicModule.findNearestSafeJumpPoint and only the
  * straight-line hostile-market score feeding the accepted-destination candidate
- * path. No other patch currently targets this class or method.
+ * path. This member runs inside StrategicJumpDestinationPlan and shares the
+ * method with the destination-index member, which consumes its post-state.
  */
 final class StrategicJumpDestinationFirst implements StructuredPatch<StrategicJumpDestinationFirst.Plan> {
   record Plan(MethodNode method, StrategicJumpCommon common, StrategicJumpOriginal original) {

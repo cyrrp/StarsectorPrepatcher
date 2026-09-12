@@ -44,9 +44,7 @@ final class StarsectorPrepatcherEconomyRuntime {
   static volatile boolean economyGroupIndexReady;
   static volatile VarHandle commodityMarketDataHandle;
   static volatile boolean commodityMarketDataHandleResolved;
-  // ---------------------------------------------------------------------
   // Exp8: economy, combat scratch, particles and hyperspace comm relays
-  // ---------------------------------------------------------------------
 
   /**
    * Compatibility path used when persistent structure epochs are disabled.
@@ -275,9 +273,7 @@ final class StarsectorPrepatcherEconomyRuntime {
       return new ArrayList(source);
     }
   }
-  // ---------------------------------------------------------------------
   // Economy hot paths: Local Resources and econ groups
-  // ---------------------------------------------------------------------
 
   /**
    * Exact warm-path replacement for LocalResourcesSubmarketPlugin's legality

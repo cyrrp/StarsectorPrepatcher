@@ -36,7 +36,6 @@ import com.starsector.prepatcher.agent.patch.PatchReport;
 import com.starsector.prepatcher.agent.bytecode.AllocationSpec;
 import com.starsector.prepatcher.agent.bytecode.SnapshotAllocationPlan;
 
-
 public final class EntityScriptSnapshotReuse implements StructuredPatch<EntityScriptSnapshotReuse.Plan> {
   record Plan(String owner, MethodNode runScripts, SnapshotAllocationPlan snapshot, String scriptsField) {
   }
@@ -195,4 +194,3 @@ public final class EntityScriptSnapshotReuse implements StructuredPatch<EntitySc
   }
 
 }
-

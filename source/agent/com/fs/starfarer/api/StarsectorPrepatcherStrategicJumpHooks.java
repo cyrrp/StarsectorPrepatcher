@@ -27,7 +27,6 @@ final class StarsectorPrepatcherStrategicJumpHooks {
       "starsector.prepatcher.patchStatus.com.fs.starfarer.campaign.BaseLocation." + "strategicJumpDestinationIndex";
   static final String STRATEGIC_JUMP_DESTINATION_STATUS = "starsector.prepatcher.patchStatus."
       + "com.fs.starfarer.api.campaign.JumpPointAPI$JumpDestination." + "strategicJumpDestinationIndex";
-  // ---------------------------------------------------------------------
   // Strategic fleet jump-point index.
   //
   // StrategicModule keeps its original destination, safety, distance and
@@ -36,7 +35,6 @@ final class StarsectorPrepatcherStrategicJumpHooks {
   // under one wall-clock token bucket shared by every location. Until READY,
   // an immutable empty list defers this route rebuild instead of re-entering
   // the original full scan.
-  // ---------------------------------------------------------------------
 
   @SuppressWarnings({"rawtypes", "unchecked"})
   public static List strategicJumpPointsForDestination(LocationAPI current, Class jumpPointType,

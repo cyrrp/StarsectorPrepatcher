@@ -120,5 +120,4 @@ final class IndustryMarketMutations implements StructuredPatch<IndustryMarketMut
     requireCount("preserved recreateOverview", calls(method, -1, INDUSTRY_PANEL, RECREATE, RECREATE_DESC).size(), 7);
   }
 
-
 }

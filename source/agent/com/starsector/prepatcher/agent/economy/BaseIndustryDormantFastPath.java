@@ -42,7 +42,6 @@ import com.starsector.prepatcher.agent.patch.Match;
 import com.starsector.prepatcher.agent.patch.PatchReport;
 import com.starsector.prepatcher.agent.PrepatcherTransformer;
 
-
 /**
  * Optimizes only the empty inherited BaseIndustry.advance() steady state.
  * MarketConditionPlugin dispatch is intentionally untouched: benchmarking
@@ -58,7 +57,6 @@ public final class BaseIndustryDormantFastPath implements StructuredPatch<BaseIn
       "com/starsector/prepatcher/agent/templates/BaseIndustryDormantTemplate";
   private static final String BASE_INDUSTRY_TEMPLATE_RESOURCE = "/" + BASE_INDUSTRY_TEMPLATE_OWNER + ".class";
   private static final int BASE_INDUSTRY_AUDIT_PLACEHOLDER = 0x5A17CAFE;
-
 
   private static final int FIELD_ACCESS = Opcodes.ACC_PRIVATE | Opcodes.ACC_TRANSIENT | Opcodes.ACC_SYNTHETIC;
   private final int auditFrames;
@@ -335,4 +333,3 @@ public final class BaseIndustryDormantFastPath implements StructuredPatch<BaseIn
     }
   }
 }
-

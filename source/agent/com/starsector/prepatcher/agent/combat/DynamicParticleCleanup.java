@@ -33,7 +33,6 @@ import com.starsector.prepatcher.agent.patch.PatchReport;
 import com.starsector.prepatcher.agent.patch.PatchState;
 import com.starsector.prepatcher.agent.bytecode.AllocationSpec;
 
-
 public final class DynamicParticleCleanup implements StructuredPatch<DynamicParticleCleanup.Plan> {
   record Plan(String owner, MethodNode advance, MethodInsnNode removeAll, MethodInsnNode add) {
   }
@@ -105,7 +104,6 @@ public final class DynamicParticleCleanup implements StructuredPatch<DynamicPart
     return raw.get(0);
   }
 
-
   private static PatchState particleCleanupState(MethodNode method) {
     String label = "DynamicParticleGroup removeAll cleanup";
     String hookDesc = "(Ljava/util/LinkedList;Ljava/util/Collection;)Z";
@@ -123,8 +121,4 @@ public final class DynamicParticleCleanup implements StructuredPatch<DynamicPart
     return original ? PatchState.ORIGINAL : PatchState.PATCHED;
   }
 
-
-  // ---------------------------------------------------------------------
-
 }
-

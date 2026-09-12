@@ -255,7 +255,6 @@ final class MarketOverviewMutationRefresh implements StructuredPatch<MarketOverv
     return calls.get(0);
   }
 
-
   private static MethodNode requireMethod(ClassNode node, String name, String desc) {
     for (MethodNode method : node.methods) {
       if (name.equals(method.name) && desc.equals(method.desc)) return method;

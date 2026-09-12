@@ -29,7 +29,6 @@ import com.starsector.prepatcher.agent.patch.StructuredPatch;
 import com.starsector.prepatcher.agent.patch.Match;
 import com.starsector.prepatcher.agent.patch.PatchReport;
 
-
 /**
  * Replaces the fixed 2000f global-grid constants with a scale-aware hook, so that a large
  * sector no longer draws its grid at the density chosen for a small one.
@@ -96,23 +95,3 @@ public final class GridLineCap implements StructuredPatch<GridLineCap.Plan> {
         countCalls(plan.method(), Opcodes.INVOKESTATIC, HOOKS, "gridSpacing", "()F"), 5);
   }
 }
-
-// ---------------------------------------------------------------------
-// Campaign and route hot paths
-// ---------------------------------------------------------------------
-
-
-// ---------------------------------------------------------------------
-// StrategicModule: destination-first safe jump-point filtering
-// ---------------------------------------------------------------------
-
-
-// ---------------------------------------------------------------------
-// StrategicModule: destination-location jump-point index
-// ---------------------------------------------------------------------
-
-
-// ---------------------------------------------------------------------
-// Topology mutation hooks for the incremental strategic jump index
-// ---------------------------------------------------------------------
-

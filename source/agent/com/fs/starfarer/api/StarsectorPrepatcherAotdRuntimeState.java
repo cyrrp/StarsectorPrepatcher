@@ -104,8 +104,8 @@ public final class StarsectorPrepatcherAotdRuntimeState {
       }
     }
 
-    // Exact replay belongs to Hooks because it owns scheduler state. The
-    // state is checked again afterwards because replay may invoke campaign
+    // The Hooks facade delegates exact replay to StarsectorPrepatcherMarketScheduler.
+    // State is checked again afterwards because replay may invoke campaign
     // callbacks that open and close their own source boundary.
     StarsectorPrepatcherHooks.flushPendingMarketBeforeAoTDMutation(market);
     synchronized (AOTD_MARKET_LOCK) {

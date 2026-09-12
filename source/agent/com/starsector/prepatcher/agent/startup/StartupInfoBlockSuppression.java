@@ -21,7 +21,6 @@ import com.starsector.prepatcher.agent.patch.Match;
 import com.starsector.prepatcher.agent.patch.PatchReport;
 import com.starsector.prepatcher.agent.patch.StructuredPatch;
 
-
 public final class StartupInfoBlockSuppression implements StructuredPatch<StartupInfoBlockSuppression.Plan> {
   private final String literal;
   private final int expected;
@@ -70,4 +69,3 @@ public final class StartupInfoBlockSuppression implements StructuredPatch<Startu
         countCategoryHooks(node, "startupLogSuppressed", "(I)V", category), expectedHooks);
   }
 }
-

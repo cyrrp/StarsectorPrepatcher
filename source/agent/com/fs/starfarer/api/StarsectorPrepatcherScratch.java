@@ -77,9 +77,7 @@ final class StarsectorPrepatcherScratch {
     SCRATCH_GAUGES = new ScratchGaugeSnapshot(scratch.frames.size(), pooledLists, pooledSets, listCapacity, setCapacity,
         identityCapacity);
   }
-  // ---------------------------------------------------------------------
   // Map reconciliation and scratch collection reuse
-  // ---------------------------------------------------------------------
 
   /** Opens a re-entrancy-safe lease for pooled values used by one transformed method. */
   public static void beginScratchScope() {

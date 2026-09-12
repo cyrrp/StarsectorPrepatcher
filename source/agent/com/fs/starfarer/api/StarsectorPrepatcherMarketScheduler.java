@@ -116,6 +116,9 @@ final class StarsectorPrepatcherMarketScheduler {
   static volatile WeakIdentityMap<ConstructionQueue, WeakReference<MarketAPI>> CONSTRUCTION_QUEUE_OWNERS =
       new WeakIdentityMap<>();
   static volatile ConstructionDiagnostics CONSTRUCTION_DIAGNOSTICS;
+  // Simulation ticks preserve engine ordering. Render batches, delimited by
+  // CampaignEngine.setFastForwardIteration(false), own cadence so fast-forward
+  // cannot multiply expensive Market.advance callbacks per visual frame.
   static volatile long marketSchedulerSimulationTick;
   static volatile long marketSchedulerRenderBatch;
   static final AtomicLong MARKET_SCHEDULER_DEBT_SEQUENCE = new AtomicLong();
@@ -168,9 +171,7 @@ final class StarsectorPrepatcherMarketScheduler {
   public static boolean isBaseIndustryDormantFastPathEligible(Object industry) {
     return industry != null && BASE_INDUSTRY_DORMANT_ELIGIBLE.get(industry.getClass());
   }
-  // ---------------------------------------------------------------------
   // Exact Market.advance batch history
-  // ---------------------------------------------------------------------
 
   /** Binds the top deferred-history frame to one concrete Market.advance invocation. */
   public static void beginMarketAdvanceInvocation(MarketAPI market) {
@@ -333,9 +334,7 @@ final class StarsectorPrepatcherMarketScheduler {
       state.constructionMutationEpoch = next <= 0L ? 1L : next;
     }
   }
-  // ---------------------------------------------------------------------
   // Direct Market.advance observation
-  // ---------------------------------------------------------------------
 
   /** Registers a transformed direct-call site before its first execution. */
   public static void registerDirectMarketCallSite(long siteId, String metadata) {

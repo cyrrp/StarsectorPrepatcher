@@ -144,12 +144,10 @@ final class IndustryOverviewMutationGuard implements StructuredPatch<IndustryOve
     }
   }
 
-
   private static MethodInsnNode uniqueCall(MethodNode method, String owner, String name, String desc) {
     List<MethodInsnNode> result = calls(method, -1, owner, name, desc);
     requireCount(name + desc, result.size(), 1);
     return result.get(0);
   }
-
 
 }

@@ -104,9 +104,7 @@ public final class StarsectorPrepatcherHooks {
     if (cause instanceof Error error) throw error;
     throw new RuntimeException(cause);
   }
-  // ---------------------------------------------------------------------
-  // Helpers and stats
-  // ---------------------------------------------------------------------
+  // Spatial cell helpers
 
   static int floorCell(float value, float cellSize) {
     return safeFloorToInt(value / cellSize);
@@ -120,9 +118,7 @@ public final class StarsectorPrepatcherHooks {
     return ((long) x << 32) ^ (y & 0xffffffffL);
   }
 
-  // -------------------------------------------------------------------
   // StarsectorPrepatcherMarketScheduler
-  // -------------------------------------------------------------------
 
   public static boolean isBaseIndustryDormantFastPathEligible(Object industry) {
     return StarsectorPrepatcherMarketScheduler.isBaseIndustryDormantFastPathEligible(industry);
@@ -203,9 +199,7 @@ public final class StarsectorPrepatcherHooks {
     return StarsectorPrepatcherMarketScheduler.dumpMarketSchedulerBaseline(reason);
   }
 
-  // -------------------------------------------------------------------
   // StarsectorPrepatcherScratch
-  // -------------------------------------------------------------------
 
   public static void beginScratchScope() {
     StarsectorPrepatcherScratch.beginScratchScope();
@@ -271,9 +265,7 @@ public final class StarsectorPrepatcherHooks {
     return StarsectorPrepatcherScratch.borrowArrowVector(x, y);
   }
 
-  // -------------------------------------------------------------------
   // StarsectorPrepatcherCampaignCaches
-  // -------------------------------------------------------------------
 
   public static long beginCampaignEngineChange(Object engine) {
     return StarsectorPrepatcherCampaignCaches.beginCampaignEngineChange(engine);
@@ -288,9 +280,7 @@ public final class StarsectorPrepatcherHooks {
     StarsectorPrepatcherCampaignCaches.runCacheMaintenance(forced);
   }
 
-  // -------------------------------------------------------------------
   // StarsectorPrepatcherStartupRuntime
-  // -------------------------------------------------------------------
 
   public static String readUtf8Normalized(InputStream input) throws IOException {
     return StarsectorPrepatcherStartupRuntime.readUtf8Normalized(input);
@@ -320,9 +310,7 @@ public final class StarsectorPrepatcherHooks {
     return StarsectorPrepatcherStartupRuntime.saveLoadProgressMinIntervalSeconds();
   }
 
-  // -------------------------------------------------------------------
   // StarsectorPrepatcherIntelRuntime
-  // -------------------------------------------------------------------
 
   public static List commRelayCandidateSystems(CampaignEngine engine, Vector2f playerLocation, float unitsPerLy,
       float maxRangeLy) {
@@ -347,9 +335,7 @@ public final class StarsectorPrepatcherHooks {
     return StarsectorPrepatcherIntelRuntime.getIntelIconEntityIndexed(owner, intelEntities, plugin);
   }
 
-  // -------------------------------------------------------------------
   // StarsectorPrepatcherMapRuntime
-  // -------------------------------------------------------------------
 
   public static SectorEntityToken hitTestCached(Object handler, float x, float y, float radius) {
     return StarsectorPrepatcherMapRuntime.hitTestCached(handler, x, y, radius);
@@ -365,17 +351,13 @@ public final class StarsectorPrepatcherHooks {
     return StarsectorPrepatcherMapRuntime.gridSpacing();
   }
 
-  // -------------------------------------------------------------------
   // StarsectorPrepatcherCampaignListeners
-  // -------------------------------------------------------------------
 
   public static void readdChangeListenersIfNeeded(Object engine, List<?> systems, Object hyperspace) {
     StarsectorPrepatcherCampaignListeners.readdChangeListenersIfNeeded(engine, systems, hyperspace);
   }
 
-  // -------------------------------------------------------------------
   // StarsectorPrepatcherRouteIndex
-  // -------------------------------------------------------------------
 
   public static List routeJumpPointsForSystem(LocationAPI hyperspace, Object system) {
     return StarsectorPrepatcherRouteIndex.routeJumpPointsForSystem(hyperspace, system);
@@ -384,9 +366,7 @@ public final class StarsectorPrepatcherHooks {
     return StarsectorPrepatcherRouteIndex.routeSystemsForAnchor(engine, anchor);
   }
 
-  // -------------------------------------------------------------------
   // StarsectorPrepatcherStrategicJumpHooks
-  // -------------------------------------------------------------------
 
   public static List strategicJumpPointsForDestination(LocationAPI current, Class jumpPointType,
       LocationAPI requested) {
@@ -413,9 +393,7 @@ public final class StarsectorPrepatcherHooks {
     StarsectorPrepatcherStrategicJumpHooks.strategicJumpLocationEntityChanged(location, entity);
   }
 
-  // -------------------------------------------------------------------
   // StarsectorPrepatcherEconomyRuntime
-  // -------------------------------------------------------------------
 
   public static void updateEconomyLocationMapIfNeeded(ReachEconomy economy) {
     StarsectorPrepatcherEconomyRuntime.updateEconomyLocationMapIfNeeded(economy);
@@ -459,9 +437,7 @@ public final class StarsectorPrepatcherHooks {
     return StarsectorPrepatcherEconomyRuntime.borrowMarketsInGroupIndexed(economy, rawState, group);
   }
 
-  // -------------------------------------------------------------------
   // StarsectorPrepatcherCommodityTemporal
-  // -------------------------------------------------------------------
 
   public static void markCommodityTemporalOwnerDirty(Object rawOwner, int role, String source) {
     StarsectorPrepatcherCommodityTemporal.markCommodityTemporalOwnerDirty(rawOwner, role, source);

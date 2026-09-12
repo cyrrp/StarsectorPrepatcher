@@ -27,7 +27,6 @@ import com.starsector.prepatcher.agent.patch.Match;
 import com.starsector.prepatcher.agent.patch.PatchReport;
 import com.starsector.prepatcher.agent.patch.StructuredPatch;
 
-
 public final class SaveLoadProgressThrottle implements StructuredPatch<SaveLoadProgressThrottle.Plan> {
   private final String methodName;
 
@@ -69,4 +68,3 @@ public final class SaveLoadProgressThrottle implements StructuredPatch<SaveLoadP
         countCalls(plan.method(), Opcodes.INVOKESTATIC, HOOKS, "saveLoadProgressMinIntervalSeconds", "()F"), 1);
   }
 }
-

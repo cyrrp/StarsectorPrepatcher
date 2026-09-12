@@ -35,21 +35,16 @@ final class StarsectorPrepatcherCampaignCaches {
   static volatile boolean campaignEngineObserved;
   static volatile boolean campaignCacheGenerationActive;
   static volatile long campaignCacheGeneration;
-  // Simulation ticks preserve engine ordering. Render batches, delimited by
-  // CampaignEngine.setFastForwardIteration(false), own cadence so fast-forward
-  // cannot multiply expensive Market.advance callbacks per visual frame.
   static final long NO_CAMPAIGN_TRANSITION = -1L;
   static long pendingCampaignTransition = NO_CAMPAIGN_TRANSITION;
   static WeakReference<Object> pendingCampaignEngine = new WeakReference<>(null);
-  // ---------------------------------------------------------------------
   // Campaign cache lifecycle
-  // ---------------------------------------------------------------------
 
   /**
    * Closes the current cache generation immediately before CampaignEngine
    * publishes its structurally verified singleton-field write.
    *
-   * All caches below are useful only inside one campaign generation. Several
+   * All campaign caches are useful only inside one campaign generation. Several
    * values intentionally contain locations, entities or UI objects that lead
    * back to ObjectRepository.listener and therefore to CampaignEngine. Weak
    * keys cannot break that value-to-key cycle, so changing the active engine is
@@ -205,9 +200,7 @@ final class StarsectorPrepatcherCampaignCaches {
       return null;
     }
   }
-  // ---------------------------------------------------------------------
   // Campaign-thread cache maintenance and delayed scratch trimming
-  // ---------------------------------------------------------------------
 
   /** Throttled campaign-thread maintenance entry installed in CampaignEngine.advance(). */
   public static void campaignCacheMaintenanceTick() {

@@ -12,9 +12,7 @@ import java.util.concurrent.atomic.LongAdder;
 final class StarsectorPrepatcherStartupRuntime {
 
   static final ThreadLocal<TextReadScratch> TEXT_READ_SCRATCH = ThreadLocal.withInitial(TextReadScratch::new);
-  // ---------------------------------------------------------------------
   // Startup and save/load helpers
-  // ---------------------------------------------------------------------
 
   /**
    * Streaming replacement for LoadingUtils' 1 MiB-per-resource byte buffer.

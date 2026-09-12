@@ -13,7 +13,6 @@ final class StarsectorPrepatcherCampaignListeners {
 
   static volatile Map<Object, CampaignListenerState> CAMPAIGN_LISTENER_STATES =
       Collections.synchronizedMap(new WeakHashMap<>());
-  // ---------------------------------------------------------------------
   // Closed-map campaign bookkeeping.
   //
   // CampaignEngine.advance() calls readdChangeListeners() every frame. The
@@ -23,7 +22,6 @@ final class StarsectorPrepatcherCampaignListeners {
   // unchanged and throttle only the call site in advance(). Structural changes
   // trigger an immediate refresh; a periodic audit covers direct list mutation
   // by mods.
-  // ---------------------------------------------------------------------
 
   public static void readdChangeListenersIfNeeded(Object engine, List<?> systems, Object hyperspace) {
     if (engine == null) return;

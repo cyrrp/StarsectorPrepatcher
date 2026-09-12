@@ -64,10 +64,8 @@ final class StarsectorPrepatcherMapRuntime {
       }
     }
   }
-  // ---------------------------------------------------------------------
   // Hover / hit-test cache. The exact vanilla hit-test remains the source
   // of truth on misses; results are reused for a short time/cell.
-  // ---------------------------------------------------------------------
 
   public static SectorEntityToken hitTestCached(Object handler, float x, float y, float radius) {
     PrepatcherConfig c = StarsectorPrepatcherHooks.config;
@@ -246,7 +244,6 @@ final class StarsectorPrepatcherMapRuntime {
       };
     }
 
-
     void reset(Object newLocation, int newIconCount, float newFactor) {
       location = newLocation;
       iconCount = newIconCount;
@@ -271,9 +268,7 @@ final class StarsectorPrepatcherMapRuntime {
       this.atNanos = atNanos;
     }
   }
-  // ---------------------------------------------------------------------
   // Map-open preprocessing caches
-  // ---------------------------------------------------------------------
 
   @SuppressWarnings({"rawtypes", "unchecked"})
   public static void updateSystemNebulasCached(Object owner, List systemNebulas, List constellationLabels,

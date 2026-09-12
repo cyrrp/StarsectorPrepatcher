@@ -146,10 +146,8 @@ final class StarsectorPrepatcherIntelRuntime {
   }
   static final java.util.Comparator<Object> COMM_RELAY_ENTRY_ORDER =
       (left, right) -> Integer.compare(((CommRelaySystemEntry) left).ordinal, ((CommRelaySystemEntry) right).ordinal);
-  // ---------------------------------------------------------------------
   // Label candidate spatial index. Original method still performs exact
   // visibility and distance checks; this only narrows the candidate set.
-  // ---------------------------------------------------------------------
 
   @SuppressWarnings({"rawtypes", "unchecked"})
   public static Collection nearbyLabelIcons(LinkedHashMap icons, Object mapOwner, Object targetIcon) {
@@ -252,7 +250,6 @@ final class StarsectorPrepatcherIntelRuntime {
       this.failed = failed;
     }
 
-
     static LabelIndex build(LinkedHashMap<?, ?> icons, long now) {
       Map<Long, List<Object>> buckets = new HashMap<>();
       List<Object> fallback = new ArrayList<>();
@@ -278,9 +275,7 @@ final class StarsectorPrepatcherIntelRuntime {
       }
     }
   }
-  // ---------------------------------------------------------------------
   // Intel callbacks
-  // ---------------------------------------------------------------------
 
   public static SectorEntityToken getMapLocationCached(IntelInfoPlugin plugin, SectorMapAPI map) {
     PrepatcherConfig c = StarsectorPrepatcherHooks.config;
@@ -510,7 +505,6 @@ final class StarsectorPrepatcherIntelRuntime {
       this.byPlugin = byPlugin;
       this.failed = failed;
     }
-
 
     @SuppressWarnings("rawtypes")
     static IntelEntityIndex build(List entities, Object first, Object last, long now) {

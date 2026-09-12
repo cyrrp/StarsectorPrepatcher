@@ -25,9 +25,7 @@ final class StarsectorPrepatcherCommodityTemporal {
   static final int COMMODITY_TEMPORAL_METRIC_SAMPLE_SHIFT = 6;
   static final int COMMODITY_TEMPORAL_METRIC_SAMPLE_MASK = (1 << COMMODITY_TEMPORAL_METRIC_SAMPLE_SHIFT) - 1;
   static int commodityTemporalMetricsTick;
-  // ---------------------------------------------------------------------
   // Aggressive economy: ordered commodity active set
-  // ---------------------------------------------------------------------
 
   static final int COMMODITY_STAT_AVAILABLE = 1;
   static final int COMMODITY_STAT_AOTD_EXCESS = 1 << 1;

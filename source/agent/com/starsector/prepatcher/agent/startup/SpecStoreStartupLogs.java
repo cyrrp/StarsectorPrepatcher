@@ -26,7 +26,6 @@ import com.starsector.prepatcher.agent.patch.Match;
 import com.starsector.prepatcher.agent.patch.PatchReport;
 import com.starsector.prepatcher.agent.patch.StructuredPatch;
 
-
 public final class SpecStoreStartupLogs implements StructuredPatch<SpecStoreStartupLogs.Plan> {
   private record Site(MethodNode method, MethodInsnNode call) {
   }
@@ -75,4 +74,3 @@ public final class SpecStoreStartupLogs implements StructuredPatch<SpecStoreStar
         countCategoryHooks(node, "suppressStartupInfo", "(Ljava/lang/Object;Ljava/lang/Object;I)V", 4), 53);
   }
 }
-

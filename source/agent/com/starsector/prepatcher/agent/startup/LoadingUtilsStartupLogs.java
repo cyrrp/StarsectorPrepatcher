@@ -21,7 +21,6 @@ import com.starsector.prepatcher.agent.patch.Match;
 import com.starsector.prepatcher.agent.patch.PatchReport;
 import com.starsector.prepatcher.agent.patch.StructuredPatch;
 
-
 public final class LoadingUtilsStartupLogs implements StructuredPatch<LoadingUtilsStartupLogs.Plan> {
   record Plan(List<StartupInfoBlocks.LogBlock> jsonBlocks, List<StartupInfoBlocks.LogBlock> csvBlocks) {
   }
@@ -64,4 +63,3 @@ public final class LoadingUtilsStartupLogs implements StructuredPatch<LoadingUti
     requireCount("LoadingUtils CSV suppression hooks", countCategoryHooks(node, "startupLogSuppressed", "(I)V", 1), 3);
   }
 }
-
