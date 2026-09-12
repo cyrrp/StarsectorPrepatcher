@@ -1,16 +1,21 @@
 package com.starsector.prepatcher.agent.uieconomy;
 
 import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
-import java.util.ArrayList;
 import java.util.List;
 
-import static com.starsector.prepatcher.agent.bytecode.Contract.*;
+import static com.starsector.prepatcher.agent.bytecode.Contract.mismatch;
+import static com.starsector.prepatcher.agent.bytecode.Queries.calls;
+import static com.starsector.prepatcher.agent.uieconomy.IndustryMutationContract.field;
+import static com.starsector.prepatcher.agent.uieconomy.IndustryMutationContract.requireConcreteInstance;
+import static com.starsector.prepatcher.agent.uieconomy.IndustryMutationContract.requireCount;
+import static com.starsector.prepatcher.agent.uieconomy.IndustryMutationContract.requireMarker;
+import static com.starsector.prepatcher.agent.uieconomy.IndustryMutationContract.requireMethod;
+import static com.starsector.prepatcher.agent.uieconomy.IndustryMutationContract.requireNoMarker;
 import com.starsector.prepatcher.agent.patch.Match;
 import com.starsector.prepatcher.agent.patch.PatchReport;
 import com.starsector.prepatcher.agent.patch.StructuredPatch;
@@ -54,23 +59,23 @@ final class IndustryMarketMutations implements StructuredPatch<IndustryMarketMut
   public Match<Plan> match(ClassNode node) {
     FieldNode marker = field(node, DIALOG_MARKER);
     if (marker != null) {
-      requireMarker(marker);
+      requireMarker(marker, DIALOG_MARKER_VALUE);
       requirePatchedDialog(node);
       return Match.alreadyApplied("industry market-mutation dialog postcondition matches");
     }
     requireNoMarker(marker);
     MethodNode method = requireMethod(node, DIALOG_DISMISSED, DIALOG_DISMISSED_DESC);
-    requireConcreteInstance(method);
-    requireCount("startUpgrading", calls(method, INDUSTRY, "startUpgrading", "()V").size(), 1);
-    requireCount("downgrade", calls(method, INDUSTRY, "downgrade", "()V").size(), 1);
-    requireCount("cancelUpgrade", calls(method, INDUSTRY, "cancelUpgrade", "()V").size(), 1);
+    requireConcreteInstance(method, DIALOG_DISMISSED);
+    requireCount("startUpgrading", calls(method, -1, INDUSTRY, "startUpgrading", "()V").size(), 1);
+    requireCount("downgrade", calls(method, -1, INDUSTRY, "downgrade", "()V").size(), 1);
+    requireCount("cancelUpgrade", calls(method, -1, INDUSTRY, "cancelUpgrade", "()V").size(), 1);
     requireCount("removeIndustry",
-        calls(method, MARKET_API, "removeIndustry", "(Ljava/lang/String;L" + MODE + ";Z)V").size(), 2);
+        calls(method, -1, MARKET_API, "removeIndustry", "(Ljava/lang/String;L" + MODE + ";Z)V").size(), 2);
     // All five exact mutations must feed the shared overview refresh.
-    requireCount("recreateOverview", calls(method, INDUSTRY_PANEL, RECREATE, RECREATE_DESC).size(), 7);
-    return Match.plan(new Plan(method, calls(method, INDUSTRY, "startUpgrading", "()V"),
-        calls(method, INDUSTRY, "downgrade", "()V"), calls(method, INDUSTRY, "cancelUpgrade", "()V"),
-        calls(method, MARKET_API, "removeIndustry", "(Ljava/lang/String;L" + MODE + ";Z)V"), node.fields));
+    requireCount("recreateOverview", calls(method, -1, INDUSTRY_PANEL, RECREATE, RECREATE_DESC).size(), 7);
+    return Match.plan(new Plan(method, calls(method, -1, INDUSTRY, "startUpgrading", "()V"),
+        calls(method, -1, INDUSTRY, "downgrade", "()V"), calls(method, -1, INDUSTRY, "cancelUpgrade", "()V"),
+        calls(method, -1, MARKET_API, "removeIndustry", "(Ljava/lang/String;L" + MODE + ";Z)V"), node.fields));
   }
 
   @Override
@@ -102,62 +107,19 @@ final class IndustryMarketMutations implements StructuredPatch<IndustryMarketMut
   }
 
   private static void requirePatchedDialog(ClassNode node) {
-    requireMarker(field(node, DIALOG_MARKER));
+    requireMarker(field(node, DIALOG_MARKER), DIALOG_MARKER_VALUE);
     MethodNode method = requireMethod(node, DIALOG_DISMISSED, DIALOG_DISMISSED_DESC);
-    requireCount("remaining startUpgrading", calls(method, INDUSTRY, "startUpgrading", "()V").size(), 0);
-    requireCount("remaining downgrade", calls(method, INDUSTRY, "downgrade", "()V").size(), 0);
-    requireCount("remaining cancelUpgrade", calls(method, INDUSTRY, "cancelUpgrade", "()V").size(), 0);
+    requireCount("remaining startUpgrading", calls(method, -1, INDUSTRY, "startUpgrading", "()V").size(), 0);
+    requireCount("remaining downgrade", calls(method, -1, INDUSTRY, "downgrade", "()V").size(), 0);
+    requireCount("remaining cancelUpgrade", calls(method, -1, INDUSTRY, "cancelUpgrade", "()V").size(), 0);
     requireCount("remaining removeIndustry",
-        calls(method, MARKET_API, "removeIndustry", "(Ljava/lang/String;L" + MODE + ";Z)V").size(), 0);
-    requireCount("start wrappers", calls(method, RUNTIME, START, INDUSTRY_WRAPPER_DESC).size(), 1);
-    requireCount("downgrade wrappers", calls(method, RUNTIME, DOWNGRADE, INDUSTRY_WRAPPER_DESC).size(), 1);
-    requireCount("cancel wrappers", calls(method, RUNTIME, CANCEL, INDUSTRY_WRAPPER_DESC).size(), 1);
-    requireCount("remove wrappers", calls(method, RUNTIME, REMOVE, REMOVE_DESC).size(), 2);
-    requireCount("preserved recreateOverview", calls(method, INDUSTRY_PANEL, RECREATE, RECREATE_DESC).size(), 7);
+        calls(method, -1, MARKET_API, "removeIndustry", "(Ljava/lang/String;L" + MODE + ";Z)V").size(), 0);
+    requireCount("start wrappers", calls(method, -1, RUNTIME, START, INDUSTRY_WRAPPER_DESC).size(), 1);
+    requireCount("downgrade wrappers", calls(method, -1, RUNTIME, DOWNGRADE, INDUSTRY_WRAPPER_DESC).size(), 1);
+    requireCount("cancel wrappers", calls(method, -1, RUNTIME, CANCEL, INDUSTRY_WRAPPER_DESC).size(), 1);
+    requireCount("remove wrappers", calls(method, -1, RUNTIME, REMOVE, REMOVE_DESC).size(), 2);
+    requireCount("preserved recreateOverview", calls(method, -1, INDUSTRY_PANEL, RECREATE, RECREATE_DESC).size(), 7);
   }
 
-  private static void requireConcreteInstance(MethodNode method) {
-    if ((method.access & Opcodes.ACC_PUBLIC) == 0
-        || (method.access & (Opcodes.ACC_STATIC | Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
-      throw mismatch(DIALOG_DISMISSED + " access changed");
-    }
-  }
 
-  private static List<MethodInsnNode> calls(MethodNode method, String owner, String name, String desc) {
-    List<MethodInsnNode> result = new ArrayList<>();
-    for (AbstractInsnNode instruction : method.instructions) {
-      if (instruction instanceof MethodInsnNode call && owner.equals(call.owner) && name.equals(call.name)
-          && desc.equals(call.desc))
-        result.add(call);
-    }
-    return result;
-  }
-
-  private static MethodNode requireMethod(ClassNode node, String name, String desc) {
-    for (MethodNode method : node.methods) {
-      if (name.equals(method.name) && desc.equals(method.desc)) return method;
-    }
-    throw mismatch("missing method " + name + desc);
-  }
-
-  private static FieldNode field(ClassNode node, String name) {
-    for (FieldNode field : node.fields) if (name.equals(field.name)) return field;
-    return null;
-  }
-
-  private static void requireNoMarker(FieldNode marker) {
-    if (marker != null) throw mismatch("owned marker already exists");
-  }
-
-  private static void requireMarker(FieldNode marker) {
-    if (marker == null
-        || marker.access != (Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_SYNTHETIC)
-        || !"Ljava/lang/String;".equals(marker.desc) || !DIALOG_MARKER_VALUE.equals(marker.value)) {
-      throw mismatch("owned marker is missing or malformed");
-    }
-  }
-
-  private static void requireCount(String label, int actual, int expected) {
-    if (actual != expected) { throw mismatch(label + " expected=" + expected + " actual=" + actual); }
-  }
 }

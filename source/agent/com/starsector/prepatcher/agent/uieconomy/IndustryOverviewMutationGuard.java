@@ -12,10 +12,16 @@ import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
-import java.util.ArrayList;
 import java.util.List;
 
-import static com.starsector.prepatcher.agent.bytecode.Contract.*;
+import static com.starsector.prepatcher.agent.bytecode.Contract.mismatch;
+import static com.starsector.prepatcher.agent.bytecode.Queries.calls;
+import static com.starsector.prepatcher.agent.uieconomy.IndustryMutationContract.field;
+import static com.starsector.prepatcher.agent.uieconomy.IndustryMutationContract.requireConcreteInstance;
+import static com.starsector.prepatcher.agent.uieconomy.IndustryMutationContract.requireCount;
+import static com.starsector.prepatcher.agent.uieconomy.IndustryMutationContract.requireMarker;
+import static com.starsector.prepatcher.agent.uieconomy.IndustryMutationContract.requireMethod;
+import static com.starsector.prepatcher.agent.uieconomy.IndustryMutationContract.requireNoMarker;
 import static com.starsector.prepatcher.agent.bytecode.Queries.nextMeaningful;
 import static com.starsector.prepatcher.agent.bytecode.Queries.previousMeaningful;
 import com.starsector.prepatcher.agent.patch.Match;
@@ -57,7 +63,7 @@ final class IndustryOverviewMutationGuard implements StructuredPatch<IndustryOve
   public Match<Plan> match(ClassNode node) {
     FieldNode marker = field(node, PANEL_MARKER);
     if (marker != null) {
-      requireMarker(marker);
+      requireMarker(marker, PANEL_MARKER_VALUE);
       requirePatchedPanel(node);
       return Match.alreadyApplied("industry overview mutation guard postcondition matches");
     }
@@ -67,9 +73,9 @@ final class IndustryOverviewMutationGuard implements StructuredPatch<IndustryOve
       throw mismatch("IndustryListPanel.market field changed");
     }
     MethodNode recreate = requireMethod(node, RECREATE, RECREATE_DESC);
-    requireConcreteInstance(recreate);
-    requireCount("tripleStep", calls(recreate, ECONOMY_API, "tripleStep", "()V").size(), 1);
-    requireCount("existing guards", calls(recreate, RUNTIME, ECON_STEP_GUARD, ECON_STEP_GUARD_DESC).size(), 0);
+    requireConcreteInstance(recreate, RECREATE);
+    requireCount("tripleStep", calls(recreate, -1, ECONOMY_API, "tripleStep", "()V").size(), 1);
+    requireCount("existing guards", calls(recreate, -1, RUNTIME, ECON_STEP_GUARD, ECON_STEP_GUARD_DESC).size(), 0);
     MethodInsnNode triple = uniqueCall(recreate, ECONOMY_API, "tripleStep", "()V");
     AbstractInsnNode getEconomyInsn = previousMeaningful(triple);
     AbstractInsnNode getSectorInsn = previousMeaningful(getEconomyInsn);
@@ -116,10 +122,11 @@ final class IndustryOverviewMutationGuard implements StructuredPatch<IndustryOve
   }
 
   private static void requirePatchedPanel(ClassNode node) {
-    requireMarker(field(node, PANEL_MARKER));
+    requireMarker(field(node, PANEL_MARKER), PANEL_MARKER_VALUE);
     MethodNode recreate = requireMethod(node, RECREATE, RECREATE_DESC);
-    requireCount("preserved tripleStep fallback", calls(recreate, ECONOMY_API, "tripleStep", "()V").size(), 1);
-    requireCount("industry mutation guard", calls(recreate, RUNTIME, ECON_STEP_GUARD, ECON_STEP_GUARD_DESC).size(), 1);
+    requireCount("preserved tripleStep fallback", calls(recreate, -1, ECONOMY_API, "tripleStep", "()V").size(), 1);
+    requireCount("industry mutation guard", calls(recreate, -1, RUNTIME, ECON_STEP_GUARD, ECON_STEP_GUARD_DESC).size(),
+        1);
     MethodInsnNode guard = uniqueCall(recreate, RUNTIME, ECON_STEP_GUARD, ECON_STEP_GUARD_DESC);
     AbstractInsnNode marketReadInsn = previousMeaningful(guard);
     AbstractInsnNode thisLoadInsn = previousMeaningful(marketReadInsn);
@@ -137,55 +144,12 @@ final class IndustryOverviewMutationGuard implements StructuredPatch<IndustryOve
     }
   }
 
-  private static void requireConcreteInstance(MethodNode method) {
-    if ((method.access & Opcodes.ACC_PUBLIC) == 0
-        || (method.access & (Opcodes.ACC_STATIC | Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
-      throw mismatch(RECREATE + " access changed");
-    }
-  }
-
-  private static List<MethodInsnNode> calls(MethodNode method, String owner, String name, String desc) {
-    List<MethodInsnNode> result = new ArrayList<>();
-    for (AbstractInsnNode instruction : method.instructions) {
-      if (instruction instanceof MethodInsnNode call && owner.equals(call.owner) && name.equals(call.name)
-          && desc.equals(call.desc))
-        result.add(call);
-    }
-    return result;
-  }
 
   private static MethodInsnNode uniqueCall(MethodNode method, String owner, String name, String desc) {
-    List<MethodInsnNode> result = calls(method, owner, name, desc);
+    List<MethodInsnNode> result = calls(method, -1, owner, name, desc);
     requireCount(name + desc, result.size(), 1);
     return result.get(0);
   }
 
-  private static MethodNode requireMethod(ClassNode node, String name, String desc) {
-    for (MethodNode method : node.methods) {
-      if (name.equals(method.name) && desc.equals(method.desc)) return method;
-    }
-    throw mismatch("missing method " + name + desc);
-  }
 
-  private static FieldNode field(ClassNode node, String name) {
-    for (FieldNode field : node.fields) if (name.equals(field.name)) return field;
-    return null;
-  }
-
-  private static void requireNoMarker(FieldNode marker) {
-    if (marker != null) throw mismatch("owned marker already exists");
-  }
-
-  private static void requireMarker(FieldNode marker) {
-    if (marker == null
-        || marker.access != (Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_SYNTHETIC)
-        || !"Ljava/lang/String;".equals(marker.desc) || !PANEL_MARKER_VALUE.equals(marker.value)) {
-      throw mismatch("owned marker is missing or malformed");
-    }
-  }
-
-
-  private static void requireCount(String label, int actual, int expected) {
-    if (actual != expected) { throw mismatch(label + " expected=" + expected + " actual=" + actual); }
-  }
 }

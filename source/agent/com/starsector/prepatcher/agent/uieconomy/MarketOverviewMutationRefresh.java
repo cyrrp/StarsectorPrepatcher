@@ -150,16 +150,16 @@ final class MarketOverviewMutationRefresh implements StructuredPatch<MarketOverv
 
     // Verify the four UI anchors and order rather than relying only on the
     // occurrence number of an obfuscated setter.
-    int freePortButton =
-        callIndex(action, "com/fs/starfarer/campaign/ui/marketinfo/oOoO", "getFreePort", "()Lcom/fs/starfarer/ui/n;");
-    int closedButton =
-        callIndex(action, "com/fs/starfarer/campaign/ui/marketinfo/oOoO", "getClosed", "()Lcom/fs/starfarer/ui/n;");
-    int stockpileButton = callIndex(action, "com/fs/starfarer/campaign/ui/marketinfo/ShippingPanel", "getUseStockpiles",
+    int freePortButton = instructionIndex(action, "com/fs/starfarer/campaign/ui/marketinfo/oOoO", "getFreePort",
         "()Lcom/fs/starfarer/ui/n;");
-    int incentivesButton = callIndex(action, "com/fs/starfarer/campaign/ui/marketinfo/oOoO", "getIncentivesToggle",
+    int closedButton = instructionIndex(action, "com/fs/starfarer/campaign/ui/marketinfo/oOoO", "getClosed",
         "()Lcom/fs/starfarer/ui/n;");
-    int adminButton =
-        callIndex(action, "com/fs/starfarer/campaign/ui/marketinfo/t", "getPortrait", "()Lcom/fs/starfarer/ui/n;");
+    int stockpileButton = instructionIndex(action, "com/fs/starfarer/campaign/ui/marketinfo/ShippingPanel",
+        "getUseStockpiles", "()Lcom/fs/starfarer/ui/n;");
+    int incentivesButton = instructionIndex(action, "com/fs/starfarer/campaign/ui/marketinfo/oOoO",
+        "getIncentivesToggle", "()Lcom/fs/starfarer/ui/n;");
+    int adminButton = instructionIndex(action, "com/fs/starfarer/campaign/ui/marketinfo/t", "getPortrait",
+        "()Lcom/fs/starfarer/ui/n;");
     if (!(freePortButton >= 0 && freePortButton < closedButton && closedButton < stockpileButton
         && stockpileButton < incentivesButton && incentivesButton < adminButton)) {
       throw mismatch("market policy branch anchors/order changed");
@@ -253,17 +253,6 @@ final class MarketOverviewMutationRefresh implements StructuredPatch<MarketOverv
     List<MethodInsnNode> calls = calls(method, owner, name, desc);
     requireCount(name + desc + " calls", calls.size(), 1);
     return calls.get(0);
-  }
-
-  private static int callIndex(MethodNode method, String owner, String name, String desc) {
-    int index = 0;
-    for (AbstractInsnNode instruction : method.instructions) {
-      if (instruction instanceof MethodInsnNode call && owner.equals(call.owner) && name.equals(call.name)
-          && desc.equals(call.desc))
-        return index;
-      index++;
-    }
-    return -1;
   }
 
 
