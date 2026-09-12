@@ -20,6 +20,7 @@
 | [D-STRUCTURAL-DISCOVERY.md](D-STRUCTURAL-DISCOVERY.md) | Как находить цели без обфусцированных имён | RESOLVED, не реализовано |
 | [D-TEMPMOD-AGGRESSIVE-SEMANTICS.md](D-TEMPMOD-AGGRESSIVE-SEMANTICS.md) | Допустимое расхождение с vanilla в expiry scheduler | ACTIVE |
 | [D-PATCH-SHAPE.md](D-PATCH-SHAPE.md) | Форма патча: доказательство контракта до мутации | ACTIVE |
+| [D-PRESENTATION-ENVELOPE.md](D-PRESENTATION-ENVELOPE.md) | Отдельная оболочка presentation-трансформера | ACTIVE |
 
 ## Шаблон
 
