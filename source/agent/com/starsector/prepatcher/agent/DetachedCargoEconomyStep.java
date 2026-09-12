@@ -18,6 +18,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static com.starsector.prepatcher.agent.Contract.*;
+import static com.starsector.prepatcher.agent.Queries.instructionIndex;
+import static com.starsector.prepatcher.agent.Queries.nextMeaningful;
+import static com.starsector.prepatcher.agent.Queries.previousMeaningful;
 
 /**
  * Owns the exact temporary-market branch shared by detached campaign Cargo
@@ -169,14 +172,6 @@ final class DetachedCargoEconomyStep implements StructuredPatch<DetachedCargoEco
     }
   }
 
-  private static int instructionIndex(MethodNode method, AbstractInsnNode target) {
-    int index = 0;
-    for (AbstractInsnNode instruction : method.instructions) {
-      if (instruction == target) return index;
-      index++;
-    }
-    return -1;
-  }
 
   private static FieldInsnNode deriveUiMarketField(MethodNode constructor, String owner) {
     MethodInsnNode conditionOnly =
@@ -301,17 +296,6 @@ final class DetachedCargoEconomyStep implements StructuredPatch<DetachedCargoEco
     return count;
   }
 
-  private static AbstractInsnNode previousMeaningful(AbstractInsnNode instruction) {
-    AbstractInsnNode current = instruction == null ? null : instruction.getPrevious();
-    while (current != null && (current.getOpcode() < 0)) current = current.getPrevious();
-    return current;
-  }
-
-  private static AbstractInsnNode nextMeaningful(AbstractInsnNode instruction) {
-    AbstractInsnNode current = instruction == null ? null : instruction.getNext();
-    while (current != null && (current.getOpcode() < 0)) current = current.getNext();
-    return current;
-  }
 
   private static <T> T only(List<T> values, String label) {
     if (values.size() != 1) { throw mismatch(label + " expected=1 actual=" + values.size()); }

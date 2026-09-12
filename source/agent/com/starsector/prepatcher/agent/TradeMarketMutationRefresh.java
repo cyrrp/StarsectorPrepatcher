@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static com.starsector.prepatcher.agent.Contract.*;
+import static com.starsector.prepatcher.agent.Queries.instructionIndex;
 
 /**
  * Guards the exact vanilla market-transaction doubleStep call with a runtime
@@ -219,14 +220,6 @@ final class TradeMarketMutationRefresh implements StructuredPatch<TradeMarketMut
     return current;
   }
 
-  private static int instructionIndex(MethodNode method, AbstractInsnNode target) {
-    int index = 0;
-    for (AbstractInsnNode instruction : method.instructions) {
-      if (instruction == target) return index;
-      index++;
-    }
-    return -1;
-  }
 
   private static List<MethodInsnNode> calls(MethodNode method, String owner, String name, String desc) {
     ArrayList<MethodInsnNode> result = new ArrayList<>();

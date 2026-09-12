@@ -404,6 +404,28 @@ final class Queries {
     return current;
   }
 
+  /** Raw instruction index by identity, including metadata nodes; -1 if absent. */
+  static int instructionIndex(MethodNode method, AbstractInsnNode target) {
+    int index = 0;
+    for (AbstractInsnNode instruction : method.instructions) {
+      if (instruction == target) return index;
+      index++;
+    }
+    return -1;
+  }
+
+  /** First invocation with this signature, irrespective of opcode; -1 if absent. */
+  static int instructionIndex(MethodNode method, String owner, String name, String desc) {
+    int index = 0;
+    for (AbstractInsnNode instruction : method.instructions) {
+      if (instruction instanceof MethodInsnNode call && owner.equals(call.owner) && name.equals(call.name)
+          && desc.equals(call.desc))
+        return index;
+      index++;
+    }
+    return -1;
+  }
+
   static AbstractInsnNode firstMeaningful(MethodNode method) {
     AbstractInsnNode current = method.instructions.getFirst();
     while (current != null && current.getOpcode() < 0) current = current.getNext();

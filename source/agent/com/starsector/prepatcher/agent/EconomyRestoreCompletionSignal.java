@@ -8,6 +8,7 @@ import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
 import static com.starsector.prepatcher.agent.Contract.*;
+import static com.starsector.prepatcher.agent.Queries.previousMeaningful;
 
 /**
  * Publishes one loader-neutral signal after Starsector has restored every
@@ -166,9 +167,4 @@ final class EconomyRestoreCompletionSignal implements StructuredPatch<EconomyRes
         && name.equals(call.name) && desc.equals(call.desc);
   }
 
-  private static AbstractInsnNode previousMeaningful(AbstractInsnNode instruction) {
-    AbstractInsnNode current = instruction == null ? null : instruction.getPrevious();
-    while (current != null && current.getOpcode() < 0) current = current.getPrevious();
-    return current;
-  }
 }

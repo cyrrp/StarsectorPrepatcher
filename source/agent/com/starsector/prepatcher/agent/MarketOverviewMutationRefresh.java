@@ -16,6 +16,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static com.starsector.prepatcher.agent.Contract.*;
+import static com.starsector.prepatcher.agent.Queries.instructionIndex;
+import static com.starsector.prepatcher.agent.Queries.nextMeaningful;
+import static com.starsector.prepatcher.agent.Queries.previousMeaningful;
 
 /**
  * Exact-call-site mutation context patch for the vanilla market overview
@@ -260,26 +263,6 @@ final class MarketOverviewMutationRefresh implements StructuredPatch<MarketOverv
     return -1;
   }
 
-  private static int instructionIndex(MethodNode method, AbstractInsnNode target) {
-    int index = 0;
-    for (AbstractInsnNode instruction : method.instructions) {
-      if (instruction == target) return index;
-      index++;
-    }
-    return -1;
-  }
-
-  private static AbstractInsnNode previousMeaningful(AbstractInsnNode instruction) {
-    AbstractInsnNode current = instruction == null ? null : instruction.getPrevious();
-    while (current != null && current.getOpcode() < 0) current = current.getPrevious();
-    return current;
-  }
-
-  private static AbstractInsnNode nextMeaningful(AbstractInsnNode instruction) {
-    AbstractInsnNode current = instruction == null ? null : instruction.getNext();
-    while (current != null && current.getOpcode() < 0) current = current.getNext();
-    return current;
-  }
 
   private static MethodNode requireMethod(ClassNode node, String name, String desc) {
     for (MethodNode method : node.methods) {

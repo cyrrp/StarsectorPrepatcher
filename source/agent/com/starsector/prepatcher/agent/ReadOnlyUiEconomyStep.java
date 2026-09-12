@@ -13,6 +13,9 @@ import org.objectweb.asm.tree.VarInsnNode;
 import java.util.List;
 
 import static com.starsector.prepatcher.agent.Contract.*;
+import static com.starsector.prepatcher.agent.Queries.instructionIndex;
+import static com.starsector.prepatcher.agent.Queries.nextMeaningful;
+import static com.starsector.prepatcher.agent.Queries.previousMeaningful;
 
 /**
  * Removes the exact sector-wide economy refresh whose only trigger is opening a
@@ -214,16 +217,6 @@ final class ReadOnlyUiEconomyStep implements StructuredPatch<ReadOnlyUiEconomySt
     } else if ((method.access & Opcodes.ACC_PUBLIC) == 0) { throw mismatch("UI constructor is no longer public"); }
   }
 
-  private static int instructionIndex(MethodNode method, String owner, String name, String desc) {
-    int index = 0;
-    for (AbstractInsnNode instruction : method.instructions) {
-      if (instruction instanceof MethodInsnNode call && owner.equals(call.owner) && name.equals(call.name)
-          && desc.equals(call.desc))
-        return index;
-      index++;
-    }
-    return -1;
-  }
 
   private static MethodInsnNode uniqueCall(MethodNode method, String owner, String name, String desc) {
     MethodInsnNode result = null;
@@ -254,17 +247,6 @@ final class ReadOnlyUiEconomyStep implements StructuredPatch<ReadOnlyUiEconomySt
     return count;
   }
 
-  private static AbstractInsnNode previousMeaningful(AbstractInsnNode instruction) {
-    AbstractInsnNode current = instruction == null ? null : instruction.getPrevious();
-    while (current != null && current.getOpcode() < 0) current = current.getPrevious();
-    return current;
-  }
-
-  private static AbstractInsnNode nextMeaningful(AbstractInsnNode instruction) {
-    AbstractInsnNode current = instruction == null ? null : instruction.getNext();
-    while (current != null && current.getOpcode() < 0) current = current.getNext();
-    return current;
-  }
 
   private static MethodNode requireMethod(ClassNode node, String name, String desc) {
     MethodNode result = null;

@@ -16,6 +16,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static com.starsector.prepatcher.agent.Contract.*;
+import static com.starsector.prepatcher.agent.Queries.nextMeaningful;
+import static com.starsector.prepatcher.agent.Queries.previousMeaningful;
 
 /**
  * Panel surface of the industry market-mutation patch. recreateOverview keeps
@@ -179,17 +181,6 @@ final class IndustryOverviewMutationGuard implements StructuredPatch<IndustryOve
     }
   }
 
-  private static AbstractInsnNode previousMeaningful(AbstractInsnNode instruction) {
-    AbstractInsnNode current = instruction == null ? null : instruction.getPrevious();
-    while (current != null && current.getOpcode() < 0) current = current.getPrevious();
-    return current;
-  }
-
-  private static AbstractInsnNode nextMeaningful(AbstractInsnNode instruction) {
-    AbstractInsnNode current = instruction == null ? null : instruction.getNext();
-    while (current != null && current.getOpcode() < 0) current = current.getNext();
-    return current;
-  }
 
   private static void requireCount(String label, int actual, int expected) {
     if (actual != expected) { throw mismatch(label + " expected=" + expected + " actual=" + actual); }
