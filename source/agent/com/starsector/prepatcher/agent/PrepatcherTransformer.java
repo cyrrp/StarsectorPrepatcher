@@ -217,12 +217,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       "(Lcom/fs/starfarer/api/campaign/CampaignFleetAPI;" + "Lcom/fs/starfarer/api/campaign/SectorEntityToken;F)I";
   private static final int STRATEGIC_JUMP_UNCOMPUTED = Integer.MIN_VALUE;
   static final Set<String> OPTIONAL_TARGET_CLASSES = Set.of(NEX_PUNITIVE_EXPEDITION_MANAGER);
-  private static final String ENTITY_TOKEN_DESC = "Lcom/fs/starfarer/api/campaign/SectorEntityToken;";
-  private static final String MAP_API_DESC = "Lcom/fs/starfarer/api/ui/SectorMapAPI;";
-  private static final String INTEL_DESC = "Lcom/fs/starfarer/api/campaign/comm/IntelInfoPlugin;";
-  private static final String LIST_DESC = "Ljava/util/List;";
-  private static final String STAR_SYSTEM_DESC = "Lcom/fs/starfarer/api/campaign/StarSystemAPI;";
-  private static final String LOCATION_DESC = "Lcom/fs/starfarer/api/campaign/LocationAPI;";
   private static final String HYPERSPACE_DESC = "Lcom/fs/starfarer/campaign/Hyperspace;";
   private final PrepatcherConfig config;
   /**
@@ -280,23 +274,25 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     TransformState state = new TransformState(className, classfileBuffer, presentationComposition);
     switch (className) {
       case H -> {
-        apply(state, "mapRenderStuff", config.mapRenderStuff, this::patchHRenderStuff);
-        apply(state, "labelSpatialCandidates", config.labelSpatialCandidates, this::patchLabelCandidates);
-        apply(state, "intelEntityIndex", config.intelEntityIndex, this::patchIntelEntityIndex);
-        apply(state, "systemNebulaCache", config.systemNebulaCache, this::patchSystemNebulaCache);
-        apply(state, "sampleCacheClearThrottle", config.sampleCacheClearThrottle, this::patchSampleCacheClearThrottle);
+        apply(state, "mapRenderStuff", config.mapRenderStuff, structured(new MapRenderReconciliation()));
+        apply(state, "labelSpatialCandidates", config.labelSpatialCandidates, structured(new NearbyLabelIconLookup()));
+        apply(state, "intelEntityIndex", config.intelEntityIndex, structured(new IntelIconEntityIndex()));
+        apply(state, "systemNebulaCache", config.systemNebulaCache, structured(new SystemNebulaUpdateCache()));
+        apply(state, "sampleCacheClearThrottle", config.sampleCacheClearThrottle,
+            structured(new SampleCacheClearThrottle()));
         apply(state, "gridLineCap", config.gridLineCap, structured(new GridLineCap()));
       }
       case A -> {
-        apply(state, "intelCallbackCache", config.intelCallbackCache, node -> patchIntelMapLocationCalls(node, 1));
+        apply(state, "intelCallbackCache", config.intelCallbackCache, structured(new IntelMapLocationCache(1)));
         // The complete hit-test method is one transformation surface. Keep the wrapper last
         // so independent call-site patches are applied to the preserved original body.
         apply(state, "mapHitTest", config.mapHitTest, structured(new MapHitTest()));
       }
-      case Z -> apply(state, "intelArrowRendering", config.intelArrowRendering, this::patchIntelArrowRendering);
+      case Z -> apply(state, "intelArrowRendering", config.intelArrowRendering, structured(new IntelArrowRendering()));
       case EVENTS -> {
-        apply(state, "intelCallbackCache", config.intelCallbackCache, node -> patchIntelMapLocationCalls(node, 7));
-        apply(state, "intelReconciliation", config.intelReconciliation, this::patchIntelReconciliation);
+        apply(state, "intelCallbackCache", config.intelCallbackCache, structured(new IntelMapLocationCache(7)));
+        apply(state, "intelReconciliation", config.intelReconciliation,
+            structured(new IntelMissingIconReconciliation()));
       }
       case CAMPAIGN_STATE ->
         apply(state, "marketScheduler", config.marketScheduler, this::patchMarketSchedulerBatchProtocol);
@@ -313,7 +309,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
         apply(state, "campaignListenerThrottle", config.campaignListenerThrottle, this::patchCampaignListenerThrottle);
       }
       case COURSE_WIDGET ->
-        apply(state, "routeJumpPointIndex", config.routeJumpPointIndex, this::patchRouteJumpPointIndex);
+        apply(state, "routeJumpPointIndex", config.routeJumpPointIndex, structured(new RouteJumpPointIndex()));
       case STRATEGIC_MODULE -> {
         // Explicit dependency order: the index matcher consumes and revalidates
         // the destination-first post-state produced by the preceding patch.
@@ -392,7 +388,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       case MUTABLE_STAT_WITH_TEMP_MODS -> apply(state, "tempModExpiryScheduler",
           config.tempModExpiryScheduler || config.commodityTemporalFastPath, this::patchTempModExpiryScheduler);
       case INTEL_MANAGER ->
-        apply(state, "commRelaySystemIndex", config.commRelaySystemIndex, this::patchCommRelaySystemIndex);
+        apply(state, "commRelaySystemIndex", config.commRelaySystemIndex, structured(new CommRelaySystemIndex()));
       case SHIP -> apply(state, "shipAdvanceScratch", config.shipAdvanceScratch, this::patchShipAdvanceScratch);
       case DYNAMIC_PARTICLE_GROUP ->
         apply(state, "particleCleanup", config.particleCleanup, structured(new DynamicParticleCleanup()));
@@ -1505,485 +1501,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
   // ---------------------------------------------------------------------
 
   /**
-   * Atomically installs the complete renderStuff optimization surface: the semantic map
-   * reconciliation hook, both reusable collection hooks, and their single reentrant scratch
-   * scope. A mixed or partial state rejects the whole group so one sub-optimization can never
-   * silently survive without the other two.
-   */
-  private PatchReport patchHRenderStuff(ClassNode node) {
-    MethodNode method = requireMethod(node, "renderStuff", "(FZ)V");
-    String hookDesc = "(Ljava/util/Set;Ljava/util/Collection;Ljava/lang/Object;)Z";
-    List<AllocationSpec> specs = hRenderStuffAllocationSpecs();
-    PatchState scopeState = scratchScopeState(node.name, method, "H.renderStuff");
-    PatchState mutationState = hRenderScratchMutationState(method);
-
-    List<MethodInsnNode> rawCalls =
-        calls(method, Opcodes.INVOKEINTERFACE, "java/util/Set", "retainAll", "(Ljava/util/Collection;)Z");
-    Frame<SourceValue>[] frames = sourceFrames(node.name, method);
-    List<MethodInsnNode> originalRetain = new ArrayList<>();
-    for (MethodInsnNode candidate : rawCalls) {
-      if (isMapReconciliationSite(node, method, candidate, frames)) {
-        originalRetain.add(candidate);
-      }
-    }
-    List<MethodInsnNode> retainHooks = calls(method, Opcodes.INVOKESTATIC, HOOKS, "retainAllFast", hookDesc);
-    boolean retainOriginal = originalRetain.size() == 1 && retainHooks.isEmpty();
-    boolean retainPatched = originalRetain.isEmpty() && retainHooks.size() == 1;
-
-    boolean allocationsOriginal = true;
-    boolean allocationsPatched = true;
-    List<List<AllocationPlan>> plans = new ArrayList<>();
-    List<List<Integer>> hookedLocals = new ArrayList<>();
-    for (AllocationSpec spec : specs) {
-      List<AllocationPlan> found = hRenderStuffAllocationPlans(node.name, method, spec);
-      List<Integer> locals = storedHookResultLocals(method, spec);
-      allocationsOriginal &= found.size() == spec.expected() && locals.isEmpty();
-      allocationsPatched &= found.isEmpty() && locals.size() == spec.expected();
-      plans.add(found);
-      hookedLocals.add(locals);
-    }
-
-    if (retainPatched && allocationsPatched) {
-      if (scopeState != PatchState.PATCHED || mutationState != PatchState.PATCHED) {
-        throw mismatch("H.renderStuff hooks exist without the complete scratch scope");
-      }
-      validatePatchedHRenderStuff(node, method, retainHooks.get(0), specs, hookedLocals);
-      throw already("H.renderStuff map reconciliation, scratch collections, and scope " + "are already present");
-    }
-
-    if (!retainOriginal || !allocationsOriginal) {
-      throw mismatch("H.renderStuff has mixed, missing, or ambiguous reconciliation/" + "allocation sites");
-    }
-    if (scopeState != PatchState.ORIGINAL || mutationState != PatchState.ORIGINAL) {
-      throw mismatch("H.renderStuff has a scope/mutation hook without the complete owned group");
-    }
-
-    // Validate every scratch local before changing any instruction in the shared method.
-    for (int i = 0; i < specs.size(); i++) {
-      AllocationSpec spec = specs.get(i);
-      for (int j = 0; j < plans.get(i).size(); j++) {
-        requireScratchUseContract(node.name, method, plans.get(i).get(j).local(), spec, j, "H.renderStuff");
-      }
-    }
-
-    applyHRetainAll(node);
-    applyHRenderScratchCollections(method, specs, plans);
-    int observedMutations = replaceHRenderScratchMutations(method);
-
-    PatchReport report = new PatchReport();
-    report.add("linear map reconciliation", 1);
-    report.add("render scratch collections", 2);
-    report.add("render scratch peak observations", observedMutations);
-    return report;
-  }
-
-  private static PatchState hRenderScratchMutationState(MethodNode method) {
-    int raw = countCalls(method, Opcodes.INVOKEINTERFACE, "java/util/Set", "add", "(Ljava/lang/Object;)Z");
-    int hooks =
-        countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "scratchSetAdd", "(Ljava/util/Set;Ljava/lang/Object;)Z");
-    boolean original = raw == 7 && hooks == 0;
-    boolean patched = raw == 0 && hooks == 7;
-    if (!original && !patched) { throw mismatch("H.renderStuff scratch-set mutation sites are partial or changed"); }
-    return original ? PatchState.ORIGINAL : PatchState.PATCHED;
-  }
-
-  private static int replaceHRenderScratchMutations(MethodNode method) {
-    AllocationSpec setSpec = hRenderStuffAllocationSpecs().get(1);
-    List<Integer> locals = storedHookResultLocals(method, setSpec);
-    if (locals.size() != 1) throw mismatch("H.renderStuff scratch-set local is ambiguous");
-    int local = locals.get(0);
-    Frame<SourceValue>[] frames = sourceFrames(H, method);
-    int changed = 0;
-    for (MethodInsnNode call : new ArrayList<>(
-        calls(method, Opcodes.INVOKEINTERFACE, "java/util/Set", "add", "(Ljava/lang/Object;)Z"))) {
-      if (!sourceIsLocal(receiverSource(method, call, frames), Opcodes.ALOAD, local)) {
-        throw mismatch("H.renderStuff Set.add receiver escaped the owned scratch local");
-      }
-      makeStatic(call, HOOKS, "scratchSetAdd", "(Ljava/util/Set;Ljava/lang/Object;)Z");
-      changed++;
-    }
-    if (changed != 7 || hRenderScratchMutationState(method) != PatchState.PATCHED) {
-      throw mismatch("H.renderStuff scratch-set peak hooks failed postcondition");
-    }
-    return changed;
-  }
-
-  private static List<AllocationSpec> hRenderStuffAllocationSpecs() {
-    return List.of(
-        new AllocationSpec("java/util/ArrayList", "(Ljava/util/Collection;)V", "borrowEntityList",
-            "(Ljava/util/Collection;)Ljava/util/ArrayList;", 1),
-        new AllocationSpec("java/util/HashSet", "()V", "borrowClassSet", "()Ljava/util/HashSet;", 1));
-  }
-
-  private static List<AllocationPlan> hRenderStuffAllocationPlans(String owner, MethodNode method,
-      AllocationSpec spec) {
-    Frame<SourceValue>[] frames = sourceFrames(owner, method);
-    List<AllocationPlan> result = new ArrayList<>();
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (!(insn instanceof TypeInsnNode allocation) || allocation.getOpcode() != Opcodes.NEW
-          || !allocation.desc.equals(spec.type()))
-        continue;
-      AbstractInsnNode duplicate = nextMeaningful(allocation);
-      if (duplicate == null || duplicate.getOpcode() != Opcodes.DUP) continue;
-
-      MethodInsnNode constructor = null;
-      for (AbstractInsnNode cursor = duplicate.getNext(); cursor != null; cursor = cursor.getNext()) {
-        if (cursor instanceof MethodInsnNode call && call.getOpcode() == Opcodes.INVOKESPECIAL
-            && call.owner.equals(spec.type()) && call.name.equals("<init>")
-            && call.desc.equals(spec.constructorDesc())) {
-          SourceValue receiver = receiverSource(method, call, frames);
-          if (sourceContains(receiver, duplicate)) constructor = call;
-          break;
-        }
-        if (cursor.getOpcode() == Opcodes.NEW && cursor != allocation) break;
-      }
-      if (constructor == null) continue;
-      AbstractInsnNode storeInsn = nextMeaningful(constructor);
-      if (!(storeInsn instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE
-          || countStores(method, store.var) != 1) {
-        continue;
-      }
-      try {
-        requireScratchUseContract(owner, method, store.var, spec, result.size(), "H.renderStuff candidate");
-        result.add(new AllocationPlan(allocation, duplicate, constructor, store.var));
-      } catch (StructuralMismatchException ignored) {
-        // A same-type allocation with a different use contract is unrelated to this surface.
-      }
-    }
-    return result;
-  }
-
-  private static void applyHRenderScratchCollections(MethodNode method, List<AllocationSpec> specs,
-      List<List<AllocationPlan>> plans) {
-    for (int i = 0; i < specs.size(); i++) {
-      AllocationSpec spec = specs.get(i);
-      for (AllocationPlan plan : plans.get(i)) {
-        method.instructions.remove(plan.allocation());
-        method.instructions.remove(plan.duplicate());
-        makeStatic(plan.constructor(), HOOKS, spec.hookName(), spec.hookDesc());
-      }
-      requireCount("H.renderStuff postcondition " + spec.hookName(),
-          countCalls(method, Opcodes.INVOKESTATIC, HOOKS, spec.hookName(), spec.hookDesc()), spec.expected());
-    }
-  }
-
-  private static void validatePatchedHRenderStuff(ClassNode node, MethodNode method, MethodInsnNode retainHook,
-      List<AllocationSpec> specs, List<List<Integer>> hookedLocals) {
-    Frame<SourceValue>[] frames = sourceFrames(node.name, method);
-    MethodInsnNode keySet = requireSourceMethod(argumentSource(method, retainHook, frames, 0), Opcodes.INVOKEVIRTUAL,
-        "java/util/LinkedHashMap", "keySet", "()Ljava/util/Set;", "retainAllFast set argument");
-    FieldInsnNode iconsField = requireSourceField(receiverSource(method, keySet, frames), Opcodes.GETFIELD, node.name,
-        LINKED_MAP_DESC, "icons map receiver");
-    requireIconsGetter(node, iconsField.name);
-
-    int entityListLocal = requireLoadedLocal(argumentSource(method, retainHook, frames, 1), Opcodes.ALOAD,
-        "retainAllFast keep collection");
-    if (hookedLocals.get(0).size() != 1 || hookedLocals.get(0).get(0) != entityListLocal) {
-      throw mismatch("retainAllFast does not consume the owned borrowEntityList local");
-    }
-    int ownerLocal =
-        requireLoadedLocal(argumentSource(method, retainHook, frames, 2), Opcodes.ALOAD, "retainAllFast owner");
-    if (ownerLocal != 0) { throw mismatch("retainAllFast owner is not H.this"); }
-    if (nextMeaningful(retainHook) == null || nextMeaningful(retainHook).getOpcode() != Opcodes.POP) {
-      throw mismatch("retainAllFast boolean result is not discarded as expected");
-    }
-
-    for (int i = 0; i < specs.size(); i++) {
-      AllocationSpec spec = specs.get(i);
-      for (int j = 0; j < hookedLocals.get(i).size(); j++) {
-        requireScratchUseContract(node.name, method, hookedLocals.get(i).get(j), spec, j, "H.renderStuff");
-      }
-    }
-  }
-
-  private PatchReport applyHRetainAll(ClassNode node) {
-    MethodNode method = requireMethod(node, "renderStuff", "(FZ)V");
-    boolean scopeInstalled = ensureScratchScope(node.name, method, "H.renderStuff");
-    String hookDesc = "(Ljava/util/Set;Ljava/util/Collection;Ljava/lang/Object;)Z";
-    List<MethodInsnNode> rawCalls =
-        calls(method, Opcodes.INVOKEINTERFACE, "java/util/Set", "retainAll", "(Ljava/util/Collection;)Z");
-    int hooks = countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "retainAllFast", hookDesc);
-    Frame<SourceValue>[] frames = sourceFrames(node.name, method);
-    List<MethodInsnNode> original = new ArrayList<>();
-    for (MethodInsnNode candidate : rawCalls) {
-      if (isMapReconciliationSite(node, method, candidate, frames)) original.add(candidate);
-    }
-    if (scopeInstalled && original.isEmpty() && hooks == 1) {
-      throw mismatch("H.renderStuff retainAll hook exists without its required scratch scope");
-    }
-    requireUnpatchedOrAlready("H.renderStuff semantic retainAll", original.size(), 1, hooks, 1);
-
-    MethodInsnNode call = only(original, "H.renderStuff semantic retainAll");
-    MethodInsnNode keySet = requireSourceMethod(receiverSource(method, call, frames), Opcodes.INVOKEVIRTUAL,
-        "java/util/LinkedHashMap", "keySet", "()Ljava/util/Set;", "retainAll receiver");
-    FieldInsnNode iconsField = requireSourceField(receiverSource(method, keySet, frames), Opcodes.GETFIELD, node.name,
-        LINKED_MAP_DESC, "icons map receiver");
-    requireIconsGetter(node, iconsField.name);
-
-    int entityListLocal =
-        requireLoadedLocal(argumentSource(method, call, frames, 0), Opcodes.ALOAD, "retainAll keep collection");
-    AbstractInsnNode beforeCall = previousMeaningful(call);
-    if (!(beforeCall instanceof VarInsnNode load) || load.getOpcode() != Opcodes.ALOAD || load.var != entityListLocal) {
-      throw mismatch("retainAll keep collection is not loaded directly from its proven local");
-    }
-    requireLocalConstructor(method, entityListLocal, "java/util/ArrayList", "(Ljava/util/Collection;)V",
-        "render entity list");
-    if (nextMeaningful(call) == null || nextMeaningful(call).getOpcode() != Opcodes.POP) {
-      throw mismatch("retainAll boolean result is not discarded as expected");
-    }
-
-    method.instructions.insertBefore(call, new VarInsnNode(Opcodes.ALOAD, 0));
-    makeStatic(call, HOOKS, "retainAllFast", hookDesc);
-    requireCount("retainAllFast postcondition",
-        countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "retainAllFast", hookDesc), 1);
-    requireCount("non-target retainAll preservation",
-        calls(method, Opcodes.INVOKEINTERFACE, "java/util/Set", "retainAll", "(Ljava/util/Collection;)Z").size(),
-        rawCalls.size() - 1);
-
-    PatchReport report = new PatchReport();
-    report.add("O(K*E) retainAll -> linear reconciliation", 1);
-    return report;
-  }
-
-  private static boolean isMapReconciliationSite(ClassNode node, MethodNode method, MethodInsnNode call,
-      Frame<SourceValue>[] frames) {
-    try {
-      MethodInsnNode keySet = requireSourceMethod(receiverSource(method, call, frames), Opcodes.INVOKEVIRTUAL,
-          "java/util/LinkedHashMap", "keySet", "()Ljava/util/Set;", "retainAll receiver");
-      FieldInsnNode iconsField = requireSourceField(receiverSource(method, keySet, frames), Opcodes.GETFIELD, node.name,
-          LINKED_MAP_DESC, "icons map receiver");
-      requireIconsGetter(node, iconsField.name);
-      int entityListLocal =
-          requireLoadedLocal(argumentSource(method, call, frames, 0), Opcodes.ALOAD, "retainAll keep collection");
-      requireLocalConstructor(method, entityListLocal, "java/util/ArrayList", "(Ljava/util/Collection;)V",
-          "render entity list");
-      return nextMeaningful(call) != null && nextMeaningful(call).getOpcode() == Opcodes.POP;
-    } catch (StructuralMismatchException ex) {
-      return false;
-    }
-  }
-
-  private PatchReport patchLabelCandidates(ClassNode node) {
-    MethodNode method = requireMethod(node, "getTextAlignmentFor",
-        "(Lcom/fs/starfarer/coreui/A/ooOO;)Lcom/fs/starfarer/api/ui/Alignment;");
-    boolean scopeInstalled = ensureScratchScope(node.name, method, "H.getTextAlignmentFor");
-    String hookDesc = "(Ljava/util/LinkedHashMap;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/Collection;";
-    List<MethodInsnNode> original =
-        calls(method, Opcodes.INVOKEVIRTUAL, "java/util/LinkedHashMap", "values", "()Ljava/util/Collection;");
-    int hooks = countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "nearbyLabelIcons", hookDesc);
-    if (scopeInstalled && original.isEmpty() && hooks == 1) {
-      throw mismatch("H.getTextAlignmentFor label hook exists without its required scratch scope");
-    }
-    requireUnpatchedOrAlready("H.getTextAlignmentFor values", original.size(), 1, hooks, 1);
-
-    MethodInsnNode values = only(original, "H.getTextAlignmentFor values");
-    Frame<SourceValue>[] frames = sourceFrames(node.name, method);
-    FieldInsnNode iconsField = requireSourceField(receiverSource(method, values, frames), Opcodes.GETFIELD, node.name,
-        LINKED_MAP_DESC, "label icons receiver");
-    requireIconsGetter(node, iconsField.name);
-    MethodInsnNode iterator = asMethod(nextMeaningful(values), "label values iterator");
-    requireCall(iterator, Opcodes.INVOKEINTERFACE, "java/util/Collection", "iterator", "()Ljava/util/Iterator;",
-        "label values iterator");
-    if (countCalls(method, -1, "com/fs/starfarer/coreui/A/ooOO", "int", "()" + ENTITY_TOKEN_DESC) < 1) {
-      throw mismatch("label icon SectorEntityToken accessor is absent");
-    }
-
-    int targetLocal = argumentLocal(method, 0);
-    method.instructions.insertBefore(values, new VarInsnNode(Opcodes.ALOAD, 0));
-    method.instructions.insertBefore(values, new VarInsnNode(Opcodes.ALOAD, targetLocal));
-    makeStatic(values, HOOKS, "nearbyLabelIcons", hookDesc);
-
-    PatchReport report = new PatchReport();
-    report.add("label spatial candidates", 1);
-    return report;
-  }
-
-  private PatchReport patchIntelEntityIndex(ClassNode node) {
-    String desc = "(" + INTEL_DESC + ")Lcom/fs/starfarer/campaign/CustomCampaignEntity;";
-    String renamed = "smo$originalGetIntelIconEntity";
-    String hookDesc = "(Ljava/lang/Object;Ljava/util/List;" + INTEL_DESC + ")Ljava/lang/Object;";
-    boolean wrapperAlready = methods(node, renamed, desc).size() == 1;
-    MethodNode original =
-        requireWrapperSource(node, "getIntelIconEntity", desc, renamed, "getIntelIconEntityIndexed", hookDesc);
-
-    if (containsWrite(original)) {
-      throw mismatch("getIntelIconEntity has field/static writes and is not a pure lookup");
-    }
-    requireCount("getIntelIconEntity semantic call count", totalMethodCalls(original), 5);
-    Frame<SourceValue>[] frames = sourceFrames(node.name, original);
-    Set<String> listFields = new LinkedHashSet<>();
-    for (MethodInsnNode iterator : calls(original, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator",
-        "()Ljava/util/Iterator;")) {
-      FieldInsnNode field =
-          optionalSourceField(receiverSource(original, iterator, frames), Opcodes.GETFIELD, node.name, LIST_DESC);
-      if (field != null) listFields.add(field.name);
-    }
-    if (listFields.size() != 1) { throw mismatch("expected one iterated Intel-data List field, found " + listFields); }
-    String listField = listFields.iterator().next();
-    requireCount("CustomCampaignEntity.getCustomData", countCalls(original, Opcodes.INVOKEVIRTUAL,
-        "com/fs/starfarer/campaign/CustomCampaignEntity", "getCustomData", "()Ljava/util/Map;"), 1);
-    requireCount("Intel custom-data Map.get",
-        countCalls(original, Opcodes.INVOKEINTERFACE, "java/util/Map", "get", "(Ljava/lang/Object;)Ljava/lang/Object;"),
-        1);
-    requireCount("INTEL_ICON_DATA_KEY reads",
-        countFields(original, Opcodes.GETSTATIC, node.name, "INTEL_ICON_DATA_KEY", "Ljava/lang/String;"), 1);
-
-    int pluginArg = argumentLocal(original, 0);
-    int identityComparisons = 0;
-    for (AbstractInsnNode insn : original.instructions.toArray()) {
-      if (!(insn instanceof JumpInsnNode jump)
-          || (jump.getOpcode() != Opcodes.IF_ACMPEQ && jump.getOpcode() != Opcodes.IF_ACMPNE))
-        continue;
-      Frame<SourceValue> frame = frameBefore(original, jump, frames);
-      if (frame.getStackSize() < 2) continue;
-      SourceValue left = frame.getStack(frame.getStackSize() - 2);
-      SourceValue right = frame.getStack(frame.getStackSize() - 1);
-      boolean match = (sourceIsFieldDesc(left, INTEL_DESC) && sourceIsLocal(right, Opcodes.ALOAD, pluginArg))
-          || (sourceIsFieldDesc(right, INTEL_DESC) && sourceIsLocal(left, Opcodes.ALOAD, pluginArg));
-      if (match) identityComparisons++;
-    }
-    requireCount("Intel plugin identity comparison", identityComparisons, 1);
-    requireNullReturn(original, "getIntelIconEntity");
-    if (wrapperAlready) {
-      requireIntelEntityWrapper(node, desc, listField, hookDesc);
-      throw already("getIntelIconEntity wrapper, original semantics, and field wiring match");
-    }
-
-    int originalAccess = original.access;
-    String signature = original.signature;
-    String[] exceptions = exceptions(original);
-    original.name = renamed;
-    makePrivateSynthetic(original);
-
-    MethodNode wrapper =
-        new MethodNode(Opcodes.ASM8, originalAccess, "getIntelIconEntity", desc, signature, exceptions);
-    moveWrapperMetadata(original, wrapper, "getIntelIconEntity");
-    wrapper.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
-    wrapper.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
-    wrapper.instructions.add(new FieldInsnNode(Opcodes.GETFIELD, node.name, listField, LIST_DESC));
-    wrapper.instructions.add(new VarInsnNode(Opcodes.ALOAD, argumentLocal(wrapper, 0)));
-    wrapper.instructions
-        .add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "getIntelIconEntityIndexed", hookDesc, false));
-    wrapper.instructions.add(new TypeInsnNode(Opcodes.CHECKCAST, "com/fs/starfarer/campaign/CustomCampaignEntity"));
-    wrapper.instructions.add(new InsnNode(Opcodes.ARETURN));
-    node.methods.add(wrapper);
-    requireWrapperPostcondition(node, "getIntelIconEntity", desc, renamed, "getIntelIconEntityIndexed", hookDesc);
-    requireIntelEntityWrapper(node, desc, listField, hookDesc);
-
-    PatchReport report = new PatchReport();
-    report.add("Intel entity identity index", 1);
-    return report;
-  }
-
-  private PatchReport patchSystemNebulaCache(ClassNode node) {
-    String desc = "()V";
-    String renamed = "smo$originalUpdateSystemNebulas";
-    String hookDesc = "(Ljava/lang/Object;Ljava/util/List;Ljava/util/List;Ljava/util/List;)V";
-    boolean wrapperAlready = methods(node, renamed, desc).size() == 1;
-    MethodNode original =
-        requireWrapperSource(node, "updateSystemNebulas", desc, renamed, "updateSystemNebulasCached", hookDesc);
-    Frame<SourceValue>[] frames = sourceFrames(node.name, original);
-    requireCount("updateSystemNebulas semantic call count", totalMethodCalls(original), 57);
-
-    String createNebulaDesc = "(" + STAR_SYSTEM_DESC + ")Lcom/fs/starfarer/campaign/CampaignTerrain;";
-    String createLabelDesc = "(Lcom/fs/starfarer/api/impl/campaign/procgen/Constellation;)"
-        + "Lcom/fs/starfarer/campaign/CustomCampaignEntity;";
-    requireMethod(node, "createNebula", createNebulaDesc);
-    requireMethod(node, "createConstellationLabel", createLabelDesc);
-    int nebulaLocal = requireStoredCallResultLocal(original, Opcodes.INVOKESTATIC, node.name, "createNebula",
-        createNebulaDesc, "system nebula result");
-    int labelLocal = requireStoredCallResultLocal(original, Opcodes.INVOKESTATIC, node.name, "createConstellationLabel",
-        createLabelDesc, "constellation label result");
-
-    String systemNebulas = null;
-    String constellationLabels = null;
-    String nebulaStars = null;
-    List<MethodInsnNode> adds =
-        calls(original, Opcodes.INVOKEINTERFACE, "java/util/List", "add", "(Ljava/lang/Object;)Z");
-    requireCount("updateSystemNebulas List.add sites", adds.size(), 3);
-    for (MethodInsnNode add : adds) {
-      FieldInsnNode field = requireSourceField(receiverSource(original, add, frames), Opcodes.GETFIELD, node.name,
-          LIST_DESC, "system-nebula output list");
-      SourceValue value = argumentSource(original, add, frames, 0);
-      if (sourceIsLocal(value, Opcodes.ALOAD, nebulaLocal)) {
-        systemNebulas = uniqueRole(systemNebulas, field.name, "system nebula list");
-      } else if (sourceIsLocal(value, Opcodes.ALOAD, labelLocal)) {
-        constellationLabels = uniqueRole(constellationLabels, field.name, "constellation label list");
-      } else if (hasCallImmediatelyBefore(add, Opcodes.INVOKEINTERFACE, "com/fs/starfarer/api/campaign/StarSystemAPI",
-          "getStar", "()Lcom/fs/starfarer/api/campaign/PlanetAPI;", 4)) {
-            nebulaStars = uniqueRole(nebulaStars, field.name, "nebula-star list");
-          } else {
-            throw mismatch("unable to assign semantic role to List.add in updateSystemNebulas");
-          }
-    }
-    if (systemNebulas == null || constellationLabels == null || nebulaStars == null
-        || Set.of(systemNebulas, constellationLabels, nebulaStars).size() != 3) {
-      throw mismatch("system-nebula output lists are missing or not distinct");
-    }
-    for (String field : List.of(systemNebulas, constellationLabels, nebulaStars)) {
-      int clears = countCallsWithFieldReceiver(node.name, original, frames, Opcodes.INVOKEINTERFACE, "java/util/List",
-          "clear", "()V", field, LIST_DESC);
-      requireCount("clear of system-nebula list " + field, clears, 1);
-    }
-    if (wrapperAlready) {
-      requireSystemNebulaWrapper(node, desc, List.of(systemNebulas, constellationLabels, nebulaStars), hookDesc);
-      throw already("updateSystemNebulas wrapper, original semantics, and field wiring match");
-    }
-
-    int originalAccess = original.access;
-    String signature = original.signature;
-    String[] exceptions = exceptions(original);
-    original.name = renamed;
-    makePrivateSynthetic(original);
-    MethodNode wrapper =
-        new MethodNode(Opcodes.ASM8, originalAccess, "updateSystemNebulas", desc, signature, exceptions);
-    moveWrapperMetadata(original, wrapper, "updateSystemNebulas");
-    wrapper.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
-    for (String field : List.of(systemNebulas, constellationLabels, nebulaStars)) {
-      wrapper.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
-      wrapper.instructions.add(new FieldInsnNode(Opcodes.GETFIELD, node.name, field, LIST_DESC));
-    }
-    wrapper.instructions
-        .add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "updateSystemNebulasCached", hookDesc, false));
-    wrapper.instructions.add(new InsnNode(Opcodes.RETURN));
-    node.methods.add(wrapper);
-    requireWrapperPostcondition(node, "updateSystemNebulas", desc, renamed, "updateSystemNebulasCached", hookDesc);
-    requireSystemNebulaWrapper(node, desc, List.of(systemNebulas, constellationLabels, nebulaStars), hookDesc);
-
-    PatchReport report = new PatchReport();
-    report.add("system-nebula preprocessing cache", 1);
-    return report;
-  }
-
-  private PatchReport patchSampleCacheClearThrottle(ClassNode node) {
-    MethodNode method = requireMethod(node, "<init>", "(Z)V");
-    String terrain = "com/fs/starfarer/api/impl/campaign/terrain/HyperspaceTerrainPlugin";
-    String hookDesc = "(Ljava/lang/Object;)V";
-    List<MethodInsnNode> original = calls(method, Opcodes.INVOKEVIRTUAL, terrain, "forceClearSampleCache", "()V");
-    int hooks = countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "forceClearSampleCacheThrottled", hookDesc);
-    requireUnpatchedOrAlready("H constructor forceClearSampleCache", original.size(), 1, hooks, 1);
-
-    MethodInsnNode call = only(original, "forceClearSampleCache");
-    Frame<SourceValue>[] frames = sourceFrames(node.name, method);
-    int pluginLocal =
-        requireLoadedLocal(receiverSource(method, call, frames), Opcodes.ALOAD, "hyperspace terrain plugin");
-    MethodInsnNode getter = only(calls(method, Opcodes.INVOKESTATIC, "com/fs/starfarer/api/util/Misc",
-        "getHyperspaceTerrainPlugin", "()L" + terrain + ";"), "getHyperspaceTerrainPlugin");
-    AbstractInsnNode stored = nextMeaningful(getter);
-    if (!(stored instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE || store.var != pluginLocal) {
-      throw mismatch("terrain plugin receiver is not the value returned by Misc.getHyperspaceTerrainPlugin");
-    }
-    if (!hasNullGuard(method, store, call, pluginLocal)) {
-      throw mismatch("terrain plugin call is not protected by the expected null guard");
-    }
-    makeStatic(call, HOOKS, "forceClearSampleCacheThrottled", hookDesc);
-
-    PatchReport report = new PatchReport();
-    report.add("hyperspace sample-cache clear throttle", 1);
-    return report;
-  }
-
-  /**
    * Replaces the fixed 2000f global-grid constants with a scale-aware hook, so that a large
    * sector no longer draws its grid at the density chosen for a small one.
    */
@@ -2170,186 +1687,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
           countCalls(original, Opcodes.INVOKESTATIC, HOOKS, "borrowHitPoint", "(FF)Lorg/lwjgl/util/vector/Vector2f;"),
           1);
     }
-  }
-
-  private PatchReport patchIntelMapLocationCalls(ClassNode node, int expected) {
-    String originalDesc = "(" + MAP_API_DESC + ")" + ENTITY_TOKEN_DESC;
-    String hookDesc = "(" + INTEL_DESC + MAP_API_DESC + ")" + ENTITY_TOKEN_DESC;
-    List<MethodInsnNode> originals = new ArrayList<>();
-    int hooks = 0;
-    for (MethodNode method : node.methods) {
-      originals.addAll(calls(method, Opcodes.INVOKEINTERFACE, "com/fs/starfarer/api/campaign/comm/IntelInfoPlugin",
-          "getMapLocation", originalDesc));
-      hooks += countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "getMapLocationCached", hookDesc);
-    }
-    requireUnpatchedOrAlready(node.name + " getMapLocation", originals.size(), expected, hooks, expected);
-    for (MethodInsnNode call : originals) {
-      if (nextMeaningful(call) != null && nextMeaningful(call).getOpcode() == Opcodes.POP) {
-        throw mismatch("getMapLocation result is discarded at a candidate site");
-      }
-    }
-    for (MethodInsnNode call : originals) {
-      makeStatic(call, HOOKS, "getMapLocationCached", hookDesc);
-    }
-    PatchReport report = new PatchReport();
-    report.add("Intel map-location callback cache", originals.size());
-    return report;
-  }
-
-  /**
-   * Atomically installs the complete Intel-arrow rendering surface in Z.o00000: the
-   * getArrowData callback cache, both temporary Vector2f scratch allocations, and the
-   * single reentrant scratch scope. Partial or foreign hook-shaped states reject the
-   * whole group.
-   */
-  private PatchReport patchIntelArrowRendering(ClassNode node) {
-    MethodNode method = requireMethod(node, "o00000", "(FF)V");
-    String originalDesc = "(" + MAP_API_DESC + ")Ljava/util/List;";
-    String hookDesc = "(" + INTEL_DESC + MAP_API_DESC + ")Ljava/util/List;";
-    List<AllocationSpec> specs = List.of(new AllocationSpec("org/lwjgl/util/vector/Vector2f", "(FF)V",
-        "borrowArrowVector", "(FF)Lorg/lwjgl/util/vector/Vector2f;", 2));
-
-    PatchState scopeState = scratchScopeState(node.name, method, "Z.o00000");
-    PatchState allocationState = scratchAllocationGroupState(node.name, method, specs, "Z arrow vectors");
-    List<MethodInsnNode> originalCallbacks = calls(method, Opcodes.INVOKEINTERFACE,
-        "com/fs/starfarer/api/campaign/comm/IntelInfoPlugin", "getArrowData", originalDesc);
-    List<MethodInsnNode> callbackHooks = calls(method, Opcodes.INVOKESTATIC, HOOKS, "getArrowDataCached", hookDesc);
-
-    boolean originalState = originalCallbacks.size() == 1 && callbackHooks.isEmpty()
-        && allocationState == PatchState.ORIGINAL && scopeState == PatchState.ORIGINAL;
-    boolean patchedState = originalCallbacks.isEmpty() && callbackHooks.size() == 1
-        && allocationState == PatchState.PATCHED && scopeState == PatchState.PATCHED;
-
-    if (patchedState) {
-      validateArrowDataCallback(callbackHooks.get(0));
-      throw already("Z Intel-arrow callback, vectors, and scratch scope are already present");
-    }
-    if (!originalState) {
-      throw mismatch(
-          "Z.o00000 Intel-arrow rendering has mixed, missing, ambiguous, or " + "foreign callback/vector/scope state");
-    }
-
-    MethodInsnNode callback = originalCallbacks.get(0);
-    validateArrowDataCallback(callback);
-    installScratchScope(node.name, method, "Z.o00000");
-    makeStatic(callback, HOOKS, "getArrowDataCached", hookDesc);
-    int vectors = replaceAllocationGroup(node.name, method, specs, true, "Z arrow vectors");
-
-    requireCount("Z arrow-data callback postcondition",
-        countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "getArrowDataCached", hookDesc), 1);
-    requireCount("Z arrow-vector postcondition",
-        countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "borrowArrowVector", "(FF)Lorg/lwjgl/util/vector/Vector2f;"),
-        2);
-    if (scratchScopeState(node.name, method, "Z.o00000") != PatchState.PATCHED) {
-      throw mismatch("Z.o00000 scratch-scope installation postcondition failed");
-    }
-
-    PatchReport report = new PatchReport();
-    report.add("Intel arrow-data callback cache", 1);
-    report.add("Intel arrow vector pool", vectors);
-    return report;
-  }
-
-  private static void validateArrowDataCallback(MethodInsnNode call) {
-    if (nextMeaningful(call) != null && nextMeaningful(call).getOpcode() == Opcodes.POP) {
-      throw mismatch("getArrowData result is discarded");
-    }
-  }
-
-  /**
-   * Atomically installs the EventsPanel reconciliation surface: the missing-plugin
-   * membership accelerator, direct existing-icon candidate lookup, and the single
-   * reentrant scratch scope required by fastContains(). Partial or foreign hook-shaped
-   * states reject the whole group.
-   */
-  private PatchReport patchIntelReconciliation(ClassNode node) {
-    MethodNode method = requireMethod(node, "addMissingIconsAndRows", "()V");
-    String containsDesc = "(Ljava/util/Collection;Ljava/lang/Object;)Z";
-    String candidatesDesc = "(Ljava/util/LinkedHashMap;Ljava/lang/Object;)Ljava/util/Collection;";
-    PatchState scopeState = scratchScopeState(node.name, method, "EventsPanel.addMissingIconsAndRows");
-
-    List<MethodInsnNode> originalContains =
-        calls(method, Opcodes.INVOKEINTERFACE, "java/util/List", "contains", "(Ljava/lang/Object;)Z");
-    List<MethodInsnNode> containsHooks = calls(method, Opcodes.INVOKESTATIC, HOOKS, "fastContains", containsDesc);
-    List<MethodInsnNode> originalValues =
-        calls(method, Opcodes.INVOKEVIRTUAL, "java/util/LinkedHashMap", "values", "()Ljava/util/Collection;");
-    List<MethodInsnNode> candidateHooks =
-        calls(method, Opcodes.INVOKESTATIC, HOOKS, "existingIntelIconCandidates", candidatesDesc);
-
-    boolean originalState = originalContains.size() == 1 && containsHooks.isEmpty() && originalValues.size() == 1
-        && candidateHooks.isEmpty() && scopeState == PatchState.ORIGINAL;
-    boolean patchedState = originalContains.isEmpty() && containsHooks.size() == 1 && originalValues.isEmpty()
-        && candidateHooks.size() == 1 && scopeState == PatchState.PATCHED;
-
-    if (patchedState) {
-      validateEventsPanelContainsSite(node, method, containsHooks.get(0), true);
-      validateEventsPanelExistingIconSite(node, method, candidateHooks.get(0), true);
-      throw already("EventsPanel reconciliation hooks and scratch scope are already present");
-    }
-    if (!originalState) {
-      throw mismatch("EventsPanel reconciliation has mixed, missing, ambiguous, or foreign "
-          + "contains/icon-candidate/scope state");
-    }
-
-    MethodInsnNode contains = originalContains.get(0);
-    MethodInsnNode values = originalValues.get(0);
-    validateEventsPanelContainsSite(node, method, contains, false);
-    int entityLocal = validateEventsPanelExistingIconSite(node, method, values, false);
-
-    installScratchScope(node.name, method, "EventsPanel.addMissingIconsAndRows");
-    makeStatic(contains, HOOKS, "fastContains", containsDesc);
-    method.instructions.insertBefore(values, new VarInsnNode(Opcodes.ALOAD, entityLocal));
-    makeStatic(values, HOOKS, "existingIntelIconCandidates", candidatesDesc);
-
-    PatchReport report = new PatchReport();
-    report.add("Intel missing-list hash membership", 1);
-    report.add("Intel direct existing-icon candidates", 1);
-    return report;
-  }
-
-  private static void validateEventsPanelContainsSite(ClassNode node, MethodNode method, MethodInsnNode call,
-      boolean patched) {
-    Frame<SourceValue>[] frames = sourceFrames(node.name, method);
-    SourceValue collectionSource =
-        patched ? argumentSource(method, call, frames, 0) : receiverSource(method, call, frames);
-    SourceValue pluginSource =
-        patched ? argumentSource(method, call, frames, 1) : argumentSource(method, call, frames, 0);
-    int listLocal = requireLoadedLocal(collectionSource, Opcodes.ALOAD, "missing Intel list");
-    int pluginLocal = requireLoadedLocal(pluginSource, Opcodes.ALOAD, "current Intel plugin");
-    requireLocalConstructor(method, listLocal, "java/util/ArrayList", "()V", "missing Intel list");
-    requireStoredCallResult(method, pluginLocal, -1, null, "getInfo", "()" + INTEL_DESC, "row Intel plugin");
-    if (hasMutatorAfter(node.name, method, call, listLocal)) {
-      throw mismatch("missing Intel list is mutated after the reconciliation membership site");
-    }
-  }
-
-  private static int validateEventsPanelExistingIconSite(ClassNode node, MethodNode method, MethodInsnNode call,
-      boolean patched) {
-    Frame<SourceValue>[] frames = sourceFrames(node.name, method);
-    SourceValue mapSource = patched ? argumentSource(method, call, frames, 0) : receiverSource(method, call, frames);
-    requireSourceMethod(mapSource, Opcodes.INVOKEVIRTUAL, H, "getIcons", "()Ljava/util/LinkedHashMap;",
-        "existing icon map receiver");
-    MethodInsnNode entityLookup = only(
-        calls(method, Opcodes.INVOKEVIRTUAL, H, "getIntelIconEntity",
-            "(" + INTEL_DESC + ")Lcom/fs/starfarer/campaign/CustomCampaignEntity;"),
-        "H.getIntelIconEntity in addMissingIconsAndRows");
-    AbstractInsnNode storeInsn = nextMeaningful(entityLookup);
-    if (!(storeInsn instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE) {
-      throw mismatch("Intel entity lookup result is not stored in a local");
-    }
-    int entityLocal = store.var;
-    if (!hasNullGuard(method, store, call, entityLocal)) {
-      throw mismatch("Intel entity candidate scan is not guarded by an entity null check");
-    }
-    if (patched) {
-      int hookEntityLocal =
-          requireLoadedLocal(argumentSource(method, call, frames, 1), Opcodes.ALOAD, "existing icon entity argument");
-      if (hookEntityLocal != entityLocal) { throw mismatch("existing icon hook is wired to the wrong entity local"); }
-    }
-    int comparisons = countIdentityComparisons(method, frames, call, entityLocal, "com/fs/starfarer/coreui/A/ooOO",
-        "int", "()" + ENTITY_TOKEN_DESC);
-    requireCount("existing icon entity identity comparison", comparisons, 1);
-    return entityLocal;
   }
 
   // ---------------------------------------------------------------------
@@ -2853,66 +2190,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
 
     PatchReport report = new PatchReport();
     report.add("incremental campaign repository-listener refresh", 1);
-    return report;
-  }
-
-  private PatchReport patchRouteJumpPointIndex(ClassNode node) {
-    MethodNode next = requireMethod(node, "getNextStep", "(" + ENTITY_TOKEN_DESC + ")" + ENTITY_TOKEN_DESC);
-    MethodNode distance = requireMethod(node, "getLastLegDistance", "(" + ENTITY_TOKEN_DESC + ")F");
-    String jumpHookDesc = "(" + LOCATION_DESC + "Ljava/lang/Object;)Ljava/util/List;";
-    String systemsHookDesc = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;";
-
-    List<MethodInsnNode> nextJumps = calls(next, Opcodes.INVOKEINTERFACE, "com/fs/starfarer/api/campaign/LocationAPI",
-        "getJumpPoints", "()Ljava/util/List;");
-    List<MethodInsnNode> distanceJumps = calls(distance, Opcodes.INVOKEINTERFACE,
-        "com/fs/starfarer/api/campaign/LocationAPI", "getJumpPoints", "()Ljava/util/List;");
-    int jumpHooks = countCalls(next, Opcodes.INVOKESTATIC, HOOKS, "routeJumpPointsForSystem", jumpHookDesc)
-        + countCalls(distance, Opcodes.INVOKESTATIC, HOOKS, "routeJumpPointsForSystem", jumpHookDesc);
-    List<MethodInsnNode> systems =
-        calls(next, Opcodes.INVOKEVIRTUAL, CAMPAIGN_ENGINE, "getStarSystems", "()Ljava/util/List;");
-    int systemsHooks = countCalls(next, Opcodes.INVOKESTATIC, HOOKS, "routeSystemsForAnchor", systemsHookDesc);
-
-    boolean fullyPatched =
-        nextJumps.isEmpty() && distanceJumps.isEmpty() && jumpHooks == 3 && systems.isEmpty() && systemsHooks == 1;
-    if (fullyPatched) throw already("three jump hooks and one system hook are already present");
-    if (jumpHooks != 0 || systemsHooks != 0) {
-      throw mismatch("mixed/foreign route hook state: jumps=" + jumpHooks + ", systems=" + systemsHooks);
-    }
-    requireCount("getNextStep jump scans", nextJumps.size(), 2);
-    requireCount("getLastLegDistance jump scans", distanceJumps.size(), 1);
-    requireCount("getNextStep system scan", systems.size(), 1);
-
-    int[] nextSystemLocals = new int[2];
-    for (int i = 0; i < nextJumps.size(); i++) {
-      AbstractInsnNode boundary = i + 1 < nextJumps.size() ? nextJumps.get(i + 1) : null;
-      nextSystemLocals[i] = findComparedLocationLocal(node.name, next, nextJumps.get(i), boundary);
-      requireSystemLocalProducer(next, nextSystemLocals[i], nextJumps.get(i), "getNextStep jump scan " + (i + 1));
-    }
-    int distanceSystemLocal = findComparedLocationLocal(node.name, distance, distanceJumps.get(0), null);
-    requireSystemLocalProducer(distance, distanceSystemLocal, distanceJumps.get(0), "getLastLegDistance jump scan");
-    int anchorLocal = findAnchorComparisonLocal(node.name, next, systems.get(0));
-    int expectedAnchor = argumentLocal(next, 0);
-    if (anchorLocal != expectedAnchor) {
-      throw mismatch("route anchor local is not the SectorEntityToken argument: found " + anchorLocal + ", expected "
-          + expectedAnchor);
-    }
-
-    for (int i = 0; i < nextJumps.size(); i++) {
-      MethodInsnNode call = nextJumps.get(i);
-      next.instructions.insertBefore(call, new VarInsnNode(Opcodes.ALOAD, nextSystemLocals[i]));
-      makeStatic(call, HOOKS, "routeJumpPointsForSystem", jumpHookDesc);
-    }
-    MethodInsnNode distanceCall = distanceJumps.get(0);
-    distance.instructions.insertBefore(distanceCall, new VarInsnNode(Opcodes.ALOAD, distanceSystemLocal));
-    makeStatic(distanceCall, HOOKS, "routeJumpPointsForSystem", jumpHookDesc);
-
-    MethodInsnNode systemsCall = systems.get(0);
-    next.instructions.insertBefore(systemsCall, new VarInsnNode(Opcodes.ALOAD, anchorLocal));
-    makeStatic(systemsCall, HOOKS, "routeSystemsForAnchor", systemsHookDesc);
-
-    PatchReport report = new PatchReport();
-    report.add("route jump-point system index", 3);
-    report.add("route hyperspace-anchor system index", 1);
     return report;
   }
 
@@ -8340,45 +7617,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
   }
 
 
-  private PatchReport patchCommRelaySystemIndex(ClassNode node) {
-    String desc = "(" + ENTITY_TOKEN_DESC + ")" + ENTITY_TOKEN_DESC;
-    MethodNode method = requireMethod(node, "findNearestCommRelayToReceive", desc);
-    boolean scopeInstalled = ensureScratchScope(node.name, method, "IntelManager.findNearestCommRelayToReceive");
-    String hookDesc = "(L" + CAMPAIGN_ENGINE + ";Lorg/lwjgl/util/vector/Vector2f;FF)Ljava/util/List;";
-    List<MethodInsnNode> raw =
-        calls(method, Opcodes.INVOKEVIRTUAL, CAMPAIGN_ENGINE, "getStarSystems", "()Ljava/util/List;");
-    int hooks = countCalls(method, Opcodes.INVOKESTATIC, HOOKS, "commRelayCandidateSystems", hookDesc);
-    boolean original = raw.size() == 1 && hooks == 0;
-    boolean patched = raw.isEmpty() && hooks == 1;
-    if (patched) {
-      if (scopeInstalled) throw mismatch("comm relay hook exists without its scratch scope");
-      throw already("comm relay system-index hook is already present");
-    }
-    if (!original) throw mismatch("IntelManager comm-relay system scan changed structurally");
-
-    MethodInsnNode getSystems = raw.get(0);
-    Frame<SourceValue>[] frames = sourceFrames(node.name, method);
-    requireSourceMethod(receiverSource(method, getSystems, frames), Opcodes.INVOKESTATIC, CAMPAIGN_ENGINE,
-        "getInstance", "()L" + CAMPAIGN_ENGINE + ";", "comm-relay CampaignEngine source");
-    requireStoredLocalProducer(method, 2, Opcodes.ASTORE, Opcodes.INVOKEINTERFACE,
-        "com/fs/starfarer/api/campaign/SectorEntityToken", "getLocationInHyperspace",
-        "()Lorg/lwjgl/util/vector/Vector2f;", getSystems, "comm-relay player hyperspace location");
-    requireFloatLocalProducer(method, 3, getSystems, "comm-relay hyperspace units-per-light-year");
-    requireCount("MAX_RANGE_AROUND_SYSTEM field",
-        countFields(method, Opcodes.GETSTATIC, node.name, "MAX_RANGE_AROUND_SYSTEM", "F"), 2);
-
-    method.instructions.insertBefore(getSystems, new VarInsnNode(Opcodes.ALOAD, 2));
-    method.instructions.insertBefore(getSystems, new VarInsnNode(Opcodes.FLOAD, 3));
-    method.instructions.insertBefore(getSystems,
-        new FieldInsnNode(Opcodes.GETSTATIC, node.name, "MAX_RANGE_AROUND_SYSTEM", "F"));
-    makeStatic(getSystems, HOOKS, "commRelayCandidateSystems", hookDesc);
-
-    PatchReport report = new PatchReport();
-    report.add("ordered hyperspace comm-relay system spatial index", 1);
-    return report;
-  }
-
-
   // ---------------------------------------------------------------------
   // Structural matcher and verifier helpers
   // ---------------------------------------------------------------------
@@ -8492,38 +7730,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
   }
 
 
-  private static void requireIntelEntityWrapper(ClassNode node, String desc, String listField, String hookDesc) {
-    MethodNode wrapper = requireMethod(node, "getIntelIconEntity", desc);
-    List<AbstractInsnNode> code = meaningfulInstructions(wrapper);
-    requireCount("getIntelIconEntity wrapper instruction count", code.size(), 7);
-    requireVar(code.get(0), Opcodes.ALOAD, 0, "Intel wrapper owner");
-    requireVar(code.get(1), Opcodes.ALOAD, 0, "Intel wrapper field owner");
-    requireField(code.get(2), Opcodes.GETFIELD, node.name, listField, LIST_DESC, "Intel wrapper List field");
-    requireVar(code.get(3), Opcodes.ALOAD, argumentLocal(wrapper, 0), "Intel wrapper plugin");
-    requireCall(asMethod(code.get(4), "Intel wrapper hook"), Opcodes.INVOKESTATIC, HOOKS, "getIntelIconEntityIndexed",
-        hookDesc, "Intel wrapper hook");
-    if (!(code.get(5) instanceof TypeInsnNode cast) || cast.getOpcode() != Opcodes.CHECKCAST
-        || !cast.desc.equals("com/fs/starfarer/campaign/CustomCampaignEntity")) {
-      throw mismatch("Intel wrapper result cast changed");
-    }
-    if (code.get(6).getOpcode() != Opcodes.ARETURN) throw mismatch("Intel wrapper return changed");
-  }
-
-  private static void requireSystemNebulaWrapper(ClassNode node, String desc, List<String> fields, String hookDesc) {
-    MethodNode wrapper = requireMethod(node, "updateSystemNebulas", desc);
-    List<AbstractInsnNode> code = meaningfulInstructions(wrapper);
-    requireCount("updateSystemNebulas wrapper instruction count", code.size(), 9);
-    requireVar(code.get(0), Opcodes.ALOAD, 0, "nebula wrapper owner");
-    for (int i = 0; i < fields.size(); i++) {
-      requireVar(code.get(1 + i * 2), Opcodes.ALOAD, 0, "nebula wrapper field owner " + i);
-      requireField(code.get(2 + i * 2), Opcodes.GETFIELD, node.name, fields.get(i), LIST_DESC,
-          "nebula wrapper field " + i);
-    }
-    requireCall(asMethod(code.get(7), "nebula wrapper hook"), Opcodes.INVOKESTATIC, HOOKS, "updateSystemNebulasCached",
-        hookDesc, "nebula wrapper hook");
-    if (code.get(8).getOpcode() != Opcodes.RETURN) throw mismatch("nebula wrapper return changed");
-  }
-
   private static void requireHitTestWrapper(ClassNode node, String desc, String hookDesc) {
     MethodNode wrapper = requireMethod(node, "OO0000", desc);
     List<AbstractInsnNode> code = meaningfulInstructions(wrapper);
@@ -8535,80 +7741,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     requireCall(asMethod(code.get(4), "hit-test wrapper hook"), Opcodes.INVOKESTATIC, HOOKS, "hitTestCached", hookDesc,
         "hit-test wrapper hook");
     if (code.get(5).getOpcode() != Opcodes.ARETURN) throw mismatch("hit-test wrapper return changed");
-  }
-
-
-  private static int findComparedLocationLocal(String owner, MethodNode method, MethodInsnNode from,
-      AbstractInsnNode boundary) {
-    Frame<SourceValue>[] frames = sourceFrames(owner, method);
-    Set<Integer> locals = new LinkedHashSet<>();
-    for (AbstractInsnNode insn = from.getNext(); insn != null && insn != boundary; insn = insn.getNext()) {
-      if (!(insn instanceof JumpInsnNode jump)
-          || (jump.getOpcode() != Opcodes.IF_ACMPEQ && jump.getOpcode() != Opcodes.IF_ACMPNE))
-        continue;
-      Frame<SourceValue> frame = frameBefore(method, jump, frames);
-      if (frame.getStackSize() < 2) continue;
-      SourceValue left = frame.getStack(frame.getStackSize() - 2);
-      SourceValue right = frame.getStack(frame.getStackSize() - 1);
-      Integer local = null;
-      if (sourceIsMethod(left, -1, "com/fs/starfarer/api/campaign/SectorEntityToken", "getContainingLocation",
-          "()" + LOCATION_DESC)) {
-        local = optionalLoadedLocal(right, Opcodes.ALOAD);
-      } else if (sourceIsMethod(right, -1, "com/fs/starfarer/api/campaign/SectorEntityToken", "getContainingLocation",
-          "()" + LOCATION_DESC)) {
-            local = optionalLoadedLocal(left, Opcodes.ALOAD);
-          }
-      if (local != null) locals.add(local);
-    }
-    if (locals.size() != 1) {
-      throw mismatch("expected one destination-containing-location comparison local, found " + locals);
-    }
-    return locals.iterator().next();
-  }
-
-  private static int findAnchorComparisonLocal(String owner, MethodNode method, MethodInsnNode from) {
-    Frame<SourceValue>[] frames = sourceFrames(owner, method);
-    Set<Integer> locals = new LinkedHashSet<>();
-    int meaningful = 0;
-    for (AbstractInsnNode insn = from.getNext(); insn != null && meaningful < 100; insn = insn.getNext()) {
-      if (insn.getOpcode() >= 0) meaningful++;
-      if (!(insn instanceof JumpInsnNode jump)
-          || (jump.getOpcode() != Opcodes.IF_ACMPEQ && jump.getOpcode() != Opcodes.IF_ACMPNE))
-        continue;
-      Frame<SourceValue> frame = frameBefore(method, jump, frames);
-      if (frame.getStackSize() < 2) continue;
-      SourceValue left = frame.getStack(frame.getStackSize() - 2);
-      SourceValue right = frame.getStack(frame.getStackSize() - 1);
-      Integer local = null;
-      if (sourceIsMethod(left, -1, "com/fs/starfarer/api/campaign/StarSystemAPI", "getHyperspaceAnchor",
-          "()" + ENTITY_TOKEN_DESC)) {
-        local = optionalLoadedLocal(right, Opcodes.ALOAD);
-      } else if (sourceIsMethod(right, -1, "com/fs/starfarer/api/campaign/StarSystemAPI", "getHyperspaceAnchor",
-          "()" + ENTITY_TOKEN_DESC)) {
-            local = optionalLoadedLocal(left, Opcodes.ALOAD);
-          }
-      if (local != null) locals.add(local);
-    }
-    if (locals.size() != 1) throw mismatch("expected one hyperspace-anchor comparison local, found " + locals);
-    return locals.iterator().next();
-  }
-
-  private static void requireSystemLocalProducer(MethodNode method, int local, AbstractInsnNode before, String label) {
-    int valid = 0;
-    for (AbstractInsnNode insn = method.instructions.getFirst(); insn != null && insn != before; insn =
-        insn.getNext()) {
-      if (!(insn instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE || store.var != local) continue;
-      AbstractInsnNode producer = previousMeaningful(store);
-      if (producer instanceof TypeInsnNode cast && cast.getOpcode() == Opcodes.CHECKCAST
-          && (cast.desc.equals("com/fs/starfarer/campaign/StarSystem")
-              || cast.desc.equals("com/fs/starfarer/api/campaign/StarSystemAPI"))) {
-        valid++;
-      } else if (producer instanceof MethodInsnNode call
-          && Type.getReturnType(call.desc).getDescriptor().equals(STAR_SYSTEM_DESC)) {
-            valid++;
-          }
-    }
-    requireCountAtLeast(label + " system-local producers", valid, 1);
   }
 
 
@@ -8626,7 +7758,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
    * not prove. Callers that only need the question "would this patch apply?" — postcondition
    * validation and the composition probe — run the match alone.
    */
-  private interface StructuredPatch<P> {
+  interface StructuredPatch<P> {
     Match<P> match(ClassNode node);
 
     PatchReport mutate(P plan);
@@ -8636,7 +7768,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
   }
 
   /** Outcome of {@link StructuredPatch#match}: a proven plan, or a refusal with its reason. */
-  private static final class Match<P> {
+  static final class Match<P> {
     private final P plan;
     private final String reason;
     private final boolean alreadyApplied;
@@ -8729,7 +7861,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
   }
 
 
-  private static final class PatchReport {
+  static final class PatchReport {
     int total;
     final List<String> details = new ArrayList<>();
 
