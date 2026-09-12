@@ -479,13 +479,12 @@ public final class StrategicJumpDestinationIndexRuntimeTest {
   private static void testCapabilityRequiresMaintenanceSurface() throws Exception {
     String prefix = "starsector.prepatcher.patchStatus.";
     String maintenance = prefix + "com.fs.starfarer.campaign.CampaignEngine.campaignCacheLifecycle";
-    String first = prefix + "com.fs.starfarer.campaign.ai.StrategicModule." + "strategicJumpDestinationFirst";
-    String source = prefix + "com.fs.starfarer.campaign.ai.StrategicModule." + "strategicJumpDestinationIndex";
+    String plan = prefix + "com.fs.starfarer.campaign.ai.StrategicModule." + "strategicJumpDestinationPlan";
     String point = prefix + "com.fs.starfarer.campaign.JumpPoint.strategicJumpDestinationIndex";
     String location = prefix + "com.fs.starfarer.campaign.BaseLocation.strategicJumpDestinationIndex";
     String destination =
         prefix + "com.fs.starfarer.api.campaign.JumpPointAPI$JumpDestination." + "strategicJumpDestinationIndex";
-    String[] keys = {maintenance, first, source, point, location, destination};
+    String[] keys = {maintenance, plan, point, location, destination};
     String[] previous = new String[keys.length];
     Field cached = StarsectorPrepatcherHooks.class.getDeclaredField("strategicJumpRuntimeCapability");
     cached.setAccessible(true);
@@ -502,11 +501,11 @@ public final class StrategicJumpDestinationIndexRuntimeTest {
       cached.setInt(null, 0);
       require((Integer) capability.invoke(null) == 1, "complete strategic index surfaces did not negotiate READY");
 
-      System.setProperty(source, "SKIPPED_STRUCTURAL");
+      System.setProperty(plan, "SKIPPED_STRUCTURAL");
       cached.setInt(null, 0);
       require((Integer) capability.invoke(null) == -1,
-          "missing StrategicModule source surface did not fail capability");
-      System.setProperty(source, "APPLIED");
+          "missing StrategicModule destination-plan surface did not fail capability");
+      System.setProperty(plan, "APPLIED");
 
       System.clearProperty(destination);
       cached.setInt(null, 0);

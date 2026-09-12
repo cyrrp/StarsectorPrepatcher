@@ -26,10 +26,10 @@ import static com.starsector.prepatcher.agent.StrategicJump.*;
 /**
  * Transformation surface: the initial candidate-source expression in
  * StrategicModule.findNearestSafeJumpPoint and the expired-plan clear branch in
- * updateJumpPlanTo. This patch consumes the complete destination-first post-state,
- * replaces LocationAPI.getEntities(JumpPoint.class) with the indexed runtime hook,
- * defers only an expired replacement while the index is cold, and then revalidates
- * both composed postconditions.
+ * updateJumpPlanTo. This member runs inside StrategicJumpDestinationPlan: it
+ * consumes the destination-first post-state proven on the same plan candidate,
+ * replaces LocationAPI.getEntities(JumpPoint.class) with the indexed runtime
+ * hook, and defers only an expired replacement while the index is cold.
  */
 final class StrategicJumpDestinationIndex implements StructuredPatch<StrategicJumpDestinationIndex.Plan> {
   private static final String STRATEGIC_JUMP_INDEX_HOOK = "strategicJumpPointsForDestination";
@@ -54,9 +54,6 @@ final class StrategicJumpDestinationIndex implements StructuredPatch<StrategicJu
   public Match<Plan> match(ClassNode node) {
     MethodNode method = requireMethod(node, "findNearestSafeJumpPoint", STRATEGIC_JUMP_METHOD_DESC);
     MethodNode update = requireMethod(node, "updateJumpPlanTo", STRATEGIC_JUMP_UPDATE_METHOD_DESC);
-    if (!hasPatchMarker(node, STRATEGIC_JUMP_DESTINATION_FIRST_PATCH_ID)) {
-      return Match.incompatible("destination index requires the owned destination-first post-state");
-    }
     StrategicJumpCommon common = inspectStrategicJumpCommon(node.name, method);
     if (inspectStrategicJumpOriginal(common, false) != null || inspectStrategicJumpLazy(common, false) == null) {
       return Match.incompatible("destination-first postcondition changed before index composition");

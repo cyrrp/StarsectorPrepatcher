@@ -579,17 +579,36 @@ relationship snapshot — раз в `route.indexTtlMs`. Это сохраняе�
 видимость прямой мутации сторонним модом. Значение TTL `0` отключает runtime index; в
 `profiles/safe.properties` route patch отключён полностью.
 
+Компоненты `StrategicModule` — lazy hostile-market score и budgeted destination index —
+применяются только через единый `strategicJumpDestinationPlan` с одним ownership marker и feature
+mask. Публичные ключи `patch.strategicJumpDestinationFirst` и `patch.strategicJumpDestinationIndex`
+выбирают компоненты mask; index-only конфигурация нормализуется в disabled, потому что
+index-компонент определён над post-state destination-first. Оба компонента проверяются на
+одинаковых входных bytes и применяются к изолированному candidate в явном порядке
+destination-first → index: matcher второго компонента видит фактическое преобразованное состояние
+candidate, поэтому результат не зависит от dispatch order. Несовместимость любого запрошенного
+компонента отклоняет весь plan: класс остаётся полностью vanilla со `SKIPPED_STRUCTURAL`, а не
+получает частичное преобразование. Legacy split markers `strategicJumpDestinationFirst`/
+`strategicJumpDestinationIndex` и unowned hook-shaped state не принимаются и не мигрируются.
+
 `patch.strategicJumpDestinationFirst` не использует route index, TTL или runtime helper. Это
-самостоятельная inline-трансформация `StrategicModule.findNearestSafeJumpPoint`: accepted destination
+inline-компонент `StrategicModule.findNearestSafeJumpPoint`: accepted destination
 predicate остаётся vanilla, а `getNumHostileMarkets` лениво выполняется не более одного раза на
 принятый jump point. Поэтому патч не зависит от `patch.routeJumpPointIndex` и не делит с ним
 transformation surface. Несовпадение radius/multiplier/control-flow либо foreign lazy-state оставляет
 весь класс без изменений со `SKIPPED_STRUCTURAL`.
 
-`patch.strategicJumpDestinationIndex` имеет явную structural-зависимость от destination-first и
-потребляет его уже преобразованный post-state. Он также требует owned lifecycle-maintenance hook,
+Index-компонент также требует owned lifecycle-maintenance hook,
 `JumpPoint` destination mutators, `JumpDestination.setDestination` и membership hooks `BaseLocation`.
 До загрузки всех поверхностей capability остаётся `PENDING`, partial index не публикуется.
+
+`strategicJumpDestinationIndex` остаётся отдельным patch id на `JumpPoint`,
+`JumpPointAPI$JumpDestination` и `BaseLocation`: эти topology surfaces genuinely disjoint от
+`StrategicModule` destination plan — они находятся в других классах и ни один из них не читает и
+не изменяет `findNearestSafeJumpPoint`/`updateJumpPlanTo`. Регрессия, доказывающая, что ни один
+из них не может быть молча пропущен из-за другого, — проверка в
+`StrategicJumpDestinationIndexTransformerTest`, где отклонённый `StrategicModule` plan не блокирует
+независимое применение `JumpPoint` topology patch.
 
 Runtime не использует route-widget cache и не определяет тип current location. Каждый запрошенный
 `LocationAPI` принимается одинаково, с bounded admission rate и bounded LRU. Первый lookup только

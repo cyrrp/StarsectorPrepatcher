@@ -113,6 +113,9 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
   static final int MARKET_ADVANCE_FEATURE_ENTRY_OBSERVATION = 4;
   static final int MARKET_ADVANCE_FEATURE_SCHEDULER_SEMANTICS = 8;
   static final String SAVE_METHOD_PLAN_PATCH_ID = "saveMethodPlan";
+  static final String STRATEGIC_JUMP_DESTINATION_PLAN_PATCH_ID = "strategicJumpDestinationPlan";
+  static final int STRATEGIC_JUMP_FEATURE_DESTINATION_FIRST = 1;
+  static final int STRATEGIC_JUMP_FEATURE_DESTINATION_INDEX = 2;
   static final int SAVE_METHOD_FEATURE_CACHE_MAINTENANCE = 1;
   static final int SAVE_METHOD_FEATURE_MARKET_SCHEDULER_FLUSH = 2;
   private static final String SAVE_OUTPUT_BUFFER_DEDUP_PATCH_ID = "saveOutputBufferDedup";
@@ -243,14 +246,9 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       }
       case COURSE_WIDGET ->
         apply(state, "routeJumpPointIndex", config.routeJumpPointIndex, structured(new RouteJumpPointIndex()));
-      case STRATEGIC_MODULE -> {
-        // Explicit dependency order: the index matcher consumes and revalidates
-        // the destination-first post-state produced by the preceding patch.
-        apply(state, STRATEGIC_JUMP_DESTINATION_FIRST_PATCH_ID, config.strategicJumpDestinationFirst,
-            structured(new StrategicJumpDestinationFirst()));
-        apply(state, STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID, config.strategicJumpDestinationIndex,
-            structured(new StrategicJumpDestinationIndex()));
-      }
+      case STRATEGIC_MODULE ->
+        apply(state, STRATEGIC_JUMP_DESTINATION_PLAN_PATCH_ID, strategicJumpDestinationPlanEnabled(),
+            structured(new StrategicJumpDestinationPlan(requestedStrategicJumpDestinationFeatureMask())));
       case JUMP_POINT -> apply(state, STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID, config.strategicJumpDestinationIndex,
           structured(new StrategicJumpDestinationInvalidation()));
       case JUMP_DESTINATION -> apply(state, STRATEGIC_JUMP_DESTINATION_INDEX_PATCH_ID,
@@ -606,7 +604,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       case CAMPAIGN_ENGINE -> config.coreWorldsExtentCache || campaignCacheLifecycleEnabled()
           || config.campaignListenerThrottle || config.entityLookupIndexRepair;
       case COURSE_WIDGET -> config.routeJumpPointIndex;
-      case STRATEGIC_MODULE -> config.strategicJumpDestinationFirst || config.strategicJumpDestinationIndex;
+      case STRATEGIC_MODULE -> strategicJumpDestinationPlanEnabled();
       case JUMP_POINT, JUMP_DESTINATION -> config.strategicJumpDestinationIndex;
       case BASE_LOCATION ->
         config.coreWorldsExtentCache || config.campaignSnapshotReuse || config.strategicJumpDestinationIndex;
@@ -693,6 +691,21 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     }
     if (config.marketScheduler) {
       mask |= MARKET_ADVANCE_FEATURE_SCHEDULER_SEMANTICS;
+    }
+    return mask;
+  }
+
+  private boolean strategicJumpDestinationPlanEnabled() {
+    return config.strategicJumpDestinationFirst || config.strategicJumpDestinationIndex;
+  }
+
+  private int requestedStrategicJumpDestinationFeatureMask() {
+    int mask = 0;
+    if (config.strategicJumpDestinationFirst) {
+      mask |= STRATEGIC_JUMP_FEATURE_DESTINATION_FIRST;
+    }
+    if (config.strategicJumpDestinationIndex) {
+      mask |= STRATEGIC_JUMP_FEATURE_DESTINATION_INDEX;
     }
     return mask;
   }

@@ -125,12 +125,9 @@ public final class StarsectorPrepatcherHooks {
   private static volatile int strategicJumpRuntimeCapability;
   private static final String STRATEGIC_JUMP_MAINTENANCE_STATUS =
       "starsector.prepatcher.patchStatus.com.fs.starfarer.campaign.CampaignEngine." + "campaignCacheLifecycle";
-  private static final String STRATEGIC_JUMP_FIRST_STATUS =
+  private static final String STRATEGIC_JUMP_PLAN_STATUS =
       "starsector.prepatcher.patchStatus.com.fs.starfarer.campaign.ai.StrategicModule."
-          + "strategicJumpDestinationFirst";
-  private static final String STRATEGIC_JUMP_SOURCE_STATUS =
-      "starsector.prepatcher.patchStatus.com.fs.starfarer.campaign.ai.StrategicModule."
-          + "strategicJumpDestinationIndex";
+          + "strategicJumpDestinationPlan";
   private static final String STRATEGIC_JUMP_POINT_STATUS =
       "starsector.prepatcher.patchStatus.com.fs.starfarer.campaign.JumpPoint." + "strategicJumpDestinationIndex";
   private static final String STRATEGIC_JUMP_LOCATION_STATUS =
@@ -6885,18 +6882,17 @@ public final class StarsectorPrepatcherHooks {
     if (cached == STRATEGIC_JUMP_CAPABILITY_READY || cached == STRATEGIC_JUMP_CAPABILITY_FAILED) return cached;
 
     String maintenance = System.getProperty(STRATEGIC_JUMP_MAINTENANCE_STATUS);
-    String first = System.getProperty(STRATEGIC_JUMP_FIRST_STATUS);
-    String source = System.getProperty(STRATEGIC_JUMP_SOURCE_STATUS);
+    String plan = System.getProperty(STRATEGIC_JUMP_PLAN_STATUS);
     String point = System.getProperty(STRATEGIC_JUMP_POINT_STATUS);
     String location = System.getProperty(STRATEGIC_JUMP_LOCATION_STATUS);
     String destination = System.getProperty(STRATEGIC_JUMP_DESTINATION_STATUS);
-    if (patchApplied(maintenance) && patchApplied(first) && patchApplied(source) && patchApplied(point)
-        && patchApplied(location) && patchApplied(destination)) {
+    if (patchApplied(maintenance) && patchApplied(plan) && patchApplied(point) && patchApplied(location)
+        && patchApplied(destination)) {
       strategicJumpRuntimeCapability = STRATEGIC_JUMP_CAPABILITY_READY;
       return STRATEGIC_JUMP_CAPABILITY_READY;
     }
-    if (patchFailed(maintenance) || patchFailed(first) || patchFailed(source) || patchFailed(point)
-        || patchFailed(location) || patchFailed(destination)) {
+    if (patchFailed(maintenance) || patchFailed(plan) || patchFailed(point) || patchFailed(location)
+        || patchFailed(destination)) {
       strategicJumpRuntimeCapability = STRATEGIC_JUMP_CAPABILITY_FAILED;
       return STRATEGIC_JUMP_CAPABILITY_FAILED;
     }

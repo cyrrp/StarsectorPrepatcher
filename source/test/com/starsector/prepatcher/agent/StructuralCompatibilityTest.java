@@ -2445,10 +2445,15 @@ public final class StructuralCompatibilityTest {
       }
       case PrepatcherTransformer.STRATEGIC_MODULE -> {
         ClassNode strategic = read(bytes);
-        require(hasOwnershipMarker(strategic, "strategicJumpDestinationFirst"),
-            "StrategicModule destination-first marker is missing");
-        require(hasOwnershipMarker(strategic, "strategicJumpDestinationIndex"),
-            "StrategicModule destination-index marker is missing");
+        require(hasOwnershipMarker(strategic, "strategicJumpDestinationPlan"),
+            "StrategicModule unified destination-plan marker is missing");
+        require(
+            !hasOwnershipMarker(strategic, "strategicJumpDestinationFirst")
+                && !hasOwnershipMarker(strategic, "strategicJumpDestinationIndex"),
+            "StrategicModule emitted legacy split destination markers");
+        FieldNode strategicMask = requireField(strategic, "smo$strategicJumpDestinationPlanMask", "I");
+        require(strategicMask.value instanceof Integer mask && mask == 3,
+            "StrategicModule destination-plan mask field changed");
         expected.put("strategicJumpPointsForDestination", 1);
         expected.put("strategicJumpDeferExpiredPlan", 1);
       }

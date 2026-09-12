@@ -18,9 +18,11 @@ import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.jar.JarFile;
 
-/** Combined structural regression for destination-first and the incremental index. */
+/** Structural regression for the unified StrategicModule plan and the index topology surfaces. */
 public final class StrategicJumpDestinationIndexTransformerTest {
   private static final String PATCH_ID = "strategicJumpDestinationIndex";
+  private static final String PLAN_PATCH_ID = "strategicJumpDestinationPlan";
+  private static final String PLAN_MASK_FIELD = "smo$strategicJumpDestinationPlanMask";
   private static final String HOOKS = "com/fs/starfarer/api/StarsectorPrepatcherHooks";
   private static final String METHOD_DESC = "(Lcom/fs/starfarer/api/campaign/CampaignFleetAPI;"
       + "Lcom/fs/starfarer/api/campaign/LocationAPI;)" + "Lcom/fs/starfarer/campaign/ai/StrategicModule$Oo;";
@@ -35,7 +37,7 @@ public final class StrategicJumpDestinationIndexTransformerTest {
   private static final String RETARGET_DESC = "(Lcom/fs/starfarer/api/campaign/JumpPointAPI$JumpDestination;)V";
   private static final String LOCATION_DESC = "(Lcom/fs/starfarer/api/campaign/LocationAPI;Ljava/lang/Object;)V";
   private static final String INDEX_STATUS =
-      "starsector.prepatcher.patchStatus." + "com.fs.starfarer.campaign.ai.StrategicModule." + PATCH_ID;
+      "starsector.prepatcher.patchStatus." + "com.fs.starfarer.campaign.ai.StrategicModule." + PLAN_PATCH_ID;
 
   private StrategicJumpDestinationIndexTransformerTest() {}
 
@@ -60,7 +62,7 @@ public final class StrategicJumpDestinationIndexTransformerTest {
     byte[] strategicPatched = transform(transformer, PrepatcherTransformer.STRATEGIC_MODULE, strategic);
     assertStrategic(strategicPatched);
     assertIdempotent(transformer, PrepatcherTransformer.STRATEGIC_MODULE, strategicPatched);
-    assertStrategicAtomicFailure(config, strategic);
+    assertStrategicAtomicFailure(config, strategic, jumpPoint);
 
     byte[] jumpPointPatched = transform(transformer, PrepatcherTransformer.JUMP_POINT, jumpPoint);
     assertJumpPoint(jumpPointPatched);
@@ -92,8 +94,13 @@ public final class StrategicJumpDestinationIndexTransformerTest {
 
   private static void assertStrategic(byte[] bytes) {
     ClassNode node = read(bytes);
-    require(hasMarker(node, "strategicJumpDestinationFirst"), "destination-first marker missing after composition");
-    require(hasMarker(node, PATCH_ID), "destination-index marker missing");
+    require(hasMarker(node, PLAN_PATCH_ID), "unified destination-plan marker missing after composition");
+    require(!hasMarker(node, "strategicJumpDestinationFirst") && !hasMarker(node, PATCH_ID),
+        "unified plan emitted legacy member markers");
+    require(
+        node.fields.stream()
+            .anyMatch(field -> field.name.equals(PLAN_MASK_FIELD) && field.value instanceof Integer mask && mask == 3),
+        "unified plan mask field is missing or wrong");
     MethodNode method = method(node, "findNearestSafeJumpPoint", METHOD_DESC);
     require(count(method, Opcodes.INVOKEINTERFACE, "com/fs/starfarer/api/campaign/LocationAPI", "getEntities",
         "(Ljava/lang/Class;)Ljava/util/List;") == 0, "vanilla full jump-point source remains");
@@ -117,7 +124,7 @@ public final class StrategicJumpDestinationIndexTransformerTest {
         "expired-plan deferral has no immediate early return");
   }
 
-  private static void assertStrategicAtomicFailure(PrepatcherConfig config, byte[] strategic) {
+  private static void assertStrategicAtomicFailure(PrepatcherConfig config, byte[] strategic, byte[] jumpPoint) {
     ClassNode malformed = read(strategic);
     MethodNode update = method(malformed, "updateJumpPlanTo", UPDATE_DESC);
     AbstractInsnNode zero = null;
@@ -139,22 +146,17 @@ public final class StrategicJumpDestinationIndexTransformerTest {
     System.clearProperty(INDEX_STATUS);
     byte[] result = new PrepatcherTransformer(config).transform(null, PrepatcherTransformer.STRATEGIC_MODULE, null,
         null, write(malformed));
-    require(result != null, "destination-first was rolled back with a non-matching index member");
-    verify(result);
-    ClassNode node = read(result);
-    require(hasMarker(node, "strategicJumpDestinationFirst"), "destination-first did not survive index-plan rejection");
-    require(!hasMarker(node, PATCH_ID), "destination index marker was published after atomic-plan rejection");
-    MethodNode find = method(node, "findNearestSafeJumpPoint", METHOD_DESC);
-    require(
-        count(find, Opcodes.INVOKEINTERFACE, "com/fs/starfarer/api/campaign/LocationAPI", "getEntities",
-            "(Ljava/lang/Class;)Ljava/util/List;") == 1,
-        "index source was partially rewritten after expiry-member rejection");
-    require(count(find, Opcodes.INVOKESTATIC, HOOKS, "strategicJumpPointsForDestination", INDEX_HOOK_DESC) == 0,
-        "index hook survived atomic-plan rejection");
-    require(count(method(node, "updateJumpPlanTo", UPDATE_DESC), Opcodes.INVOKESTATIC, HOOKS,
-        "strategicJumpDeferExpiredPlan", DEFER_DESC) == 0, "expiry deferral survived atomic-plan rejection");
+    require(result == null, "a non-matching index member left a half-applied destination plan");
     require("SKIPPED_STRUCTURAL".equals(System.getProperty(INDEX_STATUS)),
         "atomic-plan rejection did not report SKIPPED_STRUCTURAL");
+
+    // The retained strategicJumpDestinationIndex id on the topology classes is a
+    // genuinely disjoint surface: a StrategicModule plan rejection does not
+    // touch the JumpPoint member patch, which still applies on its own class.
+    byte[] jumpPointPatched =
+        new PrepatcherTransformer(config).transform(null, PrepatcherTransformer.JUMP_POINT, null, null, jumpPoint);
+    require(jumpPointPatched != null, "JumpPoint index surface was skipped because the StrategicModule plan failed");
+    assertJumpPoint(jumpPointPatched);
   }
 
   private static void assertJumpPoint(byte[] bytes) {

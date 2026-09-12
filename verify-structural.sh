@@ -283,9 +283,9 @@ else
 fi
 
 java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
-  com.starsector.prepatcher.agent.StrategicJumpDestinationFirstTransformerTest \
+  com.starsector.prepatcher.agent.StrategicJumpDestinationPlanTransformerTest \
   "$VERIFICATION_CONFIG" "$CORE/starfarer_obf.jar" \
-  2>&1 | tee "$REPORT_DIR/strategic-jump-destination-first.txt"
+  2>&1 | tee "$REPORT_DIR/strategic-jump-destination-plan.txt"
 
 java "${EXPORTS[@]}" -cp "$CLASS_PATH" \
   com.starsector.prepatcher.agent.StrategicJumpDestinationIndexTransformerTest \
