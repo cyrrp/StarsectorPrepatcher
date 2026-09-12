@@ -531,21 +531,23 @@ final class Allocations {
   }
 
   /**
-   * Returns the immediate stores for scratch-borrow hooks without requiring the JVM local
+   * Returns the immediate stores for original scratch allocations without requiring the JVM local
    * slot to remain single-assignment for the entire method. Large vanilla methods such as
    * Ship.advance reuse local slots after the scratch collection's lifetime. Mutation hooks
-   * therefore use {@link #sourceIsActiveHookLocal} to prove that a call is still inside the
-   * borrow-to-reassignment lease instead of rejecting safe slot reuse.
+   * are matched with {@link Flow#sourceIsActiveHookLocal} before allocation replacement to prove
+   * that a call is inside the allocation-to-reassignment lifetime. Replacement preserves these stores.
    */
-  static List<VarInsnNode> storedHookResultStoresRelaxed(MethodNode method, AllocationSpec spec) {
-    List<MethodInsnNode> hooks = calls(method, Opcodes.INVOKESTATIC, HOOKS, spec.hookName(), spec.hookDesc());
-    if (hooks.size() != spec.expected()) {
-      throw mismatch(spec.hookName() + " expected " + spec.expected() + " stored results but found " + hooks.size());
+  static List<VarInsnNode> storedAllocationResultStoresRelaxed(MethodNode method, AllocationSpec spec) {
+    List<MethodInsnNode> constructors =
+        calls(method, Opcodes.INVOKESPECIAL, spec.type(), "<init>", spec.constructorDesc());
+    if (constructors.size() != spec.expected()) {
+      throw mismatch(
+          spec.hookName() + " expected " + spec.expected() + " stored results but found " + constructors.size());
     }
     List<VarInsnNode> result = new ArrayList<>();
     Set<Integer> locals = new HashSet<>();
-    for (MethodInsnNode hook : hooks) {
-      AbstractInsnNode next = nextMeaningful(hook);
+    for (MethodInsnNode constructor : constructors) {
+      AbstractInsnNode next = nextMeaningful(constructor);
       if (!(next instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE) {
         throw mismatch(spec.hookName() + " result is not stored directly in one local");
       }

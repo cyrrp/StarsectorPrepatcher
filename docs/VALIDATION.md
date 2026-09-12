@@ -180,6 +180,12 @@ Review не считается завершённым без следующих 
 - mutation tests: missing, duplicate, foreign marker, broken first site и broken last site; для
   inline guards отдельно меняются receiver, entry prologue, branch target и порядок исходных
   checks при сохранённом marker;
+- `ScratchReceiverApplicabilityTest` запускается из `StructuralCompatibilityTest`: в
+  `DynamicParticleGroup.advance(F)V` receiver единственного `List.add` заменяется с `ALOAD`
+  на `ACONST_NULL`; в `Ship.advance(F)V` аналогично меняется receiver `Set.add`. Оба candidate
+  должны пройти `BasicVerifier`, получить точный structural refusal из `match` и сохранить
+  serialized bytes. Positive controls подтверждают read-only match исходного класса, успешные
+  mutate/verify и полный already-applied state. Эти проверки обязательны под `verify-structural.sh`.
 - exact-count verifier: один missing/unchanged/duplicate target обязан завершать процесс ненулевым кодом;
 - lifecycle GC: несколько load/reset generations, reentrant reset, normal/exceptional unwind и GC без
   «лечащего» обращения к cache;

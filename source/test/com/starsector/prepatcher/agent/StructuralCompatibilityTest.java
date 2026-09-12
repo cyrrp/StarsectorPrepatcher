@@ -134,6 +134,7 @@ public final class StructuralCompatibilityTest {
     runExp6OwnershipTests(config, Path.of(args[1]).toAbsolutePath().normalize());
     runInlineFastPathNegativeTests(config, Path.of(args[1]).toAbsolutePath().normalize());
     runExp8OwnershipTests(config, suppliedJars);
+    ScratchReceiverApplicabilityTest.main(new String[0]);
     System.out.println(
         "OK negative-tests map-renderStuff missing ambiguous missing-allocation unrelated-call unrelated-change"
             + " marker-ownership scratch-scope-tamper wrapper-tamper wrapper-metadata idempotency"

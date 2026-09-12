@@ -2052,7 +2052,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
 
 
   private static final class DynamicParticleCleanup implements StructuredPatch<DynamicParticleCleanup.Plan> {
-    private record Plan(String owner, MethodNode advance, MethodInsnNode removeAll) {
+    private record Plan(String owner, MethodNode advance, MethodInsnNode removeAll, MethodInsnNode add) {
     }
 
     @Override
@@ -2069,7 +2069,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       MethodInsnNode removeAll =
           calls(advance, Opcodes.INVOKEVIRTUAL, "java/util/LinkedList", "removeAll", "(Ljava/util/Collection;)Z")
               .get(0);
-      return Match.plan(new Plan(node.name, advance, removeAll));
+      return Match.plan(new Plan(node.name, advance, removeAll, matchParticleScratchMutation(node.name, advance)));
     }
 
     @Override
@@ -2077,7 +2077,11 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       installScratchScope(plan.owner(), plan.advance(), "DynamicParticleGroup.advance");
       int changed = replaceStoredSimpleAllocations(plan.owner(), plan.advance(), "java/util/ArrayList", "()V",
           "borrowParticleRemovalList", "()Ljava/util/ArrayList;", 1, true, "DynamicParticleGroup expired list");
-      changed += replaceParticleScratchMutation(plan.owner(), plan.advance());
+      makeStatic(plan.add(), HOOKS, "scratchListAdd", "(Ljava/util/List;Ljava/lang/Object;)Z");
+      if (particleScratchMutationState(plan.advance()) != PatchState.PATCHED) {
+        throw mismatch("particle scratch peak hook postcondition failed");
+      }
+      changed++;
       makeStatic(plan.removeAll(), HOOKS, "removeExpiredParticles", "(Ljava/util/LinkedList;Ljava/util/Collection;)Z");
       changed++;
 
@@ -2106,10 +2110,10 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
     return original ? PatchState.ORIGINAL : PatchState.PATCHED;
   }
 
-  private static int replaceParticleScratchMutation(String owner, MethodNode method) {
+  private static MethodInsnNode matchParticleScratchMutation(String owner, MethodNode method) {
     AllocationSpec spec =
         new AllocationSpec("java/util/ArrayList", "()V", "borrowParticleRemovalList", "()Ljava/util/ArrayList;", 1);
-    List<VarInsnNode> stores = storedHookResultStoresRelaxed(method, spec);
+    List<VarInsnNode> stores = storedAllocationResultStoresRelaxed(method, spec);
     if (stores.size() != 1) throw mismatch("particle scratch local is ambiguous");
     Frame<SourceValue>[] frames = sourceFrames(owner, method);
     List<MethodInsnNode> raw = calls(method, Opcodes.INVOKEINTERFACE, "java/util/List", "add", "(Ljava/lang/Object;)Z");
@@ -2117,11 +2121,7 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
         || !sourceIsActiveHookLocal(method, raw.get(0), receiverSource(method, raw.get(0), frames), stores)) {
       throw mismatch("particle scratch List.add receiver changed");
     }
-    makeStatic(raw.get(0), HOOKS, "scratchListAdd", "(Ljava/util/List;Ljava/lang/Object;)Z");
-    if (particleScratchMutationState(method) != PatchState.PATCHED) {
-      throw mismatch("particle scratch peak hook postcondition failed");
-    }
-    return 1;
+    return raw.get(0);
   }
 
 

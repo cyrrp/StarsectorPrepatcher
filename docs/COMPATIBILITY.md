@@ -469,6 +469,14 @@ ULP fixtures входят в actual-agent regression suite.
   scope с
   очисткой на каждом normal/exceptional exit; catch-all handler получает явный `F_FULL` frame
   с исходными locals.
+- `DynamicParticleGroup.advance(F)V` и `Ship.advance(F)V`: `match` связывает receivers
+  scratch collection calls с непосредственными `ASTORE` исходных allocations до изменения
+  bytecode. Между store и call не допускается повторный `ASTORE` в тот же slot;
+  последующее переиспользование slot разрешено. Particle требует один `List.add`, Ship —
+  три scratch `List.add`, один `Set.add` и один `Set.addAll`; четвёртый vanilla `List.add`
+  Ship остаётся без замены. Plan содержит подтверждённые call sites. Неподходящий receiver,
+  включая `ACONST_NULL` при сохранённых counts, отвергается в `match` без изменения candidate.
+  Для исходных game jars transformation и postconditions остаются прежними.
 - Два internal-read sites `HyperspaceTerrainPlugin` могут читать `HyperspaceAutomaton.cells`
   напрямую только для точного vanilla runtime owner и только когда buffer-reuse transformation
   подтверждена. Для subclass, неподтверждённого patch state или недоступного поля используется

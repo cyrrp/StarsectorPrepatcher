@@ -20,7 +20,8 @@ import static com.starsector.prepatcher.agent.Names.*;
 import static com.starsector.prepatcher.agent.Queries.*;
 
 final class ShipAdvanceScratch implements StructuredPatch<ShipAdvanceScratch.Plan> {
-  record Plan(String owner, MethodNode advance) {
+  record Plan(String owner, MethodNode advance, List<MethodInsnNode> listAdds, MethodInsnNode setAdd,
+      MethodInsnNode setAddAll) {
   }
 
   @Override
@@ -36,7 +37,7 @@ final class ShipAdvanceScratch implements StructuredPatch<ShipAdvanceScratch.Pla
     if (state == PatchState.PATCHED) {
       return Match.alreadyApplied("all Ship.advance scratch hooks and scopes satisfy their postconditions");
     }
-    return Match.plan(new Plan(node.name, advance));
+    return Match.plan(matchShipScratchMutations(node.name, advance));
   }
 
   @Override
@@ -48,7 +49,15 @@ final class ShipAdvanceScratch implements StructuredPatch<ShipAdvanceScratch.Pla
     changed += replaceStoredSimpleAllocations(plan.owner(), plan.advance(), "java/util/HashSet", "()V", "borrowShipSet",
         "()Ljava/util/HashSet;", 2, false, "Ship.advance command/weapon sets");
     changed += replaceShipCommandSnapshot(plan.owner(), plan.advance());
-    changed += replaceShipScratchMutations(plan.owner(), plan.advance());
+    for (MethodInsnNode call : plan.listAdds()) {
+      makeStatic(call, HOOKS, "scratchListAdd", "(Ljava/util/List;Ljava/lang/Object;)Z");
+    }
+    makeStatic(plan.setAdd(), HOOKS, "scratchSetAdd", "(Ljava/util/Set;Ljava/lang/Object;)Z");
+    makeStatic(plan.setAddAll(), HOOKS, "scratchSetAddAll", "(Ljava/util/Set;Ljava/util/Collection;)Z");
+    if (shipScratchMutationState(plan.advance()) != PatchState.PATCHED) {
+      throw mismatch("Ship.advance scratch mutation hook postcondition failed");
+    }
+    changed += 5;
 
     PatchReport report = new PatchReport();
     report.add("reusable Ship.advance command/group collections", changed);
@@ -83,43 +92,42 @@ final class ShipAdvanceScratch implements StructuredPatch<ShipAdvanceScratch.Pla
     return original ? PatchState.ORIGINAL : PatchState.PATCHED;
   }
 
-  private static int replaceShipScratchMutations(String owner, MethodNode method) {
+  private static Plan matchShipScratchMutations(String owner, MethodNode method) {
     AllocationSpec listSpec =
         new AllocationSpec("java/util/ArrayList", "()V", "borrowShipList", "()Ljava/util/ArrayList;", 3);
     AllocationSpec setSpec =
         new AllocationSpec("java/util/HashSet", "()V", "borrowShipSet", "()Ljava/util/HashSet;", 2);
-    List<VarInsnNode> listStores = storedHookResultStoresRelaxed(method, listSpec);
-    List<VarInsnNode> setStores = storedHookResultStoresRelaxed(method, setSpec);
+    List<VarInsnNode> listStores = storedAllocationResultStoresRelaxed(method, listSpec);
+    List<VarInsnNode> setStores = storedAllocationResultStoresRelaxed(method, setSpec);
     if (listStores.size() != 3 || setStores.size() != 2) {
       throw mismatch("Ship.advance scratch mutation locals are ambiguous");
     }
     Frame<SourceValue>[] frames = sourceFrames(owner, method);
-    int changed = 0;
-    for (MethodInsnNode call : new ArrayList<>(
-        calls(method, Opcodes.INVOKEINTERFACE, "java/util/List", "add", "(Ljava/lang/Object;)Z"))) {
+    List<MethodInsnNode> listAdds = new ArrayList<>();
+    List<MethodInsnNode> setAdds = new ArrayList<>();
+    List<MethodInsnNode> setAddAlls = new ArrayList<>();
+    for (MethodInsnNode call : calls(method, Opcodes.INVOKEINTERFACE, "java/util/List", "add",
+        "(Ljava/lang/Object;)Z")) {
       SourceValue receiver = receiverSource(method, call, frames);
       if (!sourceIsActiveHookLocal(method, call, receiver, listStores)) continue;
-      makeStatic(call, HOOKS, "scratchListAdd", "(Ljava/util/List;Ljava/lang/Object;)Z");
-      changed++;
+      listAdds.add(call);
     }
-    for (MethodInsnNode call : new ArrayList<>(
-        calls(method, Opcodes.INVOKEINTERFACE, "java/util/Set", "add", "(Ljava/lang/Object;)Z"))) {
+    for (MethodInsnNode call : calls(method, Opcodes.INVOKEINTERFACE, "java/util/Set", "add",
+        "(Ljava/lang/Object;)Z")) {
       SourceValue receiver = receiverSource(method, call, frames);
       if (!sourceIsActiveHookLocal(method, call, receiver, setStores)) continue;
-      makeStatic(call, HOOKS, "scratchSetAdd", "(Ljava/util/Set;Ljava/lang/Object;)Z");
-      changed++;
+      setAdds.add(call);
     }
-    for (MethodInsnNode call : new ArrayList<>(
-        calls(method, Opcodes.INVOKEINTERFACE, "java/util/Set", "addAll", "(Ljava/util/Collection;)Z"))) {
+    for (MethodInsnNode call : calls(method, Opcodes.INVOKEINTERFACE, "java/util/Set", "addAll",
+        "(Ljava/util/Collection;)Z")) {
       SourceValue receiver = receiverSource(method, call, frames);
       if (!sourceIsActiveHookLocal(method, call, receiver, setStores)) continue;
-      makeStatic(call, HOOKS, "scratchSetAddAll", "(Ljava/util/Set;Ljava/util/Collection;)Z");
-      changed++;
+      setAddAlls.add(call);
     }
-    if (changed != 5 || shipScratchMutationState(method) != PatchState.PATCHED) {
-      throw mismatch("Ship.advance scratch mutation hook postcondition failed");
+    if (listAdds.size() != 3 || setAdds.size() != 1 || setAddAlls.size() != 1) {
+      throw mismatch("Ship.advance scratch mutation receivers changed");
     }
-    return changed;
+    return new Plan(owner, method, List.copyOf(listAdds), setAdds.get(0), setAddAlls.get(0));
   }
 
   private static int replaceShipCommandSnapshot(String owner, MethodNode method) {
