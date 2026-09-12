@@ -97,7 +97,16 @@ metadata: AoTD economy completion → scheduler bridge → fork compatibility �
 presentation → structural plan → read-only UI economy → Market/Trade/Industry mutation →
 detached-cargo contract → market-open localization → commodity-data contract → AoTD market-open
 context → AoTD detached-cargo context → direct-market observer. Вход класса сохраняется до
-завершения всей атомарной цепочки; необработанное исключение откатывает класс к этому входу.
+завершения всей атомарной цепочки; явный отказ stage или необработанное исключение откатывает класс
+к этому входу. Stage возвращает invocation-local outcome; system properties служат диагностикой,
+а не каналом управления. Повторный отказ с той же причиной не становится успехом. Вложенный вызов
+pipeline имеет отдельную транзакцию, параллельные вызовы не разделяют её состояние.
+
+Статусы и сообщения об успехе публикуются после решения транзакции. При откате предварительные
+`APPLIED`/`READY`/`PASSED` заменяются на `ROLLED_BACK_PIPELINE`, успехи не увеличивают счётчики;
+причина отказавшего stage сохраняется. `ALREADY_APPLIED` описывает существующий входной post-state.
+У самостоятельного transformer вне pipeline диагностика публикуется при его завершении записи.
+Java-27 normalization остаётся входом транзакции, поэтому откат не возвращает незаконные имена.
 
 В vanilla запуске game classes и startup-agent доступны через system loader. Старый Faster
 Rendering делает `com.genir.renderer.loaders.AppClassLoader` system/game loader и child-load'ит
@@ -150,8 +159,10 @@ known-disabled независимо от этого loader-исключения.
    точную wiring-схему wrapper и неизменность public/protected API.
 7. Сериализовать, повторно прочитать класс и прогнать все concrete methods через
    `Analyzer<BasicValue>` + `BasicVerifier`.
-8. Только после успеха передать новые bytes следующему transformer. При ошибке пропускается
-   один патч; ранее подтверждённые изменения того же класса сохраняются.
+8. Передать проверенный candidate следующему stage. Внутри structural envelope отказ отдельного
+   патча сохраняет предыдущий candidate; во внешнем `OrderedTransformerPipeline` явный отказ stage
+   откатывает всю объявленную class-level группу. Успехи structural envelope до завершения этой
+   транзакции предварительны.
 
 Строковые литералы, constant-pool ordering, line numbers и debug metadata не являются частью
 решения о совместимости. Поэтому переводы и изменения несвязанных методов не блокируют патчи.
@@ -354,11 +365,13 @@ without linking its child loader to a runtime helper.
 
 В `logs/prepatcher.log` для каждого загруженного target выводится один из статусов:
 
-- `APPLIED` — контракт совпал, результат верифицирован;
+- `APPLIED` — контракт совпал, результат верифицирован и принят содержащей его транзакцией;
 - `ALREADY_APPLIED` — точный postcondition уже присутствует;
 - `SKIPPED_STRUCTURAL` — site отсутствует, неоднозначен или конфликтует;
 - `SKIPPED_LOADER` — target и typed runtime принадлежат разным classloader'ам; target оставлен vanilla;
-- `SKIPPED_ERROR` — анализ/сериализация завершились непредвиденной ошибкой.
+- `SKIPPED_ERROR` — анализ/сериализация завершились непредвиденной ошибкой;
+- `ROLLED_BACK_PIPELINE` — предварительный успех отменён из-за отказа содержащей его class-level
+  транзакции; возвращены её входные bytes.
 
 Количество применённых и пропущенных патчей также экспортируется в system properties и
 показывается bootstrap-плагином в `starsector.log`.

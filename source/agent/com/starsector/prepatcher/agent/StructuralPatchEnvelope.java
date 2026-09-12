@@ -159,7 +159,7 @@ final class StructuralPatchEnvelope {
     } catch (Throwable ex) {
       int count = skippedPatches.incrementAndGet();
       System.setProperty("starsector.prepatcher.skippedPatches", Integer.toString(count));
-      recordStatus(state.className, patchId, "SKIPPED_ERROR");
+      recordRejectedStatus(state.className, patchId, "SKIPPED_ERROR");
       PrepatcherLog.error(
           "SKIPPED_ERROR " + patchId + " in " + state.className + "; the preceding class bytes remain active.", ex);
     }
@@ -168,7 +168,7 @@ final class StructuralPatchEnvelope {
   void recordStructuralSkip(String className, String patchId, String reason) {
     int count = skippedPatches.incrementAndGet();
     System.setProperty("starsector.prepatcher.skippedPatches", Integer.toString(count));
-    recordStatus(className, patchId, "SKIPPED_STRUCTURAL");
+    recordRejectedStatus(className, patchId, "SKIPPED_STRUCTURAL");
     PrepatcherLog.warn("SKIPPED_STRUCTURAL " + patchId + " in " + className + ": " + reason);
   }
 
@@ -242,8 +242,10 @@ final class StructuralPatchEnvelope {
   void finalizeAppliedPatches(TransformState state) {
     for (AppliedPatch patch : state.applied) {
       if (!patch.newlyApplied) continue;
-      int count = appliedPatches.incrementAndGet();
-      System.setProperty("starsector.prepatcher.appliedPatches", Integer.toString(count));
+      TransformDiagnostics.onCommit(() -> {
+        int count = appliedPatches.incrementAndGet();
+        System.setProperty("starsector.prepatcher.appliedPatches", Integer.toString(count));
+      });
       recordStatus(state.className, patch.patchId, "APPLIED");
       PrepatcherLog.info("APPLIED " + patch.patchId + " to " + state.className + ": " + patch.detail);
     }
@@ -267,7 +269,7 @@ final class StructuralPatchEnvelope {
     System.setProperty("starsector.prepatcher.skippedPatches", Integer.toString(skipped));
     int failures = compositionFailures.incrementAndGet();
     System.setProperty("starsector.prepatcher.compositionFailures", Integer.toString(failures));
-    recordStatus(state.className, patchId, "SKIPPED_COMPOSITION");
+    recordRejectedStatus(state.className, patchId, "SKIPPED_COMPOSITION");
     recordStatus(state.className, "composition", "FAILED");
     PrepatcherLog.warn("SKIPPED_COMPOSITION " + patchId + " in " + state.className + ": " + reason
         + "; the preceding class bytes remain active.");
@@ -283,13 +285,19 @@ final class StructuralPatchEnvelope {
     System.setProperty("starsector.prepatcher.skippedPatches", Integer.toString(skipped));
     int failures = compositionFailures.incrementAndGet();
     System.setProperty("starsector.prepatcher.compositionFailures", Integer.toString(failures));
-    recordStatus(className, "presentationStructuralComposition", "SKIPPED_COMPOSITION");
+    recordRejectedStatus(className, "presentationStructuralComposition", "SKIPPED_COMPOSITION");
     recordStatus(className, "composition", "FAILED");
     PrepatcherLog.warn("SKIPPED_COMPOSITION presentation/structural contract in " + className + ": "
         + failureMessage(failure) + "; incoming class bytes remain active.");
   }
 
+  static void recordRejectedStatus(String className, String patchId, String status) {
+    TransformDiagnostics.reject("starsector.prepatcher.patchStatus." + className.replace('/', '.') + "." + patchId,
+        status);
+  }
+
   static void recordStatus(String className, String patchId, String status) {
-    System.setProperty("starsector.prepatcher.patchStatus." + className.replace('/', '.') + "." + patchId, status);
+    TransformDiagnostics.status("starsector.prepatcher.patchStatus." + className.replace('/', '.') + "." + patchId,
+        status);
   }
 }

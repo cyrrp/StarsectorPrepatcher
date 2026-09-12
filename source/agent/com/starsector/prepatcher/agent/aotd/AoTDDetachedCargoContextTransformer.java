@@ -1,5 +1,7 @@
 package com.starsector.prepatcher.agent.aotd;
 
+import com.starsector.prepatcher.agent.TransformDiagnostics;
+
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
@@ -36,7 +38,7 @@ public final class AoTDDetachedCargoContextTransformer implements ClassFileTrans
       ProtectionDomain protectionDomain, byte[] classfileBuffer) {
     if (!enabled || !TARGET.equals(className)) return null;
     if (!runtimeVisibleFrom(loader)) {
-      record("SKIPPED_LOADER");
+      recordRejected("SKIPPED_LOADER");
       disableRuntime("detached Cargo target loader cannot see runtime bridge");
       PrepatcherLog.warn("AoTD detached-Cargo context not patched: target loader=" + loaderName(loader)
           + ", runtime loader=" + loaderName(runtimeLoader));
@@ -60,19 +62,19 @@ public final class AoTDDetachedCargoContextTransformer implements ClassFileTrans
       byte[] transformed = writer.toByteArray();
       patch.verify(match.plan, read(transformed));
       record("APPLIED");
-      System.setProperty("starsector.prepatcher.aotdUiCallContexts", "ready");
+      TransformDiagnostics.status("starsector.prepatcher.aotdUiCallContexts", "ready");
       PrepatcherLog.info("APPLIED campaignCargoNoGlobalEconomyStep to " + className
           + ": exact fake_market CARGO/LOOT skip + live-market vanilla coalescing + "
           + "owned-AoTD action + original global fallback");
       return transformed;
     } catch (StructuralMismatchException mismatch) {
-      record("SKIPPED_STRUCTURAL");
+      recordRejected("SKIPPED_STRUCTURAL");
       disableRuntime("detached Cargo structural mismatch: " + mismatch.getMessage());
       PrepatcherLog
           .warn("SKIPPED_STRUCTURAL campaignCargoNoGlobalEconomyStep in " + className + ": " + mismatch.getMessage());
       return null;
     } catch (Throwable failure) {
-      record("SKIPPED_ERROR");
+      recordRejected("SKIPPED_ERROR");
       disableRuntime("detached Cargo transformer error: " + failure.getClass().getName());
       PrepatcherLog.error("SKIPPED_ERROR campaignCargoNoGlobalEconomyStep in " + className
           + "; original Cargo behavior remains active.", failure);
@@ -106,9 +108,15 @@ public final class AoTDDetachedCargoContextTransformer implements ClassFileTrans
   }
 
   private static void record(String status) {
-    System.setProperty("starsector.prepatcher.campaignCargoNoGlobalEconomyStepPatch", status);
-    System.setProperty("starsector.prepatcher.aotdDetachedCargoContextPatch", status);
-    System.setProperty("starsector.prepatcher.lootTransferNoGlobalEconomyStepPatch", status);
+    TransformDiagnostics.status("starsector.prepatcher.campaignCargoNoGlobalEconomyStepPatch", status);
+    TransformDiagnostics.status("starsector.prepatcher.aotdDetachedCargoContextPatch", status);
+    TransformDiagnostics.status("starsector.prepatcher.lootTransferNoGlobalEconomyStepPatch", status);
+  }
+
+  private static void recordRejected(String status) {
+    TransformDiagnostics.reject("starsector.prepatcher.campaignCargoNoGlobalEconomyStepPatch", status);
+    TransformDiagnostics.reject("starsector.prepatcher.aotdDetachedCargoContextPatch", status);
+    TransformDiagnostics.reject("starsector.prepatcher.lootTransferNoGlobalEconomyStepPatch", status);
   }
 
   private static String loaderName(ClassLoader loader) {

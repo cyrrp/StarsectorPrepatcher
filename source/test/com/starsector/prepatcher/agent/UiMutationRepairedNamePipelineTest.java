@@ -13,6 +13,9 @@ import org.objectweb.asm.tree.analysis.BasicValue;
 import org.objectweb.asm.tree.analysis.BasicVerifier;
 
 import java.nio.file.Path;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.jar.JarFile;
@@ -39,6 +42,7 @@ public final class UiMutationRepairedNamePipelineTest {
       exerciseOverviewRoute(route, overview);
     }
     assertLateCargoFailureRollsBack(trade);
+    OrderedTransformerPipelineTest.run();
     System.out.println("OK UI mutation pipeline raw/JAVA27_STANDARD/FR_AGENT_CHAIN/"
         + "FR_PREDEFINE_BRIDGE aliases, composition and atomic rollback");
   }
@@ -93,17 +97,33 @@ public final class UiMutationRepairedNamePipelineTest {
     byte[] damaged = changeFakeMarketLiteral(raw);
     byte[] compatible = IllegalObfuscatedMemberNameRepair.repair(TRADE, damaged);
     OrderedTransformerPipeline pipeline = tradePipeline(Route.JAVA27_STANDARD);
-    byte[] result = pipeline.transform(null, TRADE, null, null, damaged);
-    require(Arrays.equals(result, compatible), "late Cargo rejection did not roll back to the repaired pipeline input");
-    ClassNode rolledBack = read(result);
-    require(field(rolledBack, "spp$patched$tradeMarketMutationRefresh") == null,
-        "trade marker survived atomic pipeline rollback");
-    require(field(rolledBack, "spp$patched$aotdDetachedCargoContext") == null,
-        "Cargo marker survived atomic pipeline rollback");
-    require("SKIPPED_STRUCTURAL".equals(System.getProperty(CARGO_STATUS)), "late Cargo rejection status changed");
-    String failure = System.getProperty(pipelineFailure(TRADE), "");
-    require(failure.contains("stage 'AoTD detached-cargo context'") && failure.contains("=SKIPPED_STRUCTURAL"),
-        "late Cargo rejection did not publish the pipeline failure");
+    for (int attempt = 0; attempt < 2; attempt++) {
+      ByteArrayOutputStream log = new ByteArrayOutputStream();
+      PrintStream stderr = System.err;
+      byte[] result;
+      try (PrintStream capture = new PrintStream(log, true, StandardCharsets.UTF_8)) {
+        System.setErr(capture);
+        result = pipeline.transform(null, TRADE, null, null, damaged);
+      } finally {
+        System.setErr(stderr);
+      }
+      String messages = log.toString(StandardCharsets.UTF_8);
+      stderr.print(messages);
+      require(!messages.contains("[INFO] APPLIED"), "rolled-back candidate published an APPLIED log");
+      require(Arrays.equals(result, compatible),
+          "late Cargo rejection did not roll back to the repaired pipeline input");
+      ClassNode rolledBack = read(result);
+      require(field(rolledBack, "spp$patched$tradeMarketMutationRefresh") == null,
+          "trade marker survived atomic pipeline rollback");
+      require(field(rolledBack, "spp$patched$aotdDetachedCargoContext") == null,
+          "Cargo marker survived atomic pipeline rollback");
+      require("ROLLED_BACK_PIPELINE".equals(System.getProperty(TradeMarketMutationTransformer.statusProperty())),
+          "rolled-back Trade patch still reports APPLIED");
+      require("SKIPPED_STRUCTURAL".equals(System.getProperty(CARGO_STATUS)), "late Cargo rejection status changed");
+      String failure = System.getProperty(pipelineFailure(TRADE), "");
+      require(failure.contains("stage 'AoTD detached-cargo context'") && failure.contains("=SKIPPED_STRUCTURAL"),
+          "late Cargo rejection did not publish the pipeline failure");
+    }
   }
 
   private static OrderedTransformerPipeline tradePipeline(Route route) {

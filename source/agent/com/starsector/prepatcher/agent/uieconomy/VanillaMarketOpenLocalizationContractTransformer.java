@@ -1,5 +1,7 @@
 package com.starsector.prepatcher.agent.uieconomy;
 
+import com.starsector.prepatcher.agent.TransformDiagnostics;
+
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.ClassNode;
@@ -53,7 +55,7 @@ public final class VanillaMarketOpenLocalizationContractTransformer implements C
         patch.verify(match.plan, node);
         economyReady = true;
         if (!publishRuntime(true, true, null)) {
-          record(className, "SKIPPED_RUNTIME");
+          recordRejected(className, "SKIPPED_RUNTIME");
           return null;
         }
       } else {
@@ -64,7 +66,7 @@ public final class VanillaMarketOpenLocalizationContractTransformer implements C
         patch.verify(match.plan, node);
         reachReady = true;
         if (!publishRuntime(false, true, null)) {
-          record(className, "SKIPPED_RUNTIME");
+          recordRejected(className, "SKIPPED_RUNTIME");
           return null;
         }
       }
@@ -75,7 +77,7 @@ public final class VanillaMarketOpenLocalizationContractTransformer implements C
       reject(className, "SKIPPED_STRUCTURAL", mismatch.getMessage());
     } catch (Throwable failure) {
       publishRuntime(ECONOMY.equals(className), false, failure.getClass().getName());
-      record(className, "SKIPPED_ERROR");
+      recordRejected(className, "SKIPPED_ERROR");
       recordAggregate();
       PrepatcherLog.error("SKIPPED_ERROR vanilla market-open localization " + "contract for " + className
           + "; original global steps remain active", failure);
@@ -87,7 +89,7 @@ public final class VanillaMarketOpenLocalizationContractTransformer implements C
     if (ECONOMY.equals(className)) economyReady = false;
     else reachReady = false;
     publishRuntime(ECONOMY.equals(className), false, reason);
-    record(className, status);
+    recordRejected(className, status);
     recordAggregate();
     PrepatcherLog.warn(status + " vanilla market-open localization contract for " + className + ": " + reason
         + "; original global steps remain active");
@@ -111,12 +113,17 @@ public final class VanillaMarketOpenLocalizationContractTransformer implements C
 
   private void recordAggregate() {
     String status = economyReady && reachReady ? "READY" : "AWAITING";
-    System.setProperty("starsector.prepatcher.vanillaMarketOpenLocalizationContract", status);
+    TransformDiagnostics.status("starsector.prepatcher.vanillaMarketOpenLocalizationContract", status);
   }
 
   private static void record(String className, String status) {
     String suffix = ECONOMY.equals(className) ? "Economy" : "Reach";
-    System.setProperty("starsector.prepatcher.vanillaMarketOpenLocalization" + suffix + "Contract", status);
+    TransformDiagnostics.status("starsector.prepatcher.vanillaMarketOpenLocalization" + suffix + "Contract", status);
+  }
+
+  private static void recordRejected(String className, String status) {
+    String suffix = ECONOMY.equals(className) ? "Economy" : "Reach";
+    TransformDiagnostics.reject("starsector.prepatcher.vanillaMarketOpenLocalization" + suffix + "Contract", status);
   }
 
   private boolean runtimeVisibleFrom(ClassLoader loader) {

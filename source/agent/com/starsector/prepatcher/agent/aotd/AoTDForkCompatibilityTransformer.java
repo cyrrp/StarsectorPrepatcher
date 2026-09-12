@@ -1,5 +1,7 @@
 package com.starsector.prepatcher.agent.aotd;
 
+import com.starsector.prepatcher.agent.TransformDiagnostics;
+
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
@@ -93,11 +95,11 @@ public final class AoTDForkCompatibilityTransformer implements ClassFileTransfor
           .info("APPLIED " + PATCH_ID + " to " + className + ": exact setAssignedWonder construction boundary");
       return transformed;
     } catch (StructuralMismatch mismatch) {
-      record("SKIPPED_STRUCTURAL");
+      recordRejected("SKIPPED_STRUCTURAL");
       PrepatcherLog.warn("SKIPPED_STRUCTURAL " + PATCH_ID + " in " + className + ": " + mismatch.getMessage());
       return null;
     } catch (Throwable failure) {
-      record("SKIPPED_ERROR");
+      recordRejected("SKIPPED_ERROR");
       PrepatcherLog.error("SKIPPED_ERROR " + PATCH_ID + " in " + className + "; fork class remains unchanged.",
           failure);
       return null;
@@ -309,8 +311,13 @@ public final class AoTDForkCompatibilityTransformer implements ClassFileTransfor
   }
 
   private static void record(String status) {
-    System.setProperty("starsector.prepatcher.patchStatus." + CONSTRUCTION_SITE.replace('/', '.') + "." + PATCH_ID,
-        status);
+    TransformDiagnostics
+        .status("starsector.prepatcher.patchStatus." + CONSTRUCTION_SITE.replace('/', '.') + "." + PATCH_ID, status);
+  }
+
+  private static void recordRejected(String status) {
+    TransformDiagnostics
+        .reject("starsector.prepatcher.patchStatus." + CONSTRUCTION_SITE.replace('/', '.') + "." + PATCH_ID, status);
   }
 
   /** Avoids Class.forName on a not-yet-defined optional mod class. */

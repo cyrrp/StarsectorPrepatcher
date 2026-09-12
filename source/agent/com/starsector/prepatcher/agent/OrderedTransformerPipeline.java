@@ -6,9 +6,6 @@ import java.security.ProtectionDomain;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.TreeMap;
 
 /**
  * One explicitly ordered transformation chain. Every stage sees the bytes returned by
@@ -62,66 +59,47 @@ final class OrderedTransformerPipeline implements ClassFileTransformer {
     byte[] current = original;
     byte[] pipelineInput = original;
     boolean changed = false;
-    try {
-      if (repairIllegalNamesInAgentPipeline) {
-        byte[] compatible = IllegalObfuscatedMemberNameRepair.repair(className, current);
-        if (compatible != current) {
-          current = compatible;
-          changed = true;
+    try (TransformDiagnostics.Transaction diagnostics = TransformDiagnostics.begin(className)) {
+      try {
+        if (repairIllegalNamesInAgentPipeline) {
+          byte[] compatible = IllegalObfuscatedMemberNameRepair.repair(className, current);
+          if (compatible != current) {
+            current = compatible;
+            changed = true;
+          }
         }
-      }
-      // Java 27 compatibility normalization is a prerequisite to the patch group,
-      // not one of its optional mutations. A later patch failure rolls back to
-      // these loadable bytes instead of restoring an invalid obfuscated class.
-      pipelineInput = current;
-      // The complete chain is an atomic class-level group. Its input is retained
-      // until every ordered member has had a chance to validate its post-state.
-      for (Stage stage : stages) {
-        Map<String, String> statusesBefore = diagnosticStatuses();
-        byte[] next = stage.transformer().transform(loader, className, classBeingRedefined, protectionDomain, current);
-        String rejection = newlyRejectedStatus(statusesBefore);
-        if (rejection != null) {
-          throw new IllegalStateException("stage '" + stage.name() + "' published " + rejection);
+        // Java 27 compatibility normalization is a prerequisite to the patch group,
+        // not one of its optional mutations. A later patch failure rolls back to
+        // these loadable bytes instead of restoring an invalid obfuscated class.
+        pipelineInput = current;
+        // The complete chain is an atomic class-level group. Its input is retained
+        // until every ordered member has had a chance to validate its post-state.
+        for (Stage stage : stages) {
+          diagnostics.beginStage();
+          byte[] next =
+              stage.transformer().transform(loader, className, classBeingRedefined, protectionDomain, current);
+          TransformDiagnostics.StageResult result = diagnostics.finishStage(next);
+          String rejection = result.rejection();
+          if (rejection != null) {
+            throw new IllegalStateException("stage '" + stage.name() + "' published " + rejection);
+          }
+          if (result.bytes() != null) {
+            current = result.bytes();
+            changed = true;
+          }
         }
-        if (next != null) {
-          current = next;
-          changed = true;
-        }
-      }
-      return changed || !nullWhenUnchanged ? current : null;
-    } catch (Throwable failure) {
-      PrepatcherLog.error("Atomic transformer pipeline rolled back " + className
-          + " to its input bytes after an ordered-stage failure.", failure);
-      System.setProperty("starsector.prepatcher.pipelineFailure." + className.replace('/', '.'),
-          failure.getClass().getSimpleName() + ":" + String.valueOf(failure.getMessage()));
-      if (nullWhenUnchanged && pipelineInput == original) return null;
-      return pipelineInput;
-    }
-  }
-
-  private static Map<String, String> diagnosticStatuses() {
-    Map<String, String> result = new TreeMap<>();
-    Properties properties = System.getProperties();
-    synchronized (properties) {
-      for (Map.Entry<Object, Object> entry : properties.entrySet()) {
-        if (entry.getKey() instanceof String key && key.startsWith("starsector.prepatcher.")
-            && entry.getValue() instanceof String value) {
-          result.put(key, value);
-        }
+        diagnostics.commit();
+        return changed || !nullWhenUnchanged ? current : null;
+      } catch (Throwable failure) {
+        diagnostics.rollback();
+        PrepatcherLog.error("Atomic transformer pipeline rolled back " + className
+            + " to its input bytes after an ordered-stage failure.", failure);
+        System.setProperty("starsector.prepatcher.pipelineFailure." + className.replace('/', '.'),
+            failure.getClass().getSimpleName() + ":" + String.valueOf(failure.getMessage()));
+        if (nullWhenUnchanged && pipelineInput == original) return null;
+        return pipelineInput;
       }
     }
-    return result;
-  }
-
-  private static String newlyRejectedStatus(Map<String, String> before) {
-    Map<String, String> after = diagnosticStatuses();
-    for (Map.Entry<String, String> entry : after.entrySet()) {
-      String value = entry.getValue();
-      if (value.startsWith("SKIPPED_") && !value.equals(before.get(entry.getKey()))) {
-        return entry.getKey() + "=" + value;
-      }
-    }
-    return null;
   }
 
   record Stage(String name, ClassFileTransformer transformer) {
