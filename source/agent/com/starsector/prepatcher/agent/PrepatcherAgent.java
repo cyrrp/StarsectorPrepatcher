@@ -29,7 +29,7 @@ import com.starsector.prepatcher.agent.uieconomy.VanillaDetachedCargoEconomyCont
 import com.starsector.prepatcher.agent.uieconomy.VanillaMarketOpenLocalizationContractTransformer;
 
 public final class PrepatcherAgent {
-  public static final String VERSION = "0.18.4";
+  public static final String VERSION = "0.19.0";
   private PrepatcherAgent() {}
 
   public static void premain(String agentArgs, Instrumentation instrumentation) {

@@ -52,14 +52,14 @@ fi
 printf '%s\n' \
   'Manifest-Version: 1.0' \
   'Implementation-Title: StarsectorPrepatcher Agent' \
-  'Implementation-Version: 0.18.4' \
+  'Implementation-Version: 0.19.0' \
   'Premain-Class: com.starsector.prepatcher.agent.PrepatcherAgent' \
   'Can-Redefine-Classes: false' \
   'Can-Retransform-Classes: true' '' > "$BUILD/agent.mf"
 printf '%s\n' \
   'Manifest-Version: 1.0' \
   'Implementation-Title: StarsectorPrepatcher Bootstrap' \
-  'Implementation-Version: 0.18.4' '' > "$BUILD/bootstrap.mf"
+  'Implementation-Version: 0.19.0' '' > "$BUILD/bootstrap.mf"
 jar --create --file "$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" --manifest "$BUILD/agent.mf" --date=2026-01-01T00:00:00Z -C "$BUILD/agent-classes" .
 jar --create --file "$MOD_ROOT/jars/StarsectorPrepatcherBootstrap.jar" --manifest "$BUILD/bootstrap.mf" --date=2026-01-01T00:00:00Z -C "$BUILD/bootstrap-classes" .
 
