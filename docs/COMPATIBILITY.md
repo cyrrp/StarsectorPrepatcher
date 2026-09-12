@@ -315,7 +315,7 @@ one successful `RETURN`. The hook is inserted immediately before that return, af
 game passes. Any changed call count, ordering, exception region, tail or loader relationship leaves
 the method unchanged and keeps capability bit 11 unavailable.
 
-The injected call itself is O(1): `StarsectorPrepatcherRuntimeBridge` invokes one `Runnable`
+The injected call itself is O(1): `StarsectorPrepatcherAotdContract` invokes one `Runnable`
 registered by the exact V10 fork and never enumerates the economy. A missing callback or
 `LinkageError` clears only `ECONOMY_RESTORE_COORDINATION`; all failures are contained so no fork
 exception can escape into Starsector's save/load lifecycle. The bridge stores no market or campaign
