@@ -7,10 +7,7 @@ import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TypeInsnNode;
-import org.objectweb.asm.tree.VarInsnNode;
 
-import java.util.ArrayList;
-import java.util.List;
 
 import static com.starsector.prepatcher.agent.bytecode.Contract.*;
 import com.starsector.prepatcher.agent.patch.Match;

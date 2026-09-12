@@ -4,7 +4,6 @@ import com.fs.starfarer.api.campaign.JumpPointAPI;
 import com.fs.starfarer.api.campaign.LocationAPI;
 import com.fs.starfarer.api.campaign.SectorEntityToken;
 import com.fs.starfarer.api.campaign.StarSystemAPI;
-import com.fs.starfarer.campaign.CampaignEngine;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;

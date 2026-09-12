@@ -1,6 +1,5 @@
 package com.starsector.prepatcher.agent.bytecode;
 
-import java.util.LinkedHashMap;
 
 public final class Names {
   public static final String HOOKS = "com/fs/starfarer/api/StarsectorPrepatcherHooks";

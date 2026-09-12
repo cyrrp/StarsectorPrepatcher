@@ -8,7 +8,6 @@ import org.objectweb.asm.tree.MethodNode;
 
 import java.util.List;
 
-import static com.starsector.prepatcher.agent.bytecode.Contract.mismatch;
 import static com.starsector.prepatcher.agent.bytecode.Queries.calls;
 import static com.starsector.prepatcher.agent.uieconomy.IndustryMutationContract.field;
 import static com.starsector.prepatcher.agent.uieconomy.IndustryMutationContract.requireConcreteInstance;

@@ -1,6 +1,5 @@
 package com.fs.starfarer.api;
 
-import com.fs.starfarer.campaign.CampaignEngine;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;

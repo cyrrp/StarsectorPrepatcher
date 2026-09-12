@@ -2,7 +2,6 @@ package com.fs.starfarer.api;
 
 import com.fs.starfarer.campaign.CampaignEngine;
 import com.fs.starfarer.campaign.econ.Economy;
-import com.fs.starfarer.campaign.econ.Market;
 import com.fs.starfarer.campaign.econ.reach.ReachEconomy;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 import java.lang.ref.WeakReference;

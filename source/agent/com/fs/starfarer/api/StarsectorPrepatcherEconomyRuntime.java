@@ -6,8 +6,6 @@ import com.fs.starfarer.api.campaign.econ.CommodityOnMarketAPI;
 import com.fs.starfarer.api.impl.campaign.ids.Strings;
 import com.fs.starfarer.api.impl.campaign.submarkets.LocalResourcesSubmarketPlugin;
 import com.fs.starfarer.campaign.econ.CommodityOnMarket;
-import com.fs.starfarer.campaign.econ.Economy;
-import com.fs.starfarer.campaign.econ.Market;
 import com.fs.starfarer.campaign.econ.reach.CommodityMarketData;
 import com.fs.starfarer.campaign.econ.reach.ReachEconomy;
 import com.fs.starfarer.api.util.Misc;

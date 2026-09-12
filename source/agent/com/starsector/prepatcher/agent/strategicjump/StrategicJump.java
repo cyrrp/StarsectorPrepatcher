@@ -11,7 +11,6 @@ import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 import org.objectweb.asm.tree.analysis.Frame;
 import org.objectweb.asm.tree.analysis.SourceValue;
-import java.util.List;
 
 import static com.starsector.prepatcher.agent.bytecode.Contract.*;
 import static com.starsector.prepatcher.agent.bytecode.Flow.*;
