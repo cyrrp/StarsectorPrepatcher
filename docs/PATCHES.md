@@ -301,6 +301,31 @@ state получает fail-open `SKIPPED_STRUCTURAL` без частичног�
 
 ### Campaign cache maintenance and scratch retention
 
+`StarsectorPrepatcherCampaignCaches` owns the generation boundary, transition token and maintenance
+schedule. It closes the generation before calling component-owned `campaignLifecycleReset` methods,
+outside the lifecycle monitor. Intel, Map, CampaignListeners, RouteIndex, EconomyRuntime, Scheduler
+and Scratch detach their own roots; the coordinator never replaces another component's maps or
+thread-local state. Detachment does not acquire cache/state monitors or clear objects still used by
+an interrupted callback. Completion keeps the existing identity/token checks before activating the
+new generation. Scratch alone preserves open-lease depth in its replacement container so generated
+finally hooks can drain it without clearing the interrupted method's collections.
+
+The scheduler owns its market/queue maps, pending debt, campaign tick/batch counters and replay
+contexts together. Campaign reset detaches those roots and removes the current thread's tick, batch,
+replay-stack and invocation contexts. Capability registration, the delivery sequence, construction
+reflection metadata and diagnostic observation context retain their process lifetime. Other
+threads' scheduler tick/batch contexts remain guarded by the existing generation checks.
+
+`StarsectorPrepatcherMarketDiagnostics` owns reporting, sampling and observer aggregates. It consumes
+immutable construction-probe and market-state snapshots and scalar direct-call observations; it
+never receives a mutable scheduler state or a campaign object. Baseline capture copies each market
+under its state monitor, without flushing debt, then releases the monitor before formatting or file
+I/O. A snapshot is a detached observation, not a globally atomic view of every market. Scheduler
+callback execution, debt ordering and reentrant origin/depth restoration remain in the scheduler.
+Intel, Map and Scratch likewise publish numeric gauge snapshots to Metrics instead of exposing their
+mutable cache roots. Cache maintenance stays with the owner; the shared LRU helper consumes only a
+read-only last-access/active-user contract.
+
 `campaignCacheMaintenanceTick()` выполняется на campaign thread из `CampaignEngine.advance()` и
 внутренне ограничивается `cache.maintenanceIntervalMs`. Перед сериализацией pre-save barrier вызывает
 `runCacheMaintenance(true)` до market-debt flush; forced sweep игнорирует только throttle, но сохраняет

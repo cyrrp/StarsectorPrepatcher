@@ -19,9 +19,17 @@ import java.util.WeakHashMap;
 /** Campaign route/pathfinding indexes for jump points and star systems. */
 final class StarsectorPrepatcherRouteIndex {
 
-  static volatile Map<LocationAPI, RouteJumpIndex> ROUTE_JUMP_INDEXES =
+  /** Detach campaign roots without taking cache/state monitors or clearing in-flight objects. */
+  static void campaignLifecycleReset() {
+    ROUTE_JUMP_INDEXES = Collections.synchronizedMap(new WeakHashMap<>());
+    ROUTE_SYSTEM_INDEXES = Collections.synchronizedMap(new WeakHashMap<>());
+  }
+
+
+  private static volatile Map<LocationAPI, RouteJumpIndex> ROUTE_JUMP_INDEXES =
       Collections.synchronizedMap(new WeakHashMap<>());
-  static volatile Map<Object, RouteSystemIndex> ROUTE_SYSTEM_INDEXES = Collections.synchronizedMap(new WeakHashMap<>());
+  private static volatile Map<Object, RouteSystemIndex> ROUTE_SYSTEM_INDEXES =
+      Collections.synchronizedMap(new WeakHashMap<>());
   // Route/pathfinding indexes.
   //
   // O0Oo.getNextStep() and getLastLegDistance() preserve all of their original

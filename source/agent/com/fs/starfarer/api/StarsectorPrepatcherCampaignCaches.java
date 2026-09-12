@@ -5,11 +5,9 @@ import com.fs.starfarer.campaign.econ.Economy;
 import com.fs.starfarer.campaign.econ.reach.ReachEconomy;
 import com.starsector.prepatcher.agent.PrepatcherConfig;
 import java.lang.ref.WeakReference;
-import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.WeakHashMap;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongSupplier;
 
@@ -131,53 +129,20 @@ final class StarsectorPrepatcherCampaignCaches {
     if (clearMismatchedGeneration) clearCampaignCaches();
   }
   private static void clearCampaignCaches() {
-    // Detach each process-lifetime root instead of waiting for its monitor.
-    // In-flight calls retain only their local old map/slot; epoch checks stop
-    // them from publishing into a current generation, and the detached roots
-    // become collectible when those calls end.
-    StarsectorPrepatcherIntelRuntime.INTEL_CACHE = Collections.synchronizedMap(new WeakHashMap<>());
-    StarsectorPrepatcherIntelRuntime.LABEL_INDEXES = new IdentityHashMap<>();
-    StarsectorPrepatcherIntelRuntime.INTEL_ENTITY_INDEXES = new IdentityHashMap<>();
-    StarsectorPrepatcherMapRuntime.HIT_CACHES = new IdentityHashMap<>();
-    StarsectorPrepatcherMapRuntime.SAMPLE_CLEAR_TIMES = new WeakHashMap<>();
-    StarsectorPrepatcherCampaignListeners.CAMPAIGN_LISTENER_STATES = Collections.synchronizedMap(new WeakHashMap<>());
-    StarsectorPrepatcherRouteIndex.ROUTE_JUMP_INDEXES = Collections.synchronizedMap(new WeakHashMap<>());
-    StarsectorPrepatcherRouteIndex.ROUTE_SYSTEM_INDEXES = Collections.synchronizedMap(new WeakHashMap<>());
+    // The generation is already closed. Owners detach roots without acquiring
+    // cache/state monitors; in-flight calls retain their old local objects.
+    StarsectorPrepatcherIntelRuntime.campaignLifecycleReset();
+    StarsectorPrepatcherMapRuntime.campaignLifecycleReset();
+    StarsectorPrepatcherCampaignListeners.campaignLifecycleReset();
+    StarsectorPrepatcherRouteIndex.campaignLifecycleReset();
     StarsectorPrepatcherCoreWorldsRuntime.campaignLifecycleReset();
     StarsectorPrepatcherHyperspaceHooks.campaignLifecycleReset(campaignCacheGeneration);
     StarsectorPrepatcherStrategicJumpIndex.reset();
-    StarsectorPrepatcherEconomyRuntime.ECONOMY_LOCATION_STATES = Collections.synchronizedMap(new WeakHashMap<>());
-    StarsectorPrepatcherMarketScheduler.MARKET_SCHEDULER_STATES =
-        new StarsectorPrepatcherMarketScheduler.WeakIdentityMap<>();
-    StarsectorPrepatcherMarketScheduler.CONSTRUCTION_QUEUE_OWNERS =
-        new StarsectorPrepatcherMarketScheduler.WeakIdentityMap<>();
-    StarsectorPrepatcherIntelRuntime.COMM_RELAY_SYSTEM_INDEXES = Collections.synchronizedMap(new WeakHashMap<>());
-    StarsectorPrepatcherMarketScheduler.marketSchedulerSimulationTick = 0L;
-    StarsectorPrepatcherMarketScheduler.marketSchedulerRenderBatch = 0L;
+    StarsectorPrepatcherEconomyRuntime.campaignLifecycleReset();
+    StarsectorPrepatcherMarketScheduler.campaignLifecycleReset();
     cacheMaintenanceGeneration = -1L;
     nextCacheMaintenanceNanos = 0L;
-    StarsectorPrepatcherMarketScheduler.MARKET_SCHEDULER_DEBT_SEQUENCE.set(0L);
-    StarsectorPrepatcherMarketScheduler.MARKET_SCHEDULER_TICK.remove();
-    StarsectorPrepatcherMarketScheduler.MARKET_SCHEDULER_BATCH.remove();
-    StarsectorPrepatcherMarketScheduler.MARKET_ADVANCE_BATCH_STACK.remove();
-    StarsectorPrepatcherMarketScheduler.MARKET_ADVANCE_INVOCATION.remove();
-    StarsectorPrepatcherMapRuntime.nebulaCacheSlot = new StarsectorPrepatcherMapRuntime.NebulaCacheSlot();
-    // A lifecycle callback may be re-entrant inside a transformed scratch
-    // scope. Detach the old Scratch without clearing collections that the
-    // interrupted vanilla method still owns, then mirror only its open-lease
-    // depth into a fresh container. Subsequent hooks cannot append campaign
-    // objects to the detached container, and the replacement removes itself
-    // when the interrupted scope's generated finally hook completes.
-    StarsectorPrepatcherScratch.SCRATCH_GAUGES = StarsectorPrepatcherScratch.ScratchGaugeSnapshot.EMPTY;
-    StarsectorPrepatcherScratch.Scratch previous = StarsectorPrepatcherScratch.SCRATCH.get();
-    int openLeases = previous.scopeDepth;
-    StarsectorPrepatcherScratch.SCRATCH.remove();
-    if (openLeases > 0) {
-      StarsectorPrepatcherScratch.Scratch replacement = new StarsectorPrepatcherScratch.Scratch();
-      replacement.scopeDepth = openLeases;
-      replacement.removeWhenIdle = true;
-      StarsectorPrepatcherScratch.SCRATCH.set(replacement);
-    }
+    StarsectorPrepatcherScratch.campaignLifecycleReset();
   }
   static boolean campaignCachesReady(long generation) {
     return campaignCacheGenerationActive && campaignCacheGeneration == generation && activeCampaignEngine.get() != null;
@@ -267,13 +232,13 @@ final class StarsectorPrepatcherCampaignCaches {
     if (ttlMs <= 0) return false;
     return now - lastAccess >= millisToNanos(ttlMs);
   }
-  static <K, V> boolean evictIdleAndLruForInsert(IdentityHashMap<K, V> map, K protectedOwner, long now, int idleTtlMs,
-      int limit, LongAdder idleCounter, LongAdder limitCounter) {
+  static <K, V extends CacheOwner> boolean evictIdleAndLruForInsert(IdentityHashMap<K, V> map, K protectedOwner,
+      long now, int idleTtlMs, int limit, LongAdder idleCounter, LongAdder limitCounter) {
     Iterator<Map.Entry<K, V>> iterator = map.entrySet().iterator();
     while (iterator.hasNext()) {
       Map.Entry<K, V> entry = iterator.next();
-      if (entry.getKey() != protectedOwner && ownerActiveUsers(entry.getValue()) == 0
-          && idleExpired(now, ownerLastAccessNanos(entry.getValue()), idleTtlMs)) {
+      if (entry.getKey() != protectedOwner && entry.getValue().activeUsers() == 0
+          && idleExpired(now, entry.getValue().lastAccessNanos(), idleTtlMs)) {
         iterator.remove();
         idleCounter.increment();
       }
@@ -282,8 +247,8 @@ final class StarsectorPrepatcherCampaignCaches {
     K oldestKey = null;
     long oldestAccess = Long.MAX_VALUE;
     for (Map.Entry<K, V> entry : map.entrySet()) {
-      if (entry.getKey() == protectedOwner || ownerActiveUsers(entry.getValue()) > 0) continue;
-      long access = ownerLastAccessNanos(entry.getValue());
+      if (entry.getKey() == protectedOwner || entry.getValue().activeUsers() > 0) continue;
+      long access = entry.getValue().lastAccessNanos();
       if (oldestKey == null || access < oldestAccess) {
         oldestKey = entry.getKey();
         oldestAccess = access;
@@ -296,18 +261,9 @@ final class StarsectorPrepatcherCampaignCaches {
     }
     return false;
   }
-  private static long ownerLastAccessNanos(Object value) {
-    if (value instanceof StarsectorPrepatcherIntelRuntime.LabelIndex index) return index.lastAccessNanos;
-    if (value instanceof StarsectorPrepatcherIntelRuntime.IntelEntityIndex index) return index.lastAccessNanos;
-    if (value instanceof StarsectorPrepatcherMapRuntime.HitCache cache) return cache.lastAccessNanos;
-    throw new IllegalArgumentException(
-        "Unsupported owner-cache value: " + (value == null ? "null" : value.getClass().getName()));
-  }
-  private static int ownerActiveUsers(Object value) {
-    if (value instanceof StarsectorPrepatcherIntelRuntime.LabelIndex index) return index.activeUsers;
-    if (value instanceof StarsectorPrepatcherIntelRuntime.IntelEntityIndex index) return index.activeUsers;
-    if (value instanceof StarsectorPrepatcherMapRuntime.HitCache cache) return cache.activeUsers;
-    throw new IllegalArgumentException(
-        "Unsupported owner-cache value: " + (value == null ? "null" : value.getClass().getName()));
+  /** Read-only eviction contract; cache owners retain their representation and synchronization. */
+  interface CacheOwner {
+    long lastAccessNanos();
+    int activeUsers();
   }
 }

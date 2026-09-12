@@ -11,7 +11,13 @@ import java.util.WeakHashMap;
 /** Campaign change-listener bookkeeping across map open/close transitions. */
 final class StarsectorPrepatcherCampaignListeners {
 
-  static volatile Map<Object, CampaignListenerState> CAMPAIGN_LISTENER_STATES =
+  /** Detach campaign roots without taking cache/state monitors or clearing in-flight objects. */
+  static void campaignLifecycleReset() {
+    CAMPAIGN_LISTENER_STATES = Collections.synchronizedMap(new WeakHashMap<>());
+  }
+
+
+  private static volatile Map<Object, CampaignListenerState> CAMPAIGN_LISTENER_STATES =
       Collections.synchronizedMap(new WeakHashMap<>());
   // Closed-map campaign bookkeeping.
   //
