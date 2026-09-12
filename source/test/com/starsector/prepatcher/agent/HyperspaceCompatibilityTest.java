@@ -189,7 +189,11 @@ public final class HyperspaceCompatibilityTest {
     byte[] vanilla = source.toByteArray();
     ClassNode node = new ClassNode(Opcodes.ASM8);
     new ClassReader(vanilla).accept(node, 0);
-    if (HyperspacePatches.patchAutomaton(node) != 1) throw new AssertionError("synthetic automaton patch count");
+    AutomatonBufferReuse automatonPatch = new AutomatonBufferReuse();
+    var automatonMatch = automatonPatch.match(node);
+    if (automatonMatch.plan == null || automatonPatch.mutate(automatonMatch.plan).total != 1)
+      throw new AssertionError("synthetic automaton patch count");
+    automatonPatch.verify(automatonMatch.plan, node);
     ClassWriter output = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
     node.accept(output);
     ByteLoader loader = new ByteLoader();

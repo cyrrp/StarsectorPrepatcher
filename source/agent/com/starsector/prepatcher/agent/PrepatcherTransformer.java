@@ -372,24 +372,19 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       case PLANET_SURVEY_PANEL, LUDDIC_PATH_BASE_INTEL, PIRATE_BASE_INTEL, DECIV_TRACKER, PK_CMD ->
         apply(state, "marketScheduler", config.marketScheduler, structured(new CoreMarketEventSynchronization()));
       case HyperspacePatches.BASE_TILED -> {
-        applyHyperspace(state, "hyperspaceViewportBounds", config.hyperspaceViewportBounds, "viewportBounds", 2,
-            HyperspacePatches::patchViewportBounds, HyperspacePatches::countPatchedViewportBounds);
-        applyHyperspace(state, "terrainRandomReuse", config.terrainRandomReuse, "random", 3,
-            HyperspacePatches::patchRandom, HyperspacePatches::countPatchedRandom);
+        apply(state, "hyperspaceViewportBounds", config.hyperspaceViewportBounds,
+            structured(new HyperspaceViewportBounds()));
+        apply(state, "terrainRandomReuse", config.terrainRandomReuse, structured(new TerrainRandomReuse(3)));
       }
       case HyperspacePatches.HYPER_TERRAIN -> {
-        applyHyperspace(state, "skipNoOpTerrainLayer", config.skipNoOpTerrainLayer, "noOpLayer", 1,
-            HyperspacePatches::patchLayers, HyperspacePatches::countPatchedLayers);
-        applyHyperspace(state, "terrainRandomReuse", config.terrainRandomReuse, "random", 1,
-            HyperspacePatches::patchRandom, HyperspacePatches::countPatchedRandom);
-        applyHyperspace(state, "automatonInternalReads", config.automatonBufferReuse, "internalCells", 2,
-            HyperspacePatches::patchAutomatonInternalReads, HyperspacePatches::countPatchedAutomatonInternalReads);
+        apply(state, "skipNoOpTerrainLayer", config.skipNoOpTerrainLayer, structured(new NoOpTerrainLayerSkip()));
+        apply(state, "terrainRandomReuse", config.terrainRandomReuse, structured(new TerrainRandomReuse(1)));
+        apply(state, "automatonInternalReads", config.automatonBufferReuse, structured(new AutomatonInternalReads()));
       }
-      case HyperspacePatches.AUTOMATON -> applyHyperspace(state, "automatonBufferReuse", config.automatonBufferReuse,
-          "automatonBuffers", 1, HyperspacePatches::patchAutomaton, HyperspacePatches::countPatchedAutomaton);
-      case HyperspacePatches.STARFIELD ->
-        applyHyperspace(state, "starfieldCleanupBuffers", config.starfieldCleanupBuffers, "cleanup", 1,
-            HyperspacePatches::patchCleanup, HyperspacePatches::countPatchedCleanup);
+      case HyperspacePatches.AUTOMATON ->
+        apply(state, "automatonBufferReuse", config.automatonBufferReuse, structured(new AutomatonBufferReuse()));
+      case HyperspacePatches.STARFIELD -> apply(state, "starfieldCleanupBuffers", config.starfieldCleanupBuffers,
+          structured(new StarfieldCleanupBuffers()));
       default -> {
         return null;
       }
@@ -471,22 +466,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       PrepatcherLog.error(
           "SKIPPED_ERROR " + patchId + " in " + state.className + "; the preceding class bytes remain active.", ex);
     }
-  }
-
-  private void applyHyperspace(TransformState state, String patchId, boolean enabled, String detail, int expected,
-      CountPatchAction action, CountPatchAction postcondition) {
-    apply(state, patchId, enabled, node -> {
-      if (hasPatchMarker(node, patchId)) {
-        int actual = postcondition.apply(node);
-        requireCount(detail + " postcondition sites", actual, expected);
-        throw already("structural marker and complete postcondition are present");
-      }
-      int actual = action.apply(node);
-      requireCount(detail + " structural sites", actual, expected);
-      PatchReport report = new PatchReport();
-      report.add(detail, actual);
-      return report;
-    });
   }
 
   private void recordStructuralSkip(String className, String patchId, String reason) {
@@ -2162,11 +2141,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       patch.verify(match.plan, node);
       return report;
     };
-  }
-
-  @FunctionalInterface
-  private interface CountPatchAction {
-    int apply(ClassNode node);
   }
 
   @FunctionalInterface

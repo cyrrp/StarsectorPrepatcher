@@ -916,7 +916,7 @@ public final class StructuralCompatibilityTest {
         new PrepatcherTransformer(boundsOnly).transform(null, HyperspacePatches.BASE_TILED, null, null, original);
     require(patched != null, "atomic hyperspace viewport-bounds patch was not applied");
     ClassNode patchedNode = read(patched);
-    require(HyperspacePatches.countPatchedViewportBounds(patchedNode) == 2,
+    require(HyperspaceViewportBounds.countPatchedViewportBounds(patchedNode) == 2,
         "atomic hyperspace viewport-bounds postcondition is incomplete");
     require(hasOwnershipMarker(patchedNode, "hyperspaceViewportBounds"),
         "atomic hyperspace viewport-bounds ownership marker is missing");
@@ -2515,7 +2515,7 @@ public final class StructuralCompatibilityTest {
       case HyperspacePatches.BASE_TILED -> {
         assertHookCount(bytes, HYPERSPACE_HOOKS, "seededRandom", 3);
         ClassNode tiled = read(bytes);
-        require(HyperspacePatches.countPatchedViewportBounds(tiled) == 2,
+        require(HyperspaceViewportBounds.countPatchedViewportBounds(tiled) == 2,
             className + " atomic viewport-bounds postcondition is incomplete");
         require(hasOwnershipMarker(tiled, "hyperspaceViewportBounds"),
             className + " atomic viewport-bounds marker is missing");

@@ -175,11 +175,10 @@ public final class PatchAnchorInventory {
         if (call.getOpcode() == Opcodes.INVOKESPECIAL && call.name.equals("<init>") && call.owner.startsWith(PT + "$")
             && isStructuredPatch(agentClasses.get(call.owner))) {
           windowConstructed.add(call.owner);
-        } else if ((call.name.equals("apply") || call.name.equals("applyHyperspace")) && call.owner.equals(PT)) {
+        } else if (call.name.equals("apply") && call.owner.equals(PT)) {
           // apply(state, patchId, enabled, action): patchId is the last
-          // string before the call; applyHyperspace additionally carries a
-          // trailing label string.
-          int patchIdIndex = call.name.equals("apply") ? windowStrings.size() - 1 : windowStrings.size() - 2;
+          // string before the call.
+          int patchIdIndex = windowStrings.size() - 1;
           String patchId = patchIdIndex >= 0 ? windowStrings.get(patchIdIndex) : "?";
           List<MethodRef> entries = patchIdEntries.computeIfAbsent(patchId, k -> new ArrayList<>());
           entries.addAll(windowHandles);
@@ -265,7 +264,7 @@ public final class PatchAnchorInventory {
         if (resolved != null) caseClasses.add(resolved);
       }
       java.util.regex.Matcher am =
-          java.util.regex.Pattern.compile("apply(?:Hyperspace)?\\(state,\\s*(\"[^\"]+\"|[\\w.$]+)").matcher(body);
+          java.util.regex.Pattern.compile("apply\\(state,\\s*(\"[^\"]+\"|[\\w.$]+)").matcher(body);
       while (am.find()) {
         String patchId = am.group(1).startsWith("\"") ? am.group(1).substring(1, am.group(1).length() - 1)
             : fieldConsts.getOrDefault(PT + "." + am.group(1), am.group(1));
