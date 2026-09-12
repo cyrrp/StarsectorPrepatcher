@@ -406,6 +406,20 @@ ULP fixtures входят в actual-agent regression suite.
   `2000f * mapScale` step после starscape guard. Radar constant не меняется.
 - `EventsPanel.addMissingIconsAndRows`: entity local берётся из результата
   `H.getIntelIconEntity`; missing-list должен быть свежим локальным `ArrayList`.
+- `patch.intelCallbackCache` and `patch.mapHitTest` on class `A` apply only through the unified
+  `mapInteractionPlan` owner. The two member surfaces are genuinely disjoint — the Intel callback
+  site sits in `o00000(Lcom/fs/starfarer/util/A/new;)V` while the hit test owns `OO0000(FFF)` —
+  but they share the class's method inventory: the hit-test member renames `OO0000` and adds the
+  dispatch wrapper, so call-site members must see the preserved original body rather than the
+  wrapper. The two keys form a feature mask; either member may run alone. Both member surfaces are
+  proven on the same incoming bytes, then applied to an isolated candidate in the explicit order
+  callback → hit-test; the combined postcondition covers whichever mask was requested. One
+  ownership marker and a private static final mask commit in a single transaction; a member that
+  cannot match rejects the whole plan, and legacy split markers or unowned partial state are
+  refused rather than adopted. The `intelCallbackCache` patch on `EventsPanel` is a genuinely
+  disjoint surface on a different class and keeps its own id — the regression proving neither can
+  be silently skipped by the other is the class-A plan-rejection check that still transforms
+  `EventsPanel`.
 - `CampaignEngine.advance`: receiver — `this`; backing systems/hyperspace fields выводятся из
   реализации `readdChangeListeners` и передаются hook напрямую.
 - `patch.entityLookupIndexRepair` and `patch.campaignListenerThrottle` share the

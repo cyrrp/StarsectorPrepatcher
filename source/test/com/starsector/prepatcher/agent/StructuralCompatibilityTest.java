@@ -1116,43 +1116,73 @@ public final class StructuralCompatibilityTest {
 
   private static void runNegativeHitTestGroupTests(PrepatcherConfig config, Path jarPath) throws Exception {
     byte[] original;
+    byte[] eventsPanel;
     try (JarFile jar = new JarFile(jarPath.toFile())) {
       original = jar.getInputStream(jar.getJarEntry(PrepatcherTransformer.A + ".class")).readAllBytes();
+      eventsPanel = jar.getInputStream(jar.getJarEntry(PrepatcherTransformer.EVENTS + ".class")).readAllBytes();
     }
     Constructor<PrepatcherConfig> constructor = PrepatcherConfig.class.getDeclaredConstructor(Properties.class);
     constructor.setAccessible(true);
+    String statusKey =
+        "starsector.prepatcher.patchStatus." + PrepatcherTransformer.A.replace('/', '.') + ".mapInteractionPlan";
+
+    // Every non-empty feature mask commits atomically: one marker, one mask
+    // field, and exactly the requested members — no member can be silently
+    // skipped because of the other.
+    for (int mask = 1; mask <= 3; mask++) {
+      boolean intel = (mask & 1) != 0;
+      boolean hitTest = (mask & 2) != 0;
+      Properties properties = new Properties();
+      properties.setProperty("patch.intelCallbackCache", Boolean.toString(intel));
+      properties.setProperty("patch.mapHitTest", Boolean.toString(hitTest));
+      PrepatcherConfig isolated = constructor.newInstance(properties);
+      byte[] patched =
+          new PrepatcherTransformer(isolated).transform(null, PrepatcherTransformer.A, null, null, original);
+      require(patched != null, "map-interaction plan did not apply mask=" + mask);
+      ClassNode patchedNode = read(patched);
+      require(hasOwnershipMarker(patchedNode, "mapInteractionPlan"),
+          "map-interaction plan ownership marker missing mask=" + mask);
+      require(!hasOwnershipMarker(patchedNode, "intelCallbackCache") && !hasOwnershipMarker(patchedNode, "mapHitTest"),
+          "map-interaction plan emitted legacy split markers mask=" + mask);
+      FieldNode maskField = requireField(patchedNode, "smo$mapInteractionPlanMask", "I");
+      require(maskField.value instanceof Integer value && value == mask,
+          "map-interaction plan mask field changed mask=" + mask);
+      require(countHook(patched, "getMapLocationCached") == (intel ? 1 : 0),
+          "map-interaction plan Intel hook count changed mask=" + mask);
+      require(
+          countHook(patched, "borrowHitList") == (hitTest ? 1 : 0)
+              && countHook(patched, "borrowHitPoint") == (hitTest ? 1 : 0)
+              && countHook(patched, "hitTestCached") == (hitTest ? 1 : 0),
+          "map-interaction plan hit-test postcondition is incomplete mask=" + mask);
+      int skippedBefore = integerProperty("starsector.prepatcher.skippedPatches");
+      require(new PrepatcherTransformer(isolated).transform(null, PrepatcherTransformer.A, null, null, patched) == null,
+          "map-interaction plan is not idempotent mask=" + mask);
+      require(integerProperty("starsector.prepatcher.skippedPatches") == skippedBefore,
+          "idempotent map-interaction plan was reported as incompatible mask=" + mask);
+      verifyBytecode(patched);
+    }
 
     Properties hitOnlyProperties = new Properties();
     hitOnlyProperties.setProperty("patch.mapHitTest", "true");
     hitOnlyProperties.setProperty("patch.intelCallbackCache", "false");
     PrepatcherConfig hitOnly = constructor.newInstance(hitOnlyProperties);
-    String statusKey = "starsector.prepatcher.patchStatus." + PrepatcherTransformer.A.replace('/', '.') + ".mapHitTest";
+    byte[] hitOnlyPatched =
+        new PrepatcherTransformer(hitOnly).transform(null, PrepatcherTransformer.A, null, null, original);
+    require(hitOnlyPatched != null, "hit-test-only plan did not apply");
 
-    byte[] patched = new PrepatcherTransformer(hitOnly).transform(null, PrepatcherTransformer.A, null, null, original);
-    require(patched != null, "atomic map hit-test group did not apply");
-    ClassNode patchedNode = read(patched);
-    require(hasOwnershipMarker(patchedNode, "mapHitTest"), "map hit-test ownership marker is missing");
-    require(countHook(patched, "borrowHitList") == 1 && countHook(patched, "borrowHitPoint") == 1
-        && countHook(patched, "hitTestCached") == 1, "map hit-test postcondition is incomplete");
-    verifyBytecode(patched);
-
-    int skippedBefore = integerProperty("starsector.prepatcher.skippedPatches");
-    require(new PrepatcherTransformer(hitOnly).transform(null, PrepatcherTransformer.A, null, null, patched) == null,
-        "map hit-test group is not idempotent");
-    require(integerProperty("starsector.prepatcher.skippedPatches") == skippedBefore,
-        "idempotent map hit-test group was reported as incompatible");
-
-    ClassNode unowned = read(patched);
-    require(unowned.fields.removeIf(field -> field.name.equals("smo$patched$mapHitTest")),
-        "map hit-test marker was not emitted");
+    ClassNode unowned = read(hitOnlyPatched);
+    require(unowned.fields.removeIf(field -> field.name.equals("smo$patched$mapInteractionPlan")),
+        "map-interaction plan marker was not emitted");
+    require(unowned.fields.removeIf(field -> field.name.equals("smo$mapInteractionPlanMask")),
+        "map-interaction plan mask field was not emitted");
     System.clearProperty(statusKey);
     require(
         new PrepatcherTransformer(hitOnly).transform(null, PrepatcherTransformer.A, null, null, write(unowned)) == null,
-        "foreign complete hit-test group was modified");
+        "foreign complete hit-test state was modified");
     require("SKIPPED_STRUCTURAL".equals(System.getProperty(statusKey)),
-        "foreign complete hit-test group was not rejected structurally");
+        "foreign complete hit-test state was not rejected structurally");
 
-    ClassNode unscoped = read(patched);
+    ClassNode unscoped = read(hitOnlyPatched);
     removeScratchScope(
         method(unscoped, "smo$originalHitTest", "(FFF)Lcom/fs/starfarer/api/campaign/SectorEntityToken;"));
     System.clearProperty(statusKey);
@@ -1161,7 +1191,7 @@ public final class StructuralCompatibilityTest {
     require("SKIPPED_STRUCTURAL".equals(System.getProperty(statusKey)),
         "owned hit-test hooks without scope were accepted");
 
-    ClassNode partial = read(patched);
+    ClassNode partial = read(hitOnlyPatched);
     MethodInsnNode pointHook = uniqueHook(partial, "borrowHitPoint");
     pointHook.name = "borrowArrowVector";
     System.clearProperty(statusKey);
@@ -1171,7 +1201,7 @@ public final class StructuralCompatibilityTest {
     require("SKIPPED_STRUCTURAL".equals(System.getProperty(statusKey)),
         "partial hit-test allocation group was accepted");
 
-    ClassNode tamperedWrapper = read(patched);
+    ClassNode tamperedWrapper = read(hitOnlyPatched);
     method(tamperedWrapper, "OO0000", "(FFF)Lcom/fs/starfarer/api/campaign/SectorEntityToken;").instructions
         .insert(new InsnNode(Opcodes.NOP));
     System.clearProperty(statusKey);
@@ -1179,35 +1209,63 @@ public final class StructuralCompatibilityTest {
         write(tamperedWrapper)) == null, "tampered hit-test wrapper was modified");
     require("SKIPPED_STRUCTURAL".equals(System.getProperty(statusKey)), "tampered hit-test wrapper was accepted");
 
-    Properties withIndependentProperties = new Properties();
-    withIndependentProperties.setProperty("patch.mapHitTest", "true");
-    withIndependentProperties.setProperty("patch.intelCallbackCache", "true");
-    PrepatcherConfig withIndependent = constructor.newInstance(withIndependentProperties);
-    byte[] missingAllocation = mutateAHitTest(original, HitMutation.MISSING_HIT_LIST);
-    byte[] missingAllocationResult = new PrepatcherTransformer(withIndependent).transform(null, PrepatcherTransformer.A,
-        null, null, missingAllocation);
-    require(missingAllocationResult != null, "missing hit-list allocation blocked independent A patch");
-    require(countHook(missingAllocationResult, "getMapLocationCached") == 1,
-        "missing hit-list allocation cancelled independent Intel callback patch");
-    require(
-        countHook(missingAllocationResult, "borrowHitList") == 0
-            && countHook(missingAllocationResult, "borrowHitPoint") == 0
-            && countHook(missingAllocationResult, "hitTestCached") == 0,
-        "missing hit-list allocation produced a partial hit-test group");
-    verifyBytecode(missingAllocationResult);
+    // A broken hit-test member surface rejects the whole plan: the Intel
+    // callback member must not survive alone even though its own surface is
+    // intact. Class A has no other patches, so a rejected plan leaves the
+    // class fully untransformed.
+    Properties bothProperties = new Properties();
+    bothProperties.setProperty("patch.mapHitTest", "true");
+    bothProperties.setProperty("patch.intelCallbackCache", "true");
+    PrepatcherConfig both = constructor.newInstance(bothProperties);
+    for (HitMutation mutation : new HitMutation[]{HitMutation.MISSING_HIT_LIST, HitMutation.MISSING_FACTOR_CALL}) {
+      byte[] broken = mutateAHitTest(original, mutation);
+      System.clearProperty(statusKey);
+      require(new PrepatcherTransformer(both).transform(null, PrepatcherTransformer.A, null, null, broken) == null,
+          "broken hit-test member left the Intel callback member applied: " + mutation);
+      require("SKIPPED_STRUCTURAL".equals(System.getProperty(statusKey)),
+          "broken hit-test member did not report SKIPPED_STRUCTURAL: " + mutation);
+    }
 
-    byte[] missingSemantic = mutateAHitTest(original, HitMutation.MISSING_FACTOR_CALL);
-    byte[] missingSemanticResult = new PrepatcherTransformer(withIndependent).transform(null, PrepatcherTransformer.A,
-        null, null, missingSemantic);
-    require(missingSemanticResult != null, "missing hit-test semantic anchor blocked independent A patch");
-    require(countHook(missingSemanticResult, "getMapLocationCached") == 1,
-        "missing hit-test semantic anchor cancelled independent Intel callback patch");
-    require(
-        countHook(missingSemanticResult, "borrowHitList") == 0
-            && countHook(missingSemanticResult, "borrowHitPoint") == 0
-            && countHook(missingSemanticResult, "hitTestCached") == 0,
-        "missing semantic anchor produced a partial hit-test group");
-    verifyBytecode(missingSemanticResult);
+    // Symmetrically, a broken Intel member surface rejects the whole plan:
+    // the hit-test member must not be committed without it.
+    ClassNode brokenIntel = read(original);
+    int renamed = 0;
+    for (MethodNode m : brokenIntel.methods) {
+      for (AbstractInsnNode insn : m.instructions.toArray()) {
+        if (insn instanceof MethodInsnNode call && call.getOpcode() == Opcodes.INVOKEINTERFACE
+            && call.owner.equals("com/fs/starfarer/api/campaign/comm/IntelInfoPlugin")
+            && call.name.equals("getMapLocation")) {
+          call.name = "getMapLocationChanged";
+          renamed++;
+        }
+      }
+    }
+    require(renamed == 1, "Intel getMapLocation call missing in test input");
+    System.clearProperty(statusKey);
+    require(new PrepatcherTransformer(both).transform(null, PrepatcherTransformer.A, null, null,
+        write(brokenIntel)) == null, "broken Intel member left the hit-test member applied alone");
+    require("SKIPPED_STRUCTURAL".equals(System.getProperty(statusKey)),
+        "broken Intel member did not report SKIPPED_STRUCTURAL");
+
+    // The retained intelCallbackCache id on EventsPanel is a genuinely
+    // disjoint surface: a class-A plan rejection does not touch it.
+    byte[] eventsPatched =
+        new PrepatcherTransformer(both).transform(null, PrepatcherTransformer.EVENTS, null, null, eventsPanel);
+    require(eventsPatched != null && countHook(eventsPatched, "getMapLocationCached") == 7,
+        "EventsPanel Intel callback surface was skipped because the class-A plan failed");
+
+    // Legacy split markers are not adopted by the unified owner.
+    for (String legacy : List.of("intelCallbackCache", "mapHitTest")) {
+      ClassNode legacyNode = read(original);
+      legacyNode.fields.add(new FieldNode(Opcodes.ASM8,
+          Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_SYNTHETIC, "smo$patched$" + legacy,
+          "Ljava/lang/String;", null, "StarsectorPrepatcher:patch-v1:" + legacy));
+      System.clearProperty(statusKey);
+      require(new PrepatcherTransformer(both).transform(null, PrepatcherTransformer.A, null, null,
+          write(legacyNode)) == null, "legacy split marker was adopted by the unified plan: " + legacy);
+      require("SKIPPED_STRUCTURAL".equals(System.getProperty(statusKey)),
+          "legacy split marker did not report SKIPPED_STRUCTURAL: " + legacy);
+    }
 
     Properties legacyProperties = new Properties();
     legacyProperties.setProperty("patch.mapHitTest", "false");
@@ -2397,6 +2455,12 @@ public final class StructuralCompatibilityTest {
         expected.put("borrowHitPoint", 1);
         expected.put("getMapLocationCached", 1);
         expected.put("hitTestCached", 1);
+        ClassNode panel = read(bytes);
+        require(hasOwnershipMarker(panel, "mapInteractionPlan"), "A unified map-interaction marker is missing");
+        require(!hasOwnershipMarker(panel, "intelCallbackCache") && !hasOwnershipMarker(panel, "mapHitTest"),
+            "A emitted legacy split map-interaction markers");
+        FieldNode interactionMask = requireField(panel, "smo$mapInteractionPlanMask", "I");
+        require(interactionMask.value instanceof Integer mask && mask == 3, "A map-interaction mask field changed");
       }
       case PrepatcherTransformer.Z -> {
         expected.put("getArrowDataCached", 1);

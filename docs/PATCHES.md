@@ -29,10 +29,10 @@ classfile или JAR не участвует в решении.
 |---|---|---|---|
 | `patch.mapRenderStuff` | map `A.H.renderStuff` | atomic linear reconciliation plus reusable entity/class collections under one scratch scope | all three semantic sites, ownership marker, non-escape contracts and scope must match together; `LinkedHashMap` order and equality-aware fallback remain |
 | `patch.labelSpatialCandidates` | map labels | spatial candidate buckets | original exact overlap checks остаются |
-| `patch.intelCallbackCache` | Intel map locations | short TTL для `getMapLocation` | miss/error вызывает callback |
+| `patch.intelCallbackCache` | `EventsPanel` Intel map locations | short TTL для `getMapLocation` | miss/error вызывает callback; class-A instance belongs to `mapInteractionPlan` |
 | `patch.intelEntityIndex` | Intel synthetic entities | identity index | generation/TTL/fallback |
 | `patch.intelReconciliation` | `EventsPanel.addMissingIconsAndRows` | atomic missing-plugin hash membership plus direct existing-icon candidates under one scratch scope | both semantic sites, scope and ownership marker must match together; vanilla equality and full-scan fallback remain |
-| `patch.mapHitTest` | map `A.OO0000(FFF)` hit test | atomic reusable hit list/point plus bounded exact-result cache wrapper | original method, two non-escaping allocations, one scratch scope, wrapper and vanilla fallback must match together |
+| `patch.intelCallbackCache` + `patch.mapHitTest` | class-A `o00000(A/new;)` Intel callback site и `A.OO0000(FFF)` hit test | one atomic `mapInteractionPlan`: short-TTL `getMapLocation` cache plus reusable hit list/point and bounded exact-result cache wrapper | both keys form a feature mask; either member may run alone; the two member surfaces are disjoint methods on one class and commit or roll back together; original method, two non-escaping allocations, one scratch scope, wrapper and vanilla fallback must match together |
 | `patch.systemNebulaCache` | map construction | immutable system metadata cache | synthetic entities создаются заново |
 | `patch.sampleCacheClearThrottle` | map construction | suppress rapid repeated clear | configurable interval |
 | `patch.gridLineCap` | huge sector map | dynamic grid spacing | визуальный LOD only |

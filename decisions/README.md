@@ -21,6 +21,7 @@
 | [D-TEMPMOD-AGGRESSIVE-SEMANTICS.md](D-TEMPMOD-AGGRESSIVE-SEMANTICS.md) | Допустимое расхождение с vanilla в expiry scheduler | ACTIVE |
 | [D-PATCH-SHAPE.md](D-PATCH-SHAPE.md) | Форма патча: доказательство контракта до мутации | ACTIVE |
 | [D-PRESENTATION-ENVELOPE.md](D-PRESENTATION-ENVELOPE.md) | Отдельная оболочка presentation-трансформера | ACTIVE |
+| [D-MERGE-ORDERED-GROUPS.md](D-MERGE-ORDERED-GROUPS.md) | Пересекающиеся поверхности объединяются в атомарные планы, а не упорядочиваются | ACTIVE |
 
 ## Шаблон
 
