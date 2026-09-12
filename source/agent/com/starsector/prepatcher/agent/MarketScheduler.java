@@ -16,6 +16,18 @@ import static com.starsector.prepatcher.agent.Names.*;
 import static com.starsector.prepatcher.agent.Queries.*;
 
 final class MarketScheduler {
+  static final int MARKET_SCHEDULER_COMPONENT_ENGINE = 1;
+  static final int MARKET_SCHEDULER_COMPONENT_ECONOMY = 2;
+  static final int MARKET_SCHEDULER_COMPONENT_ENTITY = 4;
+  static final int MARKET_SCHEDULER_COMPONENT_SAVE = 8;
+  static final int MARKET_SCHEDULER_COMPONENT_BATCH_PROTOCOL = 16;
+  static final int MARKET_SCHEDULER_COMPONENT_MARKET_SEMANTICS = 32;
+  static final int MARKET_SCHEDULER_COMPONENT_MILITARY_BASE = 64;
+  static final int MARKET_SCHEDULER_COMPONENT_LIONS_GUARD = 128;
+  static final int MARKET_SCHEDULER_COMPONENT_RECENT_UNREST = 256;
+  static final int MARKET_SCHEDULER_COMPONENT_BASE_INDUSTRY = 512;
+  static final int MARKET_SCHEDULER_COMPONENT_CONSTRUCTION_QUEUE = 1024;
+
   static PatchState marketSchedulerRegistrationState(ClassNode node, int component, String label) {
     List<MethodNode> initializers = methods(node, "<clinit>", "()V");
     if (initializers.size() > 1) { throw mismatch(label + " has duplicate class initializers"); }

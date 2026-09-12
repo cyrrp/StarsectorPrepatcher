@@ -21,6 +21,8 @@ import static com.starsector.prepatcher.agent.Queries.*;
 
 final class PersistentState {
   static final String PERSISTENT_STATE_DESC = "Ljava/lang/Object;";
+  static final String ECONOMY_PERSISTENT_STATE_FIELD = "smo$economyMarketsSnapshotState";
+  static final String ECONOMY_PERSISTENT_ACCESSOR = "smo$borrowPersistentMarketsSnapshot";
 
   static int persistentStateAccess() {
     return Opcodes.ACC_PRIVATE | Opcodes.ACC_TRANSIENT | Opcodes.ACC_SYNTHETIC;
