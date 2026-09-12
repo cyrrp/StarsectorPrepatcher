@@ -129,15 +129,6 @@ final class PersistentState {
     return count;
   }
 
-  static void insertPersistentMarkAfterUniqueCall(MethodNode method, int opcode, String callOwner, String callName,
-      String callDesc, String owner, String stateField, String label) {
-    MethodInsnNode call = only(calls(method, opcode, callOwner, callName, callDesc), label);
-    AbstractInsnNode anchor = call;
-    AbstractInsnNode next = nextMeaningful(call);
-    if (next != null && next.getOpcode() == Opcodes.POP) anchor = next;
-    insertPersistentMarkAfter(method, anchor, owner, stateField);
-  }
-
   static void insertPersistentMarkAfter(MethodNode method, AbstractInsnNode anchor, String owner, String stateField) {
     InsnList mark = new InsnList();
     mark.add(new VarInsnNode(Opcodes.ALOAD, 0));

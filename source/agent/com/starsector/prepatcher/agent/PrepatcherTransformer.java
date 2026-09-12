@@ -64,17 +64,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
 
   private static final String CORE_WORLDS_PATCH_ID = "coreWorldsExtentCache";
 
-  private static final int MARKET_SCHEDULER_COMPONENT_ENGINE = 1;
-  private static final int MARKET_SCHEDULER_COMPONENT_ECONOMY = 2;
-  private static final int MARKET_SCHEDULER_COMPONENT_ENTITY = 4;
-  private static final int MARKET_SCHEDULER_COMPONENT_SAVE = 8;
-  private static final int MARKET_SCHEDULER_COMPONENT_BATCH_PROTOCOL = 16;
-  private static final int MARKET_SCHEDULER_COMPONENT_MARKET_SEMANTICS = 32;
-  private static final int MARKET_SCHEDULER_COMPONENT_MILITARY_BASE = 64;
-  private static final int MARKET_SCHEDULER_COMPONENT_LIONS_GUARD = 128;
-  private static final int MARKET_SCHEDULER_COMPONENT_RECENT_UNREST = 256;
-  private static final int MARKET_SCHEDULER_COMPONENT_BASE_INDUSTRY = 512;
-  private static final int MARKET_SCHEDULER_COMPONENT_CONSTRUCTION_QUEUE = 1024;
   private static final String AOTD_DEFICIT_PATCH_ID = "aotdCleanDeficitPath";
 
 
@@ -1140,14 +1129,6 @@ public final class PrepatcherTransformer implements ClassFileTransformer {
       if (cursor == end) break;
     }
     requireCount("Logger.info calls in startup block " + literal, infoCalls, 1);
-  }
-
-
-  private static MethodNode findMethod(ClassNode node, AbstractInsnNode target) {
-    for (MethodNode method : node.methods) {
-      if (method.instructions.indexOf(target) >= 0) return method;
-    }
-    throw mismatch("instruction is not owned by the target class");
   }
 
 

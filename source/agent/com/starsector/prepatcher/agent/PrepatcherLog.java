@@ -11,13 +11,11 @@ import java.time.Instant;
 public final class PrepatcherLog {
   private static final Object LOCK = new Object();
   private static volatile BufferedWriter writer;
-  private static volatile Path logPath;
 
   private PrepatcherLog() {}
 
   public static void initialize(Path path) {
     synchronized (LOCK) {
-      logPath = path;
       try {
         Files.createDirectories(path.getParent());
         writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8, StandardOpenOption.CREATE,
@@ -28,8 +26,6 @@ public final class PrepatcherLog {
       }
     }
   }
-
-  public static Path getLogPath() { return logPath; }
 
   public static void info(String message) {
     write("INFO", message, null);

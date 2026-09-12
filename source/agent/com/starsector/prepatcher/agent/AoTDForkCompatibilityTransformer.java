@@ -45,7 +45,6 @@ final class AoTDForkCompatibilityTransformer implements ClassFileTransformer {
   private static final String MARKER_FIELD = "smo$patched$aotdConstructionStartBoundary";
   private static final String MARKER_VALUE = "StarsectorPrepatcher:aotd-construction-start-v1";
 
-  private static final int MUTATION_INDUSTRY_STRUCTURE = 1 << 1;
   private static final int DIRTY_STRUCTURE = 1;
   private static final int DIRTY_INDUSTRIES = 1 << 1;
   private static final int DIRTY_DERIVED_ECONOMY = 1 << 3;

@@ -987,15 +987,6 @@ public final class FastForwardPresentationTransformer implements ClassFileTransf
     }
   }
 
-  private static MethodInsnNode uniqueEither(MethodNode method, CallKey first, CallKey second, String what) {
-    List<MethodInsnNode> found = new ArrayList<>();
-    for (AbstractInsnNode insn : method.instructions.toArray()) {
-      if (insn instanceof MethodInsnNode call && (matches(call, first) || matches(call, second))) found.add(call);
-    }
-    if (found.size() != 1) throw mismatch(method.name + method.desc + ": " + what + " is ambiguous: " + found.size());
-    return found.get(0);
-  }
-
   private static MethodInsnNode uniqueCall(MethodNode method, int opcode, String owner, String name, String desc,
       String what) {
     List<MethodInsnNode> found = calls(method, opcode, owner, name, desc);
