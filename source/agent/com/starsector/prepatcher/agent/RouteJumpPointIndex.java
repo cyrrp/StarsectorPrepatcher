@@ -16,9 +16,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-import com.starsector.prepatcher.agent.PrepatcherTransformer.Match;
-import com.starsector.prepatcher.agent.PrepatcherTransformer.PatchReport;
-import com.starsector.prepatcher.agent.PrepatcherTransformer.StructuredPatch;
 
 import static com.starsector.prepatcher.agent.Allocations.*;
 import static com.starsector.prepatcher.agent.Contract.*;

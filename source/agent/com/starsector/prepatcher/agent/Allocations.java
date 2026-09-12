@@ -241,6 +241,34 @@ final class Allocations {
     return original.size();
   }
 
+  /**
+   * Read-only twin of {@link #replaceSnapshotAllocationGroup}: proves the same original/patched
+   * allocation and use-contract decisions without touching the method. {@code scopeInstalled}
+   * carries the caller's proven scope state so the "hooks without scope" rejection keeps the
+   * same trigger as the mutating path.
+   */
+  static PatchState snapshotAllocationGroupState(String owner, MethodNode method, AllocationSpec spec,
+      boolean scopeInstalled, String label) {
+    List<SnapshotAllocationPlan> original = snapshotAllocationPlans(owner, method, spec);
+    List<SnapshotHookPlan> patched = snapshotHookPlans(method, spec);
+    boolean originalState = original.size() == spec.expected() && patched.isEmpty();
+    boolean patchedState = original.isEmpty() && patched.size() == spec.expected();
+    if (patchedState) {
+      if (scopeInstalled) { throw mismatch(label + " hooks exist without their required scratch scope"); }
+      for (int i = 0; i < patched.size(); i++) {
+        requireSnapshotUseContract(owner, method, patched.get(i).store(), expectedSnapshotIterators(spec.hookName(), i),
+            label);
+      }
+      return PatchState.PATCHED;
+    }
+    if (!originalState) { throw mismatch(label + " has mixed, missing, or ambiguous allocation/hook sites"); }
+    for (int i = 0; i < original.size(); i++) {
+      requireSnapshotUseContract(owner, method, original.get(i).store(), expectedSnapshotIterators(spec.hookName(), i),
+          label);
+    }
+    return PatchState.ORIGINAL;
+  }
+
   static List<SnapshotAllocationPlan> snapshotAllocationPlans(String owner, MethodNode method, AllocationSpec spec) {
     Frame<SourceValue>[] frames = sourceFrames(owner, method);
     List<SnapshotAllocationPlan> result = new ArrayList<>();
