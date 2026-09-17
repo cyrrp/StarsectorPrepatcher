@@ -159,11 +159,11 @@ public final class OrderedTransformerPipelineTest {
   }
 
   private static byte[] apply(OrderedTransformerPipeline pipeline, String name) {
-    return pipeline.transform(null, name, null, null, INPUT);
+    return pipeline.transform(OrderedTransformerPipelineTest.class.getClassLoader(), name, null, null, INPUT);
   }
 
   private static OrderedTransformerPipeline pipeline(OrderedTransformerPipeline.Stage... stages) {
-    return new OrderedTransformerPipeline(List.of(stages), null, false, false);
+    return new OrderedTransformerPipeline(List.of(stages), OrderedTransformerPipelineTest.class.getClassLoader(), false, false);
   }
 
   private static OrderedTransformerPipeline.Stage stage(String label, Body body) {

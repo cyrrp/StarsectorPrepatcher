@@ -103,7 +103,7 @@ public final class UiMutationRepairedNamePipelineTest {
       byte[] result;
       try (PrintStream capture = new PrintStream(log, true, StandardCharsets.UTF_8)) {
         System.setErr(capture);
-        result = pipeline.transform(null, TRADE, null, null, damaged);
+        result = pipeline.transform(UiMutationRepairedNamePipelineTest.class.getClassLoader(), TRADE, null, null, damaged);
       } finally {
         System.setErr(stderr);
       }
@@ -127,7 +127,7 @@ public final class UiMutationRepairedNamePipelineTest {
   }
 
   private static OrderedTransformerPipeline tradePipeline(Route route) {
-    ClassLoader runtimeLoader = route.predefine ? UiMutationRepairedNamePipelineTest.class.getClassLoader() : null;
+    ClassLoader runtimeLoader = UiMutationRepairedNamePipelineTest.class.getClassLoader();
     return new OrderedTransformerPipeline(List.of(
         new OrderedTransformerPipeline.Stage("Trade mutation", new TradeMarketMutationTransformer(true, runtimeLoader)),
         new OrderedTransformerPipeline.Stage("AoTD detached-cargo context",
@@ -136,7 +136,7 @@ public final class UiMutationRepairedNamePipelineTest {
   }
 
   private static OrderedTransformerPipeline overviewPipeline(Route route) {
-    ClassLoader runtimeLoader = route.predefine ? UiMutationRepairedNamePipelineTest.class.getClassLoader() : null;
+    ClassLoader runtimeLoader = UiMutationRepairedNamePipelineTest.class.getClassLoader();
     return new OrderedTransformerPipeline(
         List.of(new OrderedTransformerPipeline.Stage("Market mutation",
             new MarketOverviewMutationTransformer(true, runtimeLoader))),
@@ -145,7 +145,7 @@ public final class UiMutationRepairedNamePipelineTest {
 
   private static byte[] apply(Route route, OrderedTransformerPipeline pipeline, String target, byte[] bytes) {
     if (route.predefine) return pipeline.applyPredefine(target + ".class", bytes);
-    return pipeline.transform(null, target, null, null, bytes);
+    return pipeline.transform(UiMutationRepairedNamePipelineTest.class.getClassLoader(), target, null, null, bytes);
   }
 
   private static void clearTradeStatuses() {

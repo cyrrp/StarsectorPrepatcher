@@ -202,7 +202,7 @@ public final class PrepatcherAgent {
     }
   }
 
-  private static OrderedTransformerPipeline createOrderedPipeline(PrepatcherConfig config, ClassLoader runtimeLoader,
+  static OrderedTransformerPipeline createOrderedPipeline(PrepatcherConfig config, ClassLoader runtimeLoader,
       Path modRoot, boolean presentationMarkerLoaded, boolean syntheticCargoEconomySkipEnabled,
       boolean marketOpenContextEnabled, boolean syntheticCargoUiEnabled, boolean directObserverEnabled,
       boolean predefineBridgeRoute, boolean repairIllegalNamesInAgentPipeline) {
@@ -309,7 +309,7 @@ public final class PrepatcherAgent {
   static Class<?> findLoadedTarget(Instrumentation instrumentation, Set<String> startupAuditTargets,
       ClassLoader runtimeLoader) {
     for (Class<?> loaded : instrumentation.getAllLoadedClasses()) {
-      String internalName = loaded.getName().replace('.', '/');
+      String internalName = GameNamespace.current().canonicalName(loaded.getName().replace('.', '/'));
       if (!startupAuditTargets.contains(internalName)) continue;
       ClassLoader expectedLoader = runtimeLoader;
       if (PrepatcherTransformer.SOUND.equals(internalName) && runtimeLoader != null
@@ -355,7 +355,7 @@ public final class PrepatcherAgent {
     List<String> loadedTargets = new ArrayList<>();
     boolean markerLoaded = false;
     for (Class<?> loaded : instrumentation.getAllLoadedClasses()) {
-      String internalName = loaded.getName().replace('.', '/');
+      String internalName = GameNamespace.current().canonicalName(loaded.getName().replace('.', '/'));
       if (loaded.getClassLoader() != runtimeLoader
           || !FastForwardPresentationTransformer.TARGET_CLASSES.contains(internalName)
           || !presentationPlan.isTargetEnabled(internalName)) {

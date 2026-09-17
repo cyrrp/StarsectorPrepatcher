@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # Literal JVM nested-class names contain dollar signs.
 set -euo pipefail
 
 MOD_ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -9,23 +10,7 @@ java_native_path() {
     printf '%s\n' "$1"
   fi
 }
-find_game_root() {
-  local candidate="$1"
-  while [[ "$candidate" != "/" ]]; do
-    if [[ -d "$candidate/starsector-core" ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-    candidate="$(dirname "$candidate")"
-  done
-  return 1
-}
-GAME_ROOT="$(find_game_root "$MOD_ROOT")" || {
-  echo "Could not find a Starsector root above $MOD_ROOT." >&2
-  exit 1
-}
-CORE="$GAME_ROOT/starsector-core"
-BUILD="$MOD_ROOT/.build"
+source "$MOD_ROOT/scripts/common.sh"
 AGENT_CLASSES="$BUILD/agent-raw-classes"
 TEST_CLASSES="$BUILD/test-classes"
 FR_SMOKE_CLASSES="$BUILD/fr-smoke-classes"
@@ -53,7 +38,11 @@ fr_legacy_loader_state() {
 }
 
 bash "$MOD_ROOT/build-agent.sh"
-rm -rf "$TEST_CLASSES" "$FR_SMOKE_CLASSES"
+if [[ "$(java -cp "$BUILD/build-classes:$MOD_ROOT/lib/*" com.starsector.prepatcher.build.NamespaceJarTool --detect "$CORE/starfarer_obf.jar")" == linux ]]; then
+  exec bash "$MOD_ROOT/verify-linux.sh" "$@"
+fi
+clean_build_directory test-classes
+clean_build_directory fr-smoke-classes
 mkdir -p "$TEST_CLASSES" "$FR_SMOKE_CLASSES" "$REPORT_DIR"
 
 TEST_CP="$AGENT_CLASSES:$MOD_ROOT/lib/asm-9.10.1.jar:$MOD_ROOT/lib/asm-tree-9.10.1.jar:$MOD_ROOT/lib/asm-analysis-9.10.1.jar:$MOD_ROOT/lib/asm-util-9.10.1.jar:$MOD_ROOT/lib/asm-commons-9.10.1.jar:$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$CORE/xstream-1.4.10.jar:$CORE/jaxb-api-2.4.0-b180830.0359.jar:$CORE/json.jar"

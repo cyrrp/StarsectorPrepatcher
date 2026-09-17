@@ -55,7 +55,7 @@ final class RuntimeInstaller {
     MethodHandles.Lookup targetLookup = MethodHandles.privateLookupIn(anchor, MethodHandles.lookup());
     Map<String, Class<?>> defined = new LinkedHashMap<>();
     for (PayloadClass item : payload) {
-      Class<?> runtimeClass = targetLookup.defineClass(item.bytecode());
+      Class<?> runtimeClass = targetLookup.defineClass(GameNamespace.current().runtimePayload(item.bytecode()));
       if (runtimeClass.getClassLoader() != runtimeLoader) {
         throw new IllegalStateException("Runtime payload class has the wrong loader: " + runtimeClass.getName() + " -> "
             + describeLoader(runtimeClass.getClassLoader()));

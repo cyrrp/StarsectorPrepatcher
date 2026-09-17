@@ -9,6 +9,34 @@
 mutable-буферы или меняют bytecode. Его цель — ловить повторяющиеся ошибки до графического прогона
 и не принимать «патч загрузился» за доказательство корректности.
 
+## Linux native gate
+
+Run `STARSECTOR_ROOT=/path/to/starsector JAVA_HOME=/path/to/jdk bash verify-linux.sh`
+against native Linux JARs and a generated Mikohime/FR argument file. `verify-structural.sh`
+dispatches to the same gate when its bytecode probe detects Linux. `REFERENCE_JAVA` selects
+Java 17 for canonical structural fixtures; the installed Java/FR chain is used separately
+for native agent smoke tests. `AOTD_TOOLBOX_JAR` selects the real maintained fork JAR.
+
+Required checks are native/canonical roundtrip, the complete ordered patch pipeline,
+native identity, ASM verification, idempotence, rollback and mandatory name-repair preservation;
+runtime payload/target linkage on Java 28 + FR; and DOM/SAX/XML transformer plus Preferences
+import/export/flush with no pipeline failures. Platform isolation must also reject unparseable
+input before any patch stage, using bootstrap/platform ownership instead of package names.
+
+When the real AoTD fork is supplied, run its existing structural/behavior contract tests and
+the actual-agent child-loader handshake (`0xfff`) with exactly-once restore callback delivery.
+The native smoke parent classpath must exclude test-only AoTD stub classes. A missing fork
+must be reported as untested, never as supported by the core-only gate.
+
+Shell checks cover flat Linux and split Windows layouts, spaces in paths, LF scripts, Java
+argument parsing, agent order, unchanged Mikohime settings and safe build cleanup. Build and
+package checks include ASM Commons relocation, the Linux mapping resource, source checksums,
+and `release.sh --dry-run`; no release is published by validation.
+
+GUI acceptance additionally requires a disposable campaign with AoTD actually enabled:
+load/new game, economy advance, market/trade/building UI, save/reload, and menu/campaign transitions.
+Automated linkage/contract tests do not establish those gameplay or performance claims.
+
 ## Уровни доказательств
 
 - **S — structural:** semantic site однозначно найден; postconditions, API surface и весь класс

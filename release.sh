@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # Markdown backticks are literal release text.
 set -euo pipefail
 
 MOD_ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -39,12 +40,19 @@ RELEASE_REPORT="$MOD_ROOT/docs/releases/${VERSION}.md"
   || die "Release report not found: $RELEASE_REPORT"
 grep -q "## \[$VERSION\]" "$MOD_ROOT/CHANGELOG.md" \
   || die "CHANGELOG.md has no section for $VERSION."
-command -v gh >/dev/null 2>&1 || die "gh CLI is not installed."
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'Invalid release version.'
+[[ ! -L "$BUILD" ]] || die 'Refusing a symlinked .build directory.'
+if ! $DRY_RUN; then
+  command -v gh >/dev/null 2>&1 || die "gh CLI is not installed."
+fi
 command -v jar >/dev/null 2>&1 || die "jar is not installed (JDK required)."
-git -C "$MOD_ROOT" rev-parse "$TAG" >/dev/null 2>&1 \
-  && die "Tag $TAG already exists." || true
-[[ -z "$(git -C "$MOD_ROOT" status --porcelain)" ]] || $FORCE \
-  || die "Git working tree is not clean. Commit all changes or use --force."
+if ! $DRY_RUN; then
+  if git -C "$MOD_ROOT" rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+    die "Tag $TAG already exists."
+  fi
+  [[ -z "$(git -C "$MOD_ROOT" status --porcelain)" ]] || $FORCE \
+    || die "Git working tree is not clean. Commit all changes or use --force."
+fi
 
 mkdir -p "$BUILD"
 ZIP_PATH="$BUILD/$ZIP_NAME"
@@ -53,12 +61,14 @@ BODY_PATH="$BUILD/release-body.md"
 rm -f "$ZIP_PATH" "$SHA_PATH" "$BODY_PATH"
 
 INCLUDE_LIST="$BUILD/zip-include.txt"
-awk '{print $NF}' "$MOD_ROOT/SHA256SUMS.txt" > "$INCLUDE_LIST"
+sed -E 's/^[[:xdigit:]]{64}  //' "$MOD_ROOT/SHA256SUMS.txt" > "$INCLUDE_LIST"
 printf 'SHA256SUMS.txt\n' >> "$INCLUDE_LIST"
 LC_ALL=C sort -u -o "$INCLUDE_LIST" "$INCLUDE_LIST"
 
 ENTRY_ARGS=()
 while IFS= read -r f; do
+  case "$f" in /*|../*|*/../*|*/..|..|*\\*) die "Unsafe archive path: $f" ;; esac
+  [[ -f "$MOD_ROOT/$f" && ! -L "$MOD_ROOT/$f" ]] || die "Invalid archive input: $f"
   ENTRY_ARGS+=("${MOD_NAME}/${f}")
 done < "$INCLUDE_LIST"
 

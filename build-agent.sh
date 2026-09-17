@@ -1,38 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 MOD_ROOT="$(cd "$(dirname "$0")" && pwd)"
-find_game_root() {
-  local candidate="$1"
-  while [[ "$candidate" != "/" ]]; do
-    if [[ -d "$candidate/starsector-core" ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-    candidate="$(dirname "$candidate")"
-  done
-  return 1
-}
-GAME_ROOT="$(find_game_root "$MOD_ROOT")" || {
-  echo "Could not find a Starsector root above $MOD_ROOT." >&2
-  exit 1
-}
-CORE="$GAME_ROOT/starsector-core"
-BUILD="$MOD_ROOT/.build"
-rm -rf "$BUILD"
+source "$MOD_ROOT/scripts/common.sh"
+for directory in agent-raw-classes asm-raw-classes agent-classes build-classes bootstrap-classes; do
+  clean_build_directory "$directory"
+done
 mkdir -p "$BUILD/agent-raw-classes" "$BUILD/asm-raw-classes" "$BUILD/agent-classes" "$BUILD/build-classes" "$BUILD/bootstrap-classes" "$MOD_ROOT/agent" "$MOD_ROOT/jars"
 ASM_CORE="$MOD_ROOT/lib/asm-9.10.1.jar"
 ASM_TREE="$MOD_ROOT/lib/asm-tree-9.10.1.jar"
 ASM_ANALYSIS="$MOD_ROOT/lib/asm-analysis-9.10.1.jar"
 ASM_COMMONS="$MOD_ROOT/lib/asm-commons-9.10.1.jar"
-CP_AGENT="$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/fs.common_obf.jar:$CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$ASM_CORE:$ASM_TREE:$ASM_ANALYSIS"
-CP_BUILD="$ASM_CORE:$ASM_COMMONS"
+CP_BUILD="$ASM_CORE:$ASM_COMMONS:$ASM_TREE"
 CP_BOOT="$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/log4j-1.2.9.jar"
-find "$MOD_ROOT/source/agent" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -cp "$CP_AGENT" -d "$BUILD/agent-raw-classes"
 find "$MOD_ROOT/source/build" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -cp "$CP_BUILD" -d "$BUILD/build-classes"
+NAMESPACE="$(java -cp "$BUILD/build-classes:$CP_BUILD" com.starsector.prepatcher.build.NamespaceJarTool --detect "$CORE/starfarer_obf.jar")"
+COMPILE_CORE="$CORE"
+if [[ "$NAMESPACE" == linux ]]; then
+  COMPILE_CORE="$BUILD/canonical-core"
+  mkdir -p "$COMPILE_CORE"
+  for game_jar in starfarer_obf.jar fs.common_obf.jar fs.sound_obf.jar starfarer.api.jar; do
+    java -cp "$BUILD/build-classes:$CP_BUILD" com.starsector.prepatcher.build.NamespaceJarTool \
+      "$MOD_ROOT/source/resources/com/starsector/prepatcher/agent/linux-0.98a-RC8.tsv" \
+      "$CORE/$game_jar" "$COMPILE_CORE/$game_jar"
+  done
+fi
+CP_AGENT="$COMPILE_CORE/starfarer.api.jar:$COMPILE_CORE/starfarer_obf.jar:$COMPILE_CORE/fs.common_obf.jar:$COMPILE_CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$ASM_CORE:$ASM_TREE:$ASM_ANALYSIS:$ASM_COMMONS"
+find "$MOD_ROOT/source/agent" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -cp "$CP_AGENT" -d "$BUILD/agent-raw-classes"
+cp -R "$MOD_ROOT/source/resources/." "$BUILD/agent-raw-classes/"
 find "$MOD_ROOT/source/bootstrap" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -cp "$CP_BOOT" -d "$BUILD/bootstrap-classes"
 # Extract only runtime ASM, then relocate its classes and all agent references into
 # com.starsector.prepatcher.internal.asm with the build-only ASM Commons tool.
-for asm_jar in asm-9.10.1.jar asm-tree-9.10.1.jar asm-analysis-9.10.1.jar; do
+for asm_jar in asm-9.10.1.jar asm-tree-9.10.1.jar asm-analysis-9.10.1.jar asm-commons-9.10.1.jar; do
   asm_path="$MOD_ROOT/lib/$asm_jar"
   if [[ ! -f "$asm_path" ]]; then
     echo "Required ASM library is missing: $asm_path" >&2
@@ -42,6 +40,7 @@ for asm_jar in asm-9.10.1.jar asm-tree-9.10.1.jar asm-analysis-9.10.1.jar; do
 done
 java -cp "$BUILD/build-classes:$CP_BUILD" com.starsector.prepatcher.build.AsmRelocator \
   "$BUILD/agent-classes" "$BUILD/agent-raw-classes" "$BUILD/asm-raw-classes"
+cp -R "$MOD_ROOT/source/resources/." "$BUILD/agent-classes/"
 mkdir -p "$BUILD/agent-classes/META-INF/LICENSES"
 cp "$MOD_ROOT/lib/ASM-LICENSE.txt" "$BUILD/agent-classes/META-INF/LICENSES/ASM.txt"
 if grep -aRIl -e 'org/objectweb/asm' -e 'jdk/internal/org/objectweb/asm' \
@@ -108,7 +107,7 @@ fi
       printf '%s\n' "$top_level"
     fi
   done
-  find agent baseline docs jars lib media profiles source -type f -print
+  find agent baseline decisions docs jars lib media profiles scripts source tools -type f -print
   printf '%s\n' 'logs/README.txt'
 ) | sed 's#^\./##' | LC_ALL=C sort -u > "$CHECKSUM_INPUTS"
 

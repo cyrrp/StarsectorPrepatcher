@@ -530,7 +530,7 @@ public final class DocumentationConsistencyTest {
           .filter(path -> !path.getFileName().toString().equals(".git")).map(path -> display(root, path)).sorted()
           .forEach(inputs::add);
     }
-    for (String directory : List.of("agent", "baseline", "docs", "jars", "lib", "media", "profiles", "source")) {
+    for (String directory : List.of("agent", "baseline", "decisions", "docs", "jars", "lib", "media", "profiles", "scripts", "source", "tools")) {
       Path base = root.resolve(directory);
       require(Files.isDirectory(base), "checksum input directory is missing: " + base);
       try (Stream<Path> files = Files.walk(base)) {

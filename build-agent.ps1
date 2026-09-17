@@ -10,7 +10,7 @@ function Find-GameRoot([string] $startPath) {
     }
     throw "Could not find a Starsector root above $startPath."
 }
-$gameRoot = Find-GameRoot $modRoot
+$gameRoot = if ($env:STARSECTOR_ROOT) { (Resolve-Path -LiteralPath $env:STARSECTOR_ROOT).Path } else { Find-GameRoot $modRoot }
 $core = Join-Path $gameRoot 'starsector-core'
 $build = Join-Path $modRoot '.build'
 $agentRawClasses = Join-Path $build 'agent-raw-classes'
@@ -18,7 +18,18 @@ $asmRawClasses = Join-Path $build 'asm-raw-classes'
 $agentClasses = Join-Path $build 'agent-classes'
 $buildClasses = Join-Path $build 'build-classes'
 $bootstrapClasses = Join-Path $build 'bootstrap-classes'
-Remove-Item -Recurse -Force $build -ErrorAction SilentlyContinue
+foreach ($buildDirectory in @($agentRawClasses, $asmRawClasses, $agentClasses, $buildClasses, $bootstrapClasses)) {
+    $resolvedBuildDirectory = [IO.Path]::GetFullPath($buildDirectory)
+    if (-not $resolvedBuildDirectory.StartsWith([IO.Path]::GetFullPath($build) + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Build directory escapes .build: $buildDirectory"
+    }
+    foreach ($candidate in @($build, $resolvedBuildDirectory)) {
+        if ((Test-Path -LiteralPath $candidate) -and ((Get-Item -LiteralPath $candidate).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Refusing linked build directory: $candidate"
+        }
+    }
+    if (Test-Path -LiteralPath $resolvedBuildDirectory) { Remove-Item -LiteralPath $resolvedBuildDirectory -Recurse -Force }
+}
 New-Item -ItemType Directory -Force $agentRawClasses, $asmRawClasses, $agentClasses, $buildClasses, $bootstrapClasses, (Join-Path $modRoot 'agent'), (Join-Path $modRoot 'jars') | Out-Null
 $agentSources = Get-ChildItem -Recurse -Filter *.java (Join-Path $modRoot 'source\agent') | ForEach-Object FullName
 $buildSources = Get-ChildItem -Recurse -Filter *.java (Join-Path $modRoot 'source\build') | ForEach-Object FullName
@@ -27,11 +38,12 @@ $asmCore = Join-Path $modRoot 'lib\asm-9.10.1.jar'
 $asmTree = Join-Path $modRoot 'lib\asm-tree-9.10.1.jar'
 $asmAnalysis = Join-Path $modRoot 'lib\asm-analysis-9.10.1.jar'
 $asmCommons = Join-Path $modRoot 'lib\asm-commons-9.10.1.jar'
-$agentCp = @((Join-Path $core 'starfarer.api.jar'),(Join-Path $core 'starfarer_obf.jar'),(Join-Path $core 'fs.common_obf.jar'),(Join-Path $core 'fs.sound_obf.jar'),(Join-Path $core 'lwjgl.jar'),(Join-Path $core 'lwjgl_util.jar'),$asmCore,$asmTree,$asmAnalysis) -join ';'
-$buildCp = @($asmCore,$asmCommons) -join ';'
+$agentCp = @((Join-Path $core 'starfarer.api.jar'),(Join-Path $core 'starfarer_obf.jar'),(Join-Path $core 'fs.common_obf.jar'),(Join-Path $core 'fs.sound_obf.jar'),(Join-Path $core 'lwjgl.jar'),(Join-Path $core 'lwjgl_util.jar'),$asmCore,$asmTree,$asmAnalysis,$asmCommons) -join ';'
+$buildCp = @($asmCore,$asmCommons,$asmTree) -join ';'
 $bootstrapCp = @((Join-Path $core 'starfarer.api.jar'),(Join-Path $core 'starfarer_obf.jar'),(Join-Path $core 'log4j-1.2.9.jar')) -join ';'
 & javac -encoding UTF-8 --release 17 -cp $agentCp -d $agentRawClasses $agentSources
 if ($LASTEXITCODE -ne 0) { throw 'Agent compilation failed.' }
+Copy-Item -Path (Join-Path $modRoot 'source/resources/*') -Destination $agentRawClasses -Recurse -Force
 & javac -encoding UTF-8 --release 17 -cp $buildCp -d $buildClasses $buildSources
 if ($LASTEXITCODE -ne 0) { throw 'ASM relocator compilation failed.' }
 & javac -encoding UTF-8 --release 17 -cp $bootstrapCp -d $bootstrapClasses $bootstrapSources
@@ -39,7 +51,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Bootstrap compilation failed.' }
 
 # Extract only the runtime ASM components. A build-only ASM Commons pass then moves
 # every ASM class and every agent reference into the private Prepatcher namespace.
-foreach ($asmJarName in @('asm-9.10.1.jar','asm-tree-9.10.1.jar','asm-analysis-9.10.1.jar')) {
+foreach ($asmJarName in @('asm-9.10.1.jar','asm-tree-9.10.1.jar','asm-analysis-9.10.1.jar','asm-commons-9.10.1.jar')) {
     $asmJarPath = Join-Path $modRoot "lib\$asmJarName"
     if (-not (Test-Path -LiteralPath $asmJarPath -PathType Leaf)) {
         throw "Required ASM library is missing: $asmJarPath"
@@ -54,6 +66,7 @@ foreach ($asmJarName in @('asm-9.10.1.jar','asm-tree-9.10.1.jar','asm-analysis-9
 }
 & java -cp "$buildClasses;$buildCp" com.starsector.prepatcher.build.AsmRelocator $agentClasses $agentRawClasses $asmRawClasses
 if ($LASTEXITCODE -ne 0) { throw 'ASM relocation failed.' }
+Copy-Item -Path (Join-Path $modRoot 'source/resources/*') -Destination $agentClasses -Recurse -Force
 $asmLicenseTarget = Join-Path $agentClasses 'META-INF\LICENSES\ASM.txt'
 New-Item -ItemType Directory -Force (Split-Path -Parent $asmLicenseTarget) | Out-Null
 Copy-Item -LiteralPath (Join-Path $modRoot 'lib\ASM-LICENSE.txt') -Destination $asmLicenseTarget -Force
@@ -97,7 +110,7 @@ foreach ($entry in $requiredRuntimePayload) {
         throw "Required target-loader runtime payload is missing from the agent JAR: $entry"
     }
 }
-$expectedRuntimePayloadCount = 130
+$expectedRuntimePayloadCount = 138
 $runtimePayloadEntries = @($agentEntries | Where-Object {
     $_ -cmatch '^com/fs/starfarer/api/StarsectorPrepatcher[^/]*\.class$'
 })
@@ -111,7 +124,7 @@ $checksumFiles = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
 Get-ChildItem -LiteralPath $modRoot -File -Force | Where-Object {
     $_.Name -notin @('SHA256SUMS.txt', '.git')
 } | ForEach-Object { $checksumFiles.Add($_) }
-foreach ($directory in @('agent', 'baseline', 'docs', 'jars', 'lib', 'media', 'profiles', 'source')) {
+foreach ($directory in @('agent', 'baseline', 'decisions', 'docs', 'jars', 'lib', 'media', 'profiles', 'scripts', 'source', 'tools')) {
     Get-ChildItem -LiteralPath (Join-Path $modRoot $directory) -File -Force -Recurse |
         ForEach-Object { $checksumFiles.Add($_) }
 }

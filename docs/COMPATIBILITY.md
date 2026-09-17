@@ -143,6 +143,30 @@ target, который вызывает typed runtime, loader должен бы�
 site count сохраняют ownership/idempotency. Сам `patch.startupLogAggregation` пока остаётся
 known-disabled независимо от этого loader-исключения.
 
+## Native Linux namespace
+
+Linux 0.98a-RC8 uses a different obfuscation namespace from Windows. `GameNamespace`
+detects the namespace from the actual CampaignEngine descriptor, not `os.name`, and
+translates class/member names and descriptors around the complete ordered pipeline.
+The shipped table is generated offline from corresponding clean Windows/Linux JARs;
+game JARs are not rewritten. Unresolved class pairs are not guessed. The existing
+structural matchers and postconditions remain authoritative after translation.
+
+The transaction consumes canonical bytes, converts a successful result back to native
+names before committing diagnostics, and rolls back to its original native input on
+failure. Mandatory Java-27+ name repair remains preserved on rollback. Runtime payloads
+are translated before definition in the game loader, including the selection-indicator
+reflection bridge; repaired member names must not become illegal again after Faster
+Rendering has run. Windows remains the identity namespace.
+
+Bootstrap- and platform-loader classes are excluded before parsing, regardless of their
+package names. In particular, Java 28's `org.xml.sax` and `org.w3c.dom` classes must never
+reach the game-bytecode ASM remapper. This is a loader-ownership boundary, not a growing
+package exclusion list. Application and child mod loaders still reach normal patch checks.
+
+The Linux build creates canonical compile-time JAR copies only under `.build/canonical-core`.
+Native game/runtime validation remains separate from this build-time representation.
+
 ## Жизненный цикл патча
 
 1. Найти ровно один целевой метод по имени и descriptor.
@@ -789,7 +813,7 @@ inventory. Structural pass проверяет их до анализа и пос
 
 ## AoTD Scheduler Fork
 
-Scheduler Fork release `1.0.14-spp13` requires Prepatcher `0.18.4`, an active compatible javaagent
+The development Scheduler Fork `1.0.14-spp13` package targets Prepatcher `0.19.0`, an active compatible javaagent
 and the original game `starfarer.api.jar`. The fork is required for optimal performance when
 AoTD Theory of Toolbox is installed; it is not a dependency for configurations without AoTD.
 

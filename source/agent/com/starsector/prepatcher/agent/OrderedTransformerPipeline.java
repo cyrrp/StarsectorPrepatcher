@@ -31,6 +31,10 @@ final class OrderedTransformerPipeline implements ClassFileTransformer {
   public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
       ProtectionDomain protectionDomain, byte[] classfileBuffer) {
     if (className == null || classfileBuffer == null) return null;
+    // Platform ownership, not package spelling: java.xml also owns org.xml/org.w3c.
+    // These bytes are never a game/mod transformation surface and may use a newer
+    // classfile format than the ASM used to inspect Starsector's bytecode.
+    if (loader == null || loader == ClassLoader.getPlatformClassLoader()) return null;
     ClassLoader expected = runtimeLoader.get();
     if (predefineBridgeRoute && expected != null && loader == expected) {
       // Old Faster Rendering defines its com.fs classes from the bridge below.
@@ -72,12 +76,16 @@ final class OrderedTransformerPipeline implements ClassFileTransformer {
         // not one of its optional mutations. A later patch failure rolls back to
         // these loadable bytes instead of restoring an invalid obfuscated class.
         pipelineInput = current;
+        GameNamespace namespace = GameNamespace.current();
+        current = namespace.toCanonical(current);
+        String canonicalName = namespace.canonicalName(className);
+        boolean stageChanged = false;
         // The complete chain is an atomic class-level group. Its input is retained
         // until every ordered member has had a chance to validate its post-state.
         for (Stage stage : stages) {
           diagnostics.beginStage();
           byte[] next =
-              stage.transformer().transform(loader, className, classBeingRedefined, protectionDomain, current);
+              stage.transformer().transform(loader, canonicalName, classBeingRedefined, protectionDomain, current);
           TransformDiagnostics.StageResult result = diagnostics.finishStage(next);
           String rejection = result.rejection();
           if (rejection != null) {
@@ -86,10 +94,15 @@ final class OrderedTransformerPipeline implements ClassFileTransformer {
           if (result.bytes() != null) {
             current = result.bytes();
             changed = true;
+            stageChanged = true;
           }
         }
+        // Translation is inside the same transaction: conversion failure must not
+        // publish successful patch diagnostics or return a half-translated class.
+        byte[] output = stageChanged ? namespace.toNativeRuntime(current)
+            : (changed || !nullWhenUnchanged ? pipelineInput : null);
         diagnostics.commit();
-        return changed || !nullWhenUnchanged ? current : null;
+        return output;
       } catch (Throwable failure) {
         diagnostics.rollback();
         PrepatcherLog.error("Atomic transformer pipeline rolled back " + className
