@@ -37,10 +37,11 @@ final class AoTDSchedulerBridge implements StructuredPatch<AoTDSchedulerBridge.P
   @Override
   public Match<Plan> match(ClassNode node) {
     MethodNode initialize = require(node, "initialize", INITIALIZE_DESC);
-    require(node, "activateFromPrepatcher", ACTIVATE_DESC);
-    require(node, "deliverySignalConsumer", "()Ljava/util/function/Consumer;");
-    require(node, "deficitResolverFunction", "()Ljava/util/function/BiFunction;");
-    require(node, "economyRestoreCompleteSignal", "()Ljava/lang/Runnable;");
+    requireStatic(node, "activateFromPrepatcher", ACTIVATE_DESC);
+    requireStatic(node, "deliverySignalConsumer", "()Ljava/util/function/Consumer;");
+    requireStatic(node, "deficitResolverFunction", "()Ljava/util/function/BiFunction;");
+    requireStatic(node, "economyRestoreCompleteSignal", "()Ljava/lang/Runnable;");
+    requireStatic(node, "acceptMarketMutation", "(Ljava/lang/Object;IJJ)V");
     List<Rewritten> rewritten = new ArrayList<>();
     rewritten.add(new Rewritten(requireStatic(initialize), RUNTIME_CONTRACT, "registerAoTDForkContract"));
     rewritten.add(new Rewritten(requireStatic(node, "getDeliveredMarketGeneration", "(Ljava/lang/Object;)J"),
@@ -239,8 +240,9 @@ final class AoTDSchedulerBridge implements StructuredPatch<AoTDSchedulerBridge.P
   }
 
   private static MethodNode requireStatic(MethodNode method) {
-    if ((method.access & Opcodes.ACC_STATIC) == 0) {
-      throw new IllegalStateException("Bridge ABI method is not static: " + method.name);
+    if ((method.access & (Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC)) != (Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC)
+        || (method.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
+      throw new IllegalStateException("Bridge ABI method is not public static concrete: " + method.name);
     }
     return method;
   }

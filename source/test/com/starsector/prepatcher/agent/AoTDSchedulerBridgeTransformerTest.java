@@ -55,6 +55,17 @@ public final class AoTDSchedulerBridgeTransformerTest {
     require(patched != null, "bridge did not patch");
     require(!asConstants(patched).contains("java/lang/reflect"), "patched bridge contains reflection reference");
     inspectPatched(patched);
+    for (String brokenHelper : new String[]{"acceptMarketMutation", "activateFromPrepatcher"}) {
+      ClassNode broken = new ClassNode();
+      new ClassReader(original).accept(broken, 0);
+      for (MethodNode method : broken.methods) {
+        if (brokenHelper.equals(method.name)) method.access &= ~Opcodes.ACC_STATIC;
+      }
+      ClassWriter writer = new ClassWriter(0);
+      broken.accept(writer);
+      require(transformer.transform(modLoader, AoTDSchedulerBridgeTransformer.TARGET, null, null,
+          writer.toByteArray()) == null, "non-static bridge helper accepted: " + brokenHelper);
+    }
     ClassLoader unrelatedRuntime = new ClassLoader(null) {};
     require(new AoTDSchedulerBridgeTransformer(unrelatedRuntime).transform(modLoader,
         AoTDSchedulerBridgeTransformer.TARGET, null, null, original) == null,

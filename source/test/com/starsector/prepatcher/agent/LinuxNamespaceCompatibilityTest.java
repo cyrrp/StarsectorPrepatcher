@@ -50,6 +50,7 @@ public final class LinuxNamespaceCompatibilityTest {
             require(text(original).equals(text(ns.toNative(ns.toCanonical(original)))),"namespace roundtrip differs: "+name);
             OrderedTransformerPipeline pipeline=PrepatcherAgent.createOrderedPipeline(config,loader,Path.of(args[0]).toAbsolutePath().getParent(),false,true,true,true,true,false,true);
             byte[] result=pipeline.transform(loader,name,null,null,original);
+            if (result != null) OptionalModLinkageAudit.verify(original, result);
             require(System.getProperty("starsector.prepatcher.pipelineFailure."+name.replace('/','.'))==null,"production pipeline rejected "+name);
             if(result==null) continue;
             require(new ClassReader(result).getClassName().equals(name),"native class identity changed "+name);

@@ -37,6 +37,25 @@ GUI acceptance additionally requires a disposable campaign with AoTD actually en
 load/new game, economy advance, market/trade/building UI, save/reload, and menu/campaign transitions.
 Automated linkage/contract tests do not establish those gameplay or performance claims.
 
+## Optional-mod linkage regression gate
+
+`AoTDForkCompatibilityTransformerTest` must test a real maintained fork and an upstream-shaped
+construction method with no bridge: both successful construction and its original exceptional
+path must execute without resolving `SchedulerBridge`. Require byte-for-byte preservation
+(null transform) for missing bridge/State/contract, mismatched contract/schema, missing CodeSource,
+mixed upstream/fork JARs and parent-loader shadowing. Ownership inspection must not load optional
+classes. Keep exact-body, idempotence, altered-body rejection and ASM verification checks.
+
+`OptionalModLinkageAudit` compares symbolic type references before/after core structural and
+native Linux ordered-pipeline transformations, including descriptors, handles and type instructions.
+New direct references to AoTD/data, Nexerelin, Ashlib, LazyLib, MagicLib or Faster Rendering packages
+fail the gate. String-based runtime probes require separate guarded-behavior tests; this gate is
+not a claim of full gameplay compatibility with every mod.
+
+`OptionalModProbeLinkageTest` supplies real classfiles with an unresolved, unrelated method return
+type. Verify that reflection really raises `NoClassDefFoundError`, then that all three eligibility
+probes select their conservative outcome without propagating it. Run on Windows and Linux gates.
+
 ## Уровни доказательств
 
 - **S — structural:** semantic site однозначно найден; postconditions, API surface и весь класс

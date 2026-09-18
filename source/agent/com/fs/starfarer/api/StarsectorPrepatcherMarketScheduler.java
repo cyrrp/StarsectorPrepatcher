@@ -145,7 +145,7 @@ final class StarsectorPrepatcherMarketScheduler {
         return type.getMethod("advance", float.class).getDeclaringClass() == BaseIndustry.class
             && type.getMethod("isDisrupted").getDeclaringClass() == BaseIndustry.class
             && type.getMethod("getDisruptedKey").getDeclaringClass() == BaseIndustry.class;
-      } catch (ReflectiveOperationException | SecurityException ex) {
+      } catch (ReflectiveOperationException | SecurityException | LinkageError ex) {
         return Boolean.FALSE;
       }
     }

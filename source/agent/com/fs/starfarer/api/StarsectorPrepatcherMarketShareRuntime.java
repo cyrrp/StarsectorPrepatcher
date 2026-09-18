@@ -53,7 +53,7 @@ public final class StarsectorPrepatcherMarketShareRuntime {
           && resolvesToVanilla(type, "getMarketSharePercent", FactionAPI.class) && resolvesToVanilla(type, "getMarkets")
           && resolvesToVanilla(type, "getExportMarketSharePercent", MarketAPI.class)
           && resolvesToVanilla(type, "getMarketShareData", MarketAPI.class);
-    } catch (ReflectiveOperationException | SecurityException failure) {
+    } catch (ReflectiveOperationException | SecurityException | LinkageError failure) {
       return false;
     }
   }

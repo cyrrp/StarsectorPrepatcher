@@ -837,6 +837,23 @@ or mod classloaders. A partial required
 production capability profile is intentionally rejected. The legacy AoTD core-JAR replacement is
 not compatible with this profile.
 
+Construction-boundary ownership is proved before mutation, not inferred from a matching method
+body or the diagnostic mods-directory scan. The defining loader must see the runtime loader in
+its parent chain. Construction, bridge, bridge State and contract resources must resolve from
+the construction class's own CodeSource (JAR or classes directory); mixed upstream/fork JARs,
+parent-resource shadowing and absent provenance cannot authorize the patch. The byte-only check
+requires the existing current fork version/capability constants, bridge V10 marker and bridge
+method ABI. It does not load/initialize mod classes, cache loaders or depend on handshake order.
+Missing ownership reports `NOT_APPLICABLE_UNOWNED` without changing upstream ToT. Runtime
+activation still requires the existing callback handshake; this resource proof does not activate
+capabilities. A malformed resource or changed construction body remains a diagnostic rejection.
+
+Reflective eligibility probes for market-share aggregation, dormant BaseIndustry callbacks and
+entity identity membership also treat `LinkageError` as an unproven class shape. Java reflection
+can resolve an unrelated optional type in a mod method signature while inspecting another method.
+These probes retain their existing conservative outcomes: original market-share/industry paths
+and normal collection equality, respectively. They do not suppress errors from actual mod gameplay.
+
 The owned fork is validated from its real `AoTDToolboxTheory.jar`. Its scheduler bridge and the
 exact `AoTDConstructionSite.setAssignedWonder(String)` construction-start surface are transformed
 directly. The validation also proves the public final dispatcher signature and implementation,

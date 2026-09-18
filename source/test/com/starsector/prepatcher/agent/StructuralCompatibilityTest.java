@@ -1003,6 +1003,7 @@ public final class StructuralCompatibilityTest {
             "final composition validation did not pass for " + className);
         assertExpectedHooks(className, transformed);
         assertHookTargetsExist(transformed);
+        OptionalModLinkageAudit.verify(original, transformed);
         methods += verifyBytecode(transformed);
         int skippedBefore = integerProperty("starsector.prepatcher.skippedPatches");
         byte[] second = transformer.transform(null, className, null, null, transformed);

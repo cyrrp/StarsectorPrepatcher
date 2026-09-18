@@ -247,7 +247,7 @@ final class StarsectorPrepatcherScratch {
         Method equals = type.getMethod("equals", Object.class);
         Method hashCode = type.getMethod("hashCode");
         return equals.getDeclaringClass() != Object.class || hashCode.getDeclaringClass() != Object.class;
-      } catch (ReflectiveOperationException | SecurityException ex) {
+      } catch (ReflectiveOperationException | SecurityException | LinkageError ex) {
         // Unknown/custom class shape: prefer collection semantics over the
         // identity optimization.
         return Boolean.TRUE;

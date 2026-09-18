@@ -506,7 +506,10 @@ structural transformer сохраняет исходное тело как priva
 `building=false -> true` сначала доставляет накопленное время старому состоянию, затем немедленно
 публикует structure/industry/derived-economy dirty mask. Transformer включён тем же
 `patch.marketScheduler`, не создаёт cache/listener/state и отклоняет future implementation, если
-изменились write/call/return invariants.
+изменились write/call/return invariants. До изменения проверяется принадлежность форку:
+ресурсы construction class, `SchedulerBridge`, его `State` и `PrepatcherContract` должны
+разрешаться загрузчиком из того же CodeSource; V10 ABI и текущий контракт проверяются по байтам.
+Обычный ToT без этого доказательства получает `NOT_APPLICABLE_UNOWNED` и остаётся нетронутым.
 
 После завершения строительства рынок автоматически возвращается к coalescing. Полный detector scan
 выполняется после mutation epoch и через редкий safety audit, а не на каждом simulation input.

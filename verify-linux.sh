@@ -37,6 +37,8 @@ run_reference() {
 run_reference CoreWorldsStructuralMatcherTest "$CONFIG" "$CANONICAL/starfarer.api.jar" "$CANONICAL/starfarer_obf.jar"
 run_reference FastForwardPresentationCompatibilityTest "$CANONICAL/starfarer_obf.jar" "$CANONICAL/starfarer.api.jar"
 run_reference StructuralCompatibilityTest "$CONFIG" "$CANONICAL/starfarer_obf.jar" "$CANONICAL/fs.common_obf.jar" "$CANONICAL/fs.sound_obf.jar" "$CANONICAL/starfarer.api.jar"
+"$REFERENCE_JAVA" -Xverify:none -cp "$CANONICAL_CP" com.fs.starfarer.api.OptionalModProbeLinkageTest \
+  2>&1 | tee "$BUILD/reports/linux-optional-mod-probes.txt"
 run_reference UiMutationRepairedNamePipelineTest "$CANONICAL/starfarer_obf.jar"
 AOTD_JAR="${AOTD_TOOLBOX_JAR:-$GAME_ROOT/mods/AoTD-Theory-Of-Toolbox-Scheduler-Fork/jars/AoTDToolboxTheory.jar}"
 if [[ -f "$AOTD_JAR" ]]; then

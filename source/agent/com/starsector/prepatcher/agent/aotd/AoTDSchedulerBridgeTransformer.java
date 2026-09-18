@@ -16,8 +16,8 @@ import com.starsector.prepatcher.agent.PrepatcherLog;
 /** Rewrites the fork-owned no-op bridge to direct target-loader ABI calls. */
 public final class AoTDSchedulerBridgeTransformer implements ClassFileTransformer {
   public static final String TARGET = AoTDSchedulerBridge.TARGET;
-  private static final int CURRENT_BRIDGE_SCHEMA = 10;
-  private static final String CURRENT_BRIDGE_MARKER = "AOTD_SCHEDULER_BRIDGE_V10";
+  static final int CURRENT_BRIDGE_SCHEMA = 10;
+  static final String CURRENT_BRIDGE_MARKER = "AOTD_SCHEDULER_BRIDGE_V10";
 
   private final ClassLoader runtimeLoader;
 

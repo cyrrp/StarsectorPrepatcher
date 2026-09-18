@@ -141,6 +141,8 @@ if ($CoreJars.Count -gt 0) {
     )
 }
 $classPath = @($testClasses, $testCp) -join [IO.Path]::PathSeparator
+& java -cp $classPath com.fs.starfarer.api.OptionalModProbeLinkageTest
+if ($LASTEXITCODE -ne 0) { throw 'Optional-mod reflective linkage verification failed.' }
 $frConfigurationReport = Join-Path $reportDir 'faster-rendering-configuration.txt'
 $frConfigurationOutput = @(& java -cp $classPath `
     com.starsector.prepatcher.agent.FasterRenderingConfigurationTest 2>&1)

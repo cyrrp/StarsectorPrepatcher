@@ -13,6 +13,16 @@ public final class LinuxAoTDIntegrationSmokeTest {
     for (String arg : args) jars.add(Path.of(arg).toUri().toURL());
     ClassLoader parent = ClassLoader.getSystemClassLoader();
     try (URLClassLoader modLoader = new URLClassLoader(jars.toArray(URL[]::new), parent)) {
+      // Ownership proof must work before the runtime handshake, without eagerly
+      // loading/initializing SchedulerBridge from inside a transformer.
+      String constructionName = "data.kaysaar.aotd.tot.industries.AoTDConstructionSite";
+      Class<?> construction = Class.forName(constructionName, false, modLoader);
+      require(construction.getClassLoader() == modLoader, "construction class did not load in child");
+      construction.getDeclaredMethod("spp$rawSetAssignedWonder", String.class);
+      require(
+          "APPLIED".equals(System
+              .getProperty("starsector.prepatcher.patchStatus." + constructionName + ".aotdConstructionStartBoundary")),
+          "real construction boundary not applied");
       Class<?> bridge = Class.forName("data.kaysaar.aotd.tot.compat.SchedulerBridge", true, modLoader);
       require(bridge.getClassLoader() == modLoader, "real fork did not load in child");
       Object state = bridge.getMethod("initialize").invoke(null);
@@ -25,23 +35,25 @@ public final class LinuxAoTDIntegrationSmokeTest {
       runtime.getMethod("publishAoTDEconomyRestoreComplete").invoke(null);
       long after = (Long) bridge.getMethod("getEconomyRestoreCompleteSignalCount").invoke(null);
       require(after == before + 1, "restore callback was not delivered exactly once");
-      for (String name : List.of(
-          "data.kaysaar.aotd.tot.scripts.economy.AoTDEconomy",
+      for (String name : List.of("data.kaysaar.aotd.tot.scripts.economy.AoTDEconomy",
           "data.kaysaar.aotd.tot.scripts.economy.AoTDReachEconomy",
           "data.kaysaar.aotd.tot.scripts.commoditydata.AoTDCommodityOnMarket",
           "data.kaysaar.aotd.tot.scripts.commoditydata.AoTDSupplyDemandData",
           "data.kaysaar.aotd.tot.scripts.economy.AoTDUIEconomyRefreshCoordinator")) {
         Class<?> type = Class.forName(name, false, modLoader);
         require(type.getClassLoader() == modLoader, "fixture shadowed real fork: " + name);
-        type.getDeclaredMethods(); type.getDeclaredFields(); type.getDeclaredConstructors();
+        type.getDeclaredMethods();
+        type.getDeclaredFields();
+        type.getDeclaredConstructors();
       }
       for (String key : System.getProperties().stringPropertyNames()) {
         if (key.startsWith("starsector.prepatcher.pipelineFailure.")) {
           throw new AssertionError(key + "=" + System.getProperty(key));
         }
       }
-      System.out.println("OK Linux real AoTD child-loader integration: ACTIVE capabilities=0x"
-          + Long.toHexString(capabilities) + " restore-signal=exactly-once native-economy-linkage");
+      System.out.println(
+          "OK Linux real AoTD child-loader integration: ACTIVE capabilities=0x" + Long.toHexString(capabilities)
+              + " restore-signal=exactly-once native-economy-linkage construction-before-handshake");
     }
   }
 

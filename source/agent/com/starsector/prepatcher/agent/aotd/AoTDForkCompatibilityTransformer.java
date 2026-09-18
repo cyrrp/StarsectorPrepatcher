@@ -50,9 +50,15 @@ public final class AoTDForkCompatibilityTransformer implements ClassFileTransfor
   private static final int DIRTY_MASK = DIRTY_STRUCTURE | DIRTY_INDUSTRIES | DIRTY_DERIVED_ECONOMY;
 
   private final boolean enabled;
+  private final ClassLoader runtimeLoader;
 
   public AoTDForkCompatibilityTransformer(boolean enabled) {
+    this(enabled, AoTDForkCompatibilityTransformer.class.getClassLoader());
+  }
+
+  public AoTDForkCompatibilityTransformer(boolean enabled, ClassLoader runtimeLoader) {
     this.enabled = enabled;
+    this.runtimeLoader = runtimeLoader;
   }
 
   @Override
@@ -60,6 +66,12 @@ public final class AoTDForkCompatibilityTransformer implements ClassFileTransfor
       ProtectionDomain protectionDomain, byte[] classfileBuffer) {
     if (!enabled || !CONSTRUCTION_SITE.equals(className)) return null;
     try {
+      if (!runtimeVisibleFrom(loader) || !AoTDForkClassOwnership.matches(loader, protectionDomain)) {
+        record("NOT_APPLICABLE_UNOWNED");
+        PrepatcherLog.info("NOT_APPLICABLE_UNOWNED " + PATCH_ID
+            + ": no same-source compatible AoTD fork ABI; construction method remains unchanged.");
+        return null;
+      }
       ClassNode node = read(classfileBuffer);
       if (!CONSTRUCTION_SITE.equals(node.name)) return null;
 
@@ -100,6 +112,14 @@ public final class AoTDForkCompatibilityTransformer implements ClassFileTransfor
           failure);
       return null;
     }
+  }
+
+  private boolean runtimeVisibleFrom(ClassLoader loader) {
+    if (runtimeLoader == null) return false;
+    for (ClassLoader current = loader; current != null; current = current.getParent()) {
+      if (current == runtimeLoader) return true;
+    }
+    return false;
   }
 
   private static void installWrapper(ClassNode node, MethodNode original) {

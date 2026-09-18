@@ -212,7 +212,7 @@ public final class PrepatcherAgent {
     stages.add(new OrderedTransformerPipeline.Stage("AoTD scheduler bridge",
         new AoTDSchedulerBridgeTransformer(runtimeLoader)));
     stages.add(new OrderedTransformerPipeline.Stage("AoTD fork compatibility",
-        new AoTDForkCompatibilityTransformer(config.marketScheduler)));
+        new AoTDForkCompatibilityTransformer(config.marketScheduler, runtimeLoader)));
     stages.add(new OrderedTransformerPipeline.Stage("fast-forward presentation", presentationMarkerLoaded
         ? new NoOpTransformer() : new FastForwardPresentationTransformer(config, runtimeLoader)));
     stages
