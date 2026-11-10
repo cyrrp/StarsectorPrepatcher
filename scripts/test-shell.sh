@@ -22,6 +22,25 @@ before="$(sha256sum "$flat/Miko_Simple.txt")"
 STARSECTOR_ROOT="$flat" bash "$flat/mods/Test Mod/StarsectorPrepatcher.sh" --check
 STARSECTOR_ROOT="$flat" bash "$flat/mods/Test Mod/StarsectorPrepatcher.sh" > "$fixture/java-spaces.log" 2>&1
 [[ "$before" == "$(sha256sum "$flat/Miko_Simple.txt")" ]]
+# Player launchers need only java; isolate PATH so a developer JDK cannot hide
+# an accidental javac/jar requirement in the runtime helper.
+mkdir -p "$fixture/runtime/bin"
+for utility in java dirname mkdir mktemp awk rm; do
+  ln -s "$(command -v "$utility")" "$fixture/runtime/bin/$utility"
+done
+JAVA_HOME="$fixture/runtime" PATH="$fixture/runtime/bin" STARSECTOR_ROOT="$flat" \
+  "$BASH" "$flat/mods/Test Mod/StarsectorPrepatcher.sh" > "$fixture/jre-only.log" 2>&1
+# Standard Linux launcher: ./mods resolves from the flat game root, and the
+# continued -classpath line is still an argument to Java, never a shell command.
+java_executable="$(command -v java)"
+cat > "$flat/starsector.sh" <<EOF
+#!/bin/sh
+"$java_executable" \\
+    "-javaagent:./mods/Test Mod/agent/StarsectorPrepatcherAgent.jar" \\
+    -classpath . \\
+    -version
+EOF
+(cd "$flat" && sh ./starsector.sh > "$fixture/standard-launcher.log" 2>&1)
 printf '%s\n' '-classpath .' '-javaagent:later.jar' '-version' > "$flat/Miko_Simple.txt"
 if STARSECTOR_ROOT="$flat" bash "$flat/mods/Test Mod/StarsectorPrepatcher.sh" --check > "$fixture/rejected.log" 2>&1; then
   echo 'Launcher accepted an agent after its insertion point' >&2; exit 1
@@ -31,4 +50,6 @@ ln -s "$fixture/outside" "$flat/mods/Test Mod/.build"
 if STARSECTOR_ROOT="$flat" bash "$flat/mods/Test Mod/StarsectorPrepatcher.sh" --check > "$fixture/symlink.log" 2>&1; then
   echo 'Accepted symlinked build directory' >&2; exit 1
 fi
-echo 'OK shell flat/split roots, spaces, real Java argument parsing, unchanged config, agent ordering, symlink refusal'
+echo 'OK shell flat/split roots, spaces, JRE-only and standard launchers, real Java argument parsing, unchanged config, agent ordering, symlink refusal'
+
+bash "$MOD_ROOT/scripts/test-release.sh"

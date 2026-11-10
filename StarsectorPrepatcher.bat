@@ -107,22 +107,12 @@ exit /b %RESULT%
 
 :dispatch
 if /I "%~1"=="help" goto help_cli
-if /I "%~1"=="build" goto build_cli
-if /I "%~1"=="verify" goto verify_cli
 if /I "%~1"=="install" goto install_cli
 if /I "%~1"=="uninstall" goto uninstall_cli
 echo Unknown command: %~1
 echo.
 call :show_usage
 exit /b 2
-
-:build_cli
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0build-agent.ps1"
-exit /b %ERRORLEVEL%
-
-:verify_cli
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0verify-structural.ps1"
-exit /b %ERRORLEVEL%
 
 :install_cli
 call :normalize_target "%~2"
@@ -179,19 +169,6 @@ echo   Removes only the Prepatcher entry; other javaagents and launch
 echo   options are left intact. A timestamped backup is created first.
 echo   Same targets as install.
 echo.
-echo Build ('build' command; not in the menu):
-echo   Compiles agent\StarsectorPrepatcherAgent.jar and
-echo   jars\StarsectorPrepatcherBootstrap.jar, validates the runtime
-echo   payload, and recalculates SHA256SUMS.txt.
-echo   Requires JDK 17+ on PATH (javac, java, jar).
-echo   Not needed for normal use -- the release ships prebuilt JARs.
-echo.
-echo Verify ('verify' command; not in the menu):
-echo   Runs the full release gate (documentation, structural, runtime,
-echo   startup, hyperspace, Faster Rendering). Reports go to
-echo   .build\reports, which is excluded from Git and the release.
-echo   Requires JDK 17+ on PATH. Not needed for normal use.
-echo.
 echo Run without arguments to open the interactive menu.
 echo.
 call :show_usage
@@ -210,7 +187,5 @@ echo   StarsectorPrepatcher.bat uninstall FasterRendering
 echo   StarsectorPrepatcher.bat uninstall Mikohime
 echo   StarsectorPrepatcher.bat uninstall Vanilla,Mikohime
 echo   StarsectorPrepatcher.bat uninstall All
-echo   StarsectorPrepatcher.bat build
-echo   StarsectorPrepatcher.bat verify
 echo   StarsectorPrepatcher.bat help
 exit /b 0

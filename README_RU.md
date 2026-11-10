@@ -2,13 +2,13 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Текущая версия: **0.19.0**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
+Текущая версия: **0.18.5**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
 
-[![Без препатчера и с ним](media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
+[![Без препатчера и с ним](https://github.com/kirpoly/StarsectorPrepatcher/raw/HEAD/media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
 Набор оптимизаций внутреннего кода Starsector и избранных модов.
 
-## Установка
+## Установка в Windows
 
 1. Закройте Starsector.
 2. Распакуйте мод как `<Starsector>\mods\StarsectorPrepatcher`.
@@ -25,5 +25,34 @@
 5. Если вы используете **AoTD — Theory of Toolbox**, дополнительно установите поддерживаемый мод [Scheduler Fork](https://github.com/cyrrp/AoTD-Theory-Of-Toolbox-Scheduler-Fork) (выпуск `1.0.14-spp13`) и включите его. Без него исправления производительности рынков не применяются при установленном AoTD.
 
 Для удаления: запустите `StarsectorPrepatcher.bat` и выберите **Remove javaagent** (он создаёт резервную копию каждого файла перед изменением, с меткой времени), либо удалите запись `-javaagent` вручную.
+
+## Установка в Linux
+
+Используйте релизный ZIP с готовыми JAR. Распакуйте его как `<Starsector>/mods/StarsectorPrepatcher`,
+без суффикса `-dev` или номера версии. В Linux файлы `starsector.sh` и игровые JAR лежат прямо
+в каталоге игры; подкаталог `starsector-core` не требуется. Сначала закройте игру.
+
+Для обычного лаунчера с Java 17 или новее сохраните копию `starsector.sh` и добавьте строку
+в существующую команду Java, после остальных `-javaagent` и перед `-classpath`:
+
+```sh
+    -javaagent:./mods/StarsectorPrepatcher/agent/StarsectorPrepatcherAgent.jar \
+```
+
+Сохраните завершающий `\`: следующая строка `-classpath` должна оставаться частью той же
+команды Java. Запускайте `./starsector.sh` из каталога игры. Включите мод в launcher, как в
+Windows. Для удаления уберите добавленную строку из `starsector.sh`.
+
+Для Mikohime/Faster Rendering с созданным `Miko_Simple.txt` запускайте из каталога игры:
+
+```sh
+JAVA_HOME=/path/to/your/java bash ./mods/StarsectorPrepatcher/StarsectorPrepatcher.sh
+```
+
+Укажите в `JAVA_HOME` Java из вашей установки Mikohime или уберите переменную, если эта Java
+уже доступна через `PATH`. Если файл аргументов называется иначе, укажите его абсолютный путь
+в `PREPATCHER_ARGS`. Этот лаунчер сохраняет созданный файл и добавляет Prepatcher после
+остальных агентов. Для отключения вернитесь к обычному лаунчеру. Для запуска релиза нужен
+Java runtime, компилятор не требуется. С AoTD используйте Scheduler Fork по ссылке выше.
 
 StarsectorPrepatcher распространяется на условиях, указанных в [`LICENSE`](LICENSE).

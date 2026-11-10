@@ -15,8 +15,9 @@ hyperspace-патчи из `starfarer.api.jar` и `starfarer_obf.jar`, неза�
 
 ## Classloader-архитектура и Faster Rendering
 
-Версия 0.18.4 поддерживает Java 17 и проверенную Miko Java `27+22`. Для JVM новее 27 применяется
-та же проверка возможностей, но поддержка такой версии не заявляется без отдельной валидации.
+Версия 0.18.5 проверена на Java 17 и Miko Java `27+22` в Windows, а также на нативных Linux JAR
+с Temurin Java `28-ea+13` и Faster Rendering. Для других JVM применяется та же проверка
+возможностей, но поддержка такой версии не заявляется без отдельной валидации.
 Решение никогда не зависит от версии или checksum Faster Rendering.
 
 До загрузки игровых targets выбирается один профиль:
@@ -255,7 +256,7 @@ the original call. The local path deliberately retains the last committed global
 
 ## UI market-mutation refresh
 
-Prepatcher 0.18.4 and Scheduler Fork `1.0.14-spp13` use bridge schema V10. The required production
+Prepatcher 0.18.5 and Scheduler Fork `1.0.14-spp13` use bridge schema V10. The required production
 mask `0xbff` includes `UI_ECONOMY_DISPATCH` and `ECONOMY_RESTORE_COORDINATION`; the optional
 `UI_MARKET_MUTATION_REFRESH` bit 10 extends the complete profile to `0xfff`. The explicit dispatcher
 receives a classified action, detail value and, when needed, an immutable sorted `String[]` of
@@ -813,7 +814,8 @@ inventory. Structural pass проверяет их до анализа и пос
 
 ## AoTD Scheduler Fork
 
-The development Scheduler Fork `1.0.14-spp13` package targets Prepatcher `0.19.0`, an active compatible javaagent
+Scheduler Fork `1.0.14-spp13` remains the maintained V10 implementation. Its development launcher
+dependency is aligned to Prepatcher `0.18.5`; no fork runtime or ABI change is required. It requires an active compatible javaagent
 and the original game `starfarer.api.jar`. The fork is required for optimal performance when
 AoTD Theory of Toolbox is installed; it is not a dependency for configurations without AoTD.
 

@@ -11,6 +11,7 @@ java_native_path() {
   fi
 }
 source "$MOD_ROOT/scripts/common.sh"
+require_jdk
 AGENT_CLASSES="$BUILD/agent-raw-classes"
 TEST_CLASSES="$BUILD/test-classes"
 FR_SMOKE_CLASSES="$BUILD/fr-smoke-classes"
