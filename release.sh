@@ -61,8 +61,17 @@ BODY_PATH="$BUILD/release-body.md"
 rm -f "$ZIP_PATH" "$SHA_PATH" "$BODY_PATH"
 
 INCLUDE_LIST="$BUILD/zip-include.txt"
-sed -E 's/^[[:xdigit:]]{64}  //' "$MOD_ROOT/SHA256SUMS.txt" > "$INCLUDE_LIST"
-printf 'SHA256SUMS.txt\n' >> "$INCLUDE_LIST"
+# Player distributions contain runtime and installation files only. The source
+# tree and its build checksum manifest remain available in the repository.
+PAYLOAD_FILES=(
+  LICENSE README.md README_RU.md mod_info.json prepatcher.properties
+  StarsectorPrepatcher.bat StarsectorPrepatcher.sh install-agent.ps1 uninstall-agent.ps1
+  agent/StarsectorPrepatcherAgent.jar jars/StarsectorPrepatcherBootstrap.jar
+  profiles/aggressive.properties profiles/debug.properties profiles/safe.properties
+  logs/README.txt scripts/common.sh
+)
+mapfile -t PAYLOAD_FILES < <(printf '%s\n' "${PAYLOAD_FILES[@]}" | LC_ALL=C sort)
+printf '%s\n' "${PAYLOAD_FILES[@]}" SHA256SUMS.txt > "$INCLUDE_LIST"
 LC_ALL=C sort -u -o "$INCLUDE_LIST" "$INCLUDE_LIST"
 
 ENTRY_ARGS=()
@@ -72,7 +81,30 @@ while IFS= read -r f; do
   ENTRY_ARGS+=("${MOD_NAME}/${f}")
 done < "$INCLUDE_LIST"
 
-(cd "$MOD_ROOT/.." && jar cMf "$ZIP_PATH" "${ENTRY_ARGS[@]}")
+# Reject stale source/build output before staging the player files. The staged
+# distribution receives its own manifest, covering only its packaged payload.
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$MOD_ROOT" && sha256sum --check --quiet SHA256SUMS.txt) \
+    || die 'Release inputs differ from SHA256SUMS.txt. Rebuild before packaging.'
+elif command -v shasum >/dev/null 2>&1; then
+  (cd "$MOD_ROOT" && shasum -a 256 --check --quiet SHA256SUMS.txt) \
+    || die 'Release inputs differ from SHA256SUMS.txt. Rebuild before packaging.'
+else
+  die "Neither sha256sum nor shasum is available."
+fi
+
+PACKAGE_ROOT=$(mktemp -d "$BUILD/package.XXXXXX")
+PLAYER_ROOT="$PACKAGE_ROOT/$MOD_NAME"
+for f in "${PAYLOAD_FILES[@]}"; do
+  mkdir -p "$PLAYER_ROOT/$(dirname "$f")"
+  cp -- "$MOD_ROOT/$f" "$PLAYER_ROOT/$f"
+done
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$PLAYER_ROOT" && sha256sum --text "${PAYLOAD_FILES[@]}" > SHA256SUMS.txt)
+else
+  (cd "$PLAYER_ROOT" && shasum -a 256 --text "${PAYLOAD_FILES[@]}" > SHA256SUMS.txt)
+fi
+(cd "$PACKAGE_ROOT" && jar cMf "$ZIP_PATH" "${ENTRY_ARGS[@]}")
 
 if command -v sha256sum >/dev/null 2>&1; then
   ZIP_SHA256=$(sha256sum "$ZIP_PATH" | awk '{print $1}')
@@ -95,7 +127,7 @@ else
   {
     cat "$NOTES_FILE"
     printf '\n## Packaging\n\n'
-    printf 'Agent and bootstrap JARs have been rebuilt using the standard release workflow, and `SHA256SUMS.txt` has been regenerated.\n\n'
+    printf 'The player archive contains runtime and installation files only; its `SHA256SUMS.txt` covers the packaged files. Developer tools and source code are available in the repository.\n\n'
     printf 'GitHub release artifact:\n\n'
     printf '`%s`\n\n' "$ZIP_NAME"
     printf 'SHA-256:\n\n'

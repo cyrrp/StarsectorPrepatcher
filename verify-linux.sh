@@ -3,6 +3,7 @@ set -euo pipefail
 (( $# == 0 )) || { echo 'Set STARSECTOR_ROOT to select Linux JARs; positional JAR overrides are not supported here.' >&2; exit 2; }
 MOD_ROOT="$(cd -- "$(dirname -- "$0")" && pwd)"
 source "$MOD_ROOT/scripts/common.sh"
+require_jdk
 bash "$MOD_ROOT/build-agent.sh"
 bash "$MOD_ROOT/scripts/test-shell.sh"
 if command -v shellcheck >/dev/null; then

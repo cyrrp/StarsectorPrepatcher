@@ -30,7 +30,7 @@ function Find-GameRoot([string] $startPath) {
     }
     throw "Could not find a Starsector root above $startPath."
 }
-$gameRoot = Find-GameRoot $modRoot
+$gameRoot = if ($env:STARSECTOR_ROOT) { (Resolve-Path -LiteralPath $env:STARSECTOR_ROOT).Path } else { Find-GameRoot $modRoot }
 $core = Join-Path $gameRoot 'starsector-core'
 
 # Only the legacy Faster Rendering layout ships the custom system loader inside fr.jar; the Agent
@@ -638,11 +638,11 @@ if ($aotdAvailable) {
 }
 
 $strategicJumpReport =
-    Join-Path $reportDir 'strategic-jump-destination-first.txt'
+    Join-Path $reportDir 'strategic-jump-destination-plan.txt'
 $ErrorActionPreference = 'Continue'
 try {
     $strategicJumpOutput = @(& java @exports -cp $classPath `
-        com.starsector.prepatcher.agent.StrategicJumpDestinationFirstTransformerTest `
+        com.starsector.prepatcher.agent.StrategicJumpDestinationPlanTransformerTest `
         $verificationConfig (Join-Path $core 'starfarer_obf.jar') 2>&1)
     $strategicJumpExitCode = $LASTEXITCODE
 } finally {
@@ -656,7 +656,7 @@ $strategicJumpLines
     [string[]] $strategicJumpLines,
     $utf8)
 if ($strategicJumpExitCode -ne 0) {
-    throw 'Strategic jump destination-first verification failed.'
+    throw 'Strategic jump destination plan verification failed.'
 }
 
 $strategicJumpIndexReport = Join-Path $reportDir 'strategic-jump-destination-index.txt'

@@ -283,7 +283,8 @@ public final class DocumentationConsistencyTest {
           "obsolete release path remains in StarsectorPrepatcher: " + obsoletePath);
     }
     Path releaseReport = requiredFile(root.resolve("docs/releases/" + expected + ".md"));
-    String releaseHeading = readUtf8(releaseReport).split("\\R", 2)[0];
+    String releaseHeading = readUtf8(releaseReport).lines().filter(line -> line.startsWith("# "))
+        .findFirst().orElse("");
     require(releaseHeading.equals("# Отчёт о выпуске " + expected),
         "release report H1 does not match mod_info.json version: " + releaseHeading);
     for (String relative : List.of("source/agent/com/starsector/prepatcher/agent/PrepatcherAgent.java")) {
@@ -527,6 +528,7 @@ public final class DocumentationConsistencyTest {
     Set<String> inputs = new LinkedHashSet<>();
     try (Stream<Path> files = Files.list(root)) {
       files.filter(Files::isRegularFile).filter(path -> !path.getFileName().toString().equals("SHA256SUMS.txt"))
+          .filter(path -> !path.getFileName().toString().matches("StarsectorPrepatcher-.*\\.zip(?:\\.sha256)?"))
           .filter(path -> !path.getFileName().toString().equals(".git")).map(path -> display(root, path)).sorted()
           .forEach(inputs::add);
     }

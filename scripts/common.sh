@@ -28,15 +28,19 @@ else
   CORE="$GAME_ROOT"
 fi
 if [[ -n "${JAVA_HOME:-}" ]]; then
-  [[ -x "$JAVA_HOME/bin/javac" && -x "$JAVA_HOME/bin/jar" && -x "$JAVA_HOME/bin/java" ]] || {
-    echo 'JAVA_HOME must point to a JDK (java, javac and jar required).' >&2
+  [[ -x "$JAVA_HOME/bin/java" ]] || {
+    echo 'JAVA_HOME must contain bin/java.' >&2
     return 1
   }
   export PATH="$JAVA_HOME/bin:$PATH"
 fi
-for tool in java javac jar; do
-  command -v "$tool" >/dev/null || { echo "Missing JDK tool: $tool" >&2; return 1; }
-done
+command -v java >/dev/null || { echo 'Missing Java runtime: set JAVA_HOME or PATH.' >&2; return 1; }
+require_jdk() {
+  local tool
+  for tool in javac jar; do
+    command -v "$tool" >/dev/null || { echo "Missing JDK tool: $tool" >&2; return 1; }
+  done
+}
 BUILD="$MOD_ROOT/.build"
 export GAME_ROOT CORE BUILD
 [[ ! -L "$BUILD" ]] || { echo 'Refusing a symlinked .build directory.' >&2; return 1; }

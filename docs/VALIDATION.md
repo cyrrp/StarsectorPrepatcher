@@ -9,7 +9,34 @@
 mutable-буферы или меняют bytecode. Его цель — ловить повторяющиеся ошибки до графического прогона
 и не принимать «патч загрузился» за доказательство корректности.
 
+## Player archive gate
+
+`release.sh --dry-run` packages only the two runtime JARs, metadata/configuration,
+profiles, license, player README files, log-directory guidance, and installation/launch
+scripts with their runtime helper. Source, tests, build/verification/release tools,
+development dependencies, internal documentation and demonstration media stay in the repository.
+The Windows launcher exposes installation, removal and help; developers invoke build and
+verification scripts directly from a source checkout.
+
+The source `SHA256SUMS.txt` must pass before packaging. Root-level generated
+`StarsectorPrepatcher-*.zip` and `.zip.sha256` outputs are excluded from source inputs in both
+builders and the documentation gate: keeping an old release beside a checkout must not make
+that external artifact a required source dependency. All actual source inputs remain checked.
+The archive has a separate manifest
+covering exactly its payload, excluding the manifest itself. Run `bash scripts/test-release.sh`
+to check a valid package, absence of developer files, extracted payload checksums, and rejection
+of files modified after hashing. `scripts/test-shell.sh` also invokes this gate.
+When investigating antivirus reports, retain the original archive, record exact sample hashes,
+compare individual-file and archive verdicts, and scan the final player archive. Record engine
+coverage, analysis dates and any missing Defender evidence in the release report; a structural
+archive test or an old zero-detection report alone does not establish antivirus acceptance.
+
 ## Linux native gate
+
+Release validation uses clean official Windows/Linux game JARs. On Windows,
+`STARSECTOR_ROOT` selects an isolated game directory for both build and verification;
+on Linux it selects the flat game directory. Installed modpack-modified core JARs are
+outside this release's validation scope. Synthetic mutation/negative fixtures remain required.
 
 Run `STARSECTOR_ROOT=/path/to/starsector JAVA_HOME=/path/to/jdk bash verify-linux.sh`
 against native Linux JARs and a generated Mikohime/FR argument file. `verify-structural.sh`
@@ -277,7 +304,7 @@ Review не считается завершённым без следующих 
 - structural test `sound.Sound` подтверждает exact inline suppression, отсутствие helper
   `INVOKESTATIC` и полную postcondition/idempotency marker;
 - полный `verify-structural` на целевой Java 17; PowerShell parser check и POSIX shell syntax check;
-- реальный startup/activity smoke на той же Starsector-установке, для которой публикуется guard.
+- startup/activity smoke на чистых игровых JAR целевой платформы и поддерживаемом Java/FR-маршруте.
 
 Численное performance-заявление делается только после этих gates и одинакового A/B-прогона. Если
 какой-либо gate временно неприменим, патч остаётся experimental/disabled by default. Исключение
