@@ -10,9 +10,11 @@ $modFolder = Split-Path $modRoot -Leaf
 $gameRoot = (Resolve-Path (Join-Path $modRoot '..\..')).Path
 $agentJar = Join-Path $modRoot 'agent\StarsectorPrepatcherAgent.jar'
 $agentArg = "-javaagent:../mods/$modFolder/agent/StarsectorPrepatcherAgent.jar"
-$managedAgentTokenPattern = '-javaagent:"?\.\.[\\/]+mods[\\/]+' +
+$managedAgentPathPattern = '\.\.[\\/]+mods[\\/]+' +
         [regex]::Escape($modFolder) +
-        '[\\/]+agent[\\/]+StarsectorPrepatcherAgent\.jar"?'
+        '[\\/]+agent[\\/]+StarsectorPrepatcherAgent\.jar'
+$managedAgentTokenPattern = '(?:-javaagent:(?:' + $managedAgentPathPattern +
+        '|"' + $managedAgentPathPattern + '")|"-javaagent:' + $managedAgentPathPattern + '")'
 $managedAgentLinePattern = '(?i)^\s*' + $managedAgentTokenPattern + '\s*$'
 $frAgentArg = '-javaagent:fr.agent.jar'
 $legacyFrLoaderArg = '-Djava.system.class.loader=com.genir.renderer.loaders.AppClassLoader'
@@ -90,9 +92,9 @@ $availableTargets = @(
         Path = Join-Path $gameRoot 'mikohime\DefaultVM'
         RequiresJavaPrefix = $false
         IsArgumentFile = $true
-        # DefaultVM is the persistent template that Configure_Me.cmd concatenates into
-        # Miko_Simple.txt. It has no -classpath line (the classpath is appended dynamically
-        # afterwards), so the managed entry is appended at the end of the template.
+        # Original Mikohime concatenates DefaultVM into Miko_Simple.txt. Managed
+        # agents are removed from this template and emitted by the generator
+        # after the rendering agent, before the dynamically appended classpath.
         RequiresClasspath = $false
     },
     [pscustomobject]@{
@@ -112,21 +114,37 @@ $availableTargets = @(
 )
 $mikohimeGeneratorSpec = $availableTargets | Where-Object Name -eq 'MikohimeGenerator'
 $modernMikohimeGenerator = $false
+$gaiusMikohime = $false
 if (Test-Path -LiteralPath $mikohimeGeneratorSpec.Path -PathType Leaf) {
     $generatorProbe = [IO.File]::ReadAllText($mikohimeGeneratorSpec.Path)
+    # Recognize native integration in both the monolithic and modular Gaius
+    # configurators. DefaultVM may be absent or left over from an older install.
+    $nativeAgentDefinition = $generatorProbe -match
+            '(?im)^[ \t]*set[ \t]+"?PrepatcherAgent=-javaagent:[^\r\n]*StarsectorPrepatcherAgent\.jar"?[ \t]*\r?$'
+    $nativeAgentOutput = $generatorProbe -match
+            '(?im)^[ \t]*if[ \t]+/I[^\r\n]*[!%]PrepatcherStatus[!%][^\r\n]*\becho[ \t]+"?[!%]PrepatcherAgent[!%]"?[ \t]*\r?$'
+    $nativeGenerationModule = $generatorProbe -match
+            '(?im)^set[ \t]+"GenerationModule=!WindowsConfigRoot!\\Configurator\.Generation\.cmd"[ \t]*\r?$' -and
+            $generatorProbe -match
+            '(?im)^call[ \t]+"!GenerationModule!"[ \t]+BuildPendingFiles[ \t]*\r?$' -and
+            $generatorProbe -match '(?im)^[ \t]*set[ \t]+"PrepatcherStatus=(?:Enabled|Disabled)"[ \t]*\r?$'
+    $gaiusMikohime = ($nativeAgentDefinition -and $nativeAgentOutput) -or $nativeGenerationModule
     $modernMikohimeGenerator = $generatorProbe -match
             '(?im)^:AppendAgentsAndClasspath[ \t]*\r?$' -and
             $generatorProbe -match '(?im)^set[ \t]+"?OutputFile='
 }
-$mikohimeTargets = if ($modernMikohimeGenerator) {
+$mikohimeTargets = if ($gaiusMikohime) {
+    @()
+} elseif ($modernMikohimeGenerator) {
     $availableTargets | Where-Object Name -in @('MikohimeSimple', 'MikohimeGenerator')
 } else {
     $availableTargets | Where-Object Name -like 'Mikohime*'
 }
 if ($Target -eq 'All') {
     $selectedTargets = $availableTargets | Where-Object {
-        -not $modernMikohimeGenerator -or
-        $_.Name -notin @('MikohimeTemplate', 'MikohimeLauncher')
+        (-not $gaiusMikohime -or $_.Name -notlike 'Mikohime*') -and
+        (-not $modernMikohimeGenerator -or
+        $_.Name -notin @('MikohimeTemplate', 'MikohimeLauncher'))
     }
 } else {
     $requestedNames = $Target -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
@@ -142,6 +160,16 @@ if ($Target -eq 'All') {
             'Mikohime' { $mikohimeTargets }
         }
     }
+}
+
+if ($gaiusMikohime -and ($Target -eq 'All' -or $requestedNames -contains 'Mikohime')) {
+    Write-Host 'Mikohime (Gaius): Prepatcher is managed by Configure_Me.cmd.' -ForegroundColor Cyan
+    Write-Host 'Open Configure_Me.cmd, enable StarsectorPrepatcher, and generate the configuration.'
+    Write-Host 'Then launch the game with Miko_Rouge.bat (or Miko_Silent.bat if available).'
+    Write-Host 'This installer did not enable Prepatcher or change any Mikohime launch files.'
+    if (-not $selectedTargets) { return }
+} elseif ($Target -eq 'All' -or $requestedNames -contains 'Mikohime') {
+    Write-Host 'Mikohime (original/legacy): installing through the Prepatcher installer.' -ForegroundColor Cyan
 }
 
 function Normalize-MikohimeTemplate {
@@ -181,7 +209,7 @@ function Normalize-MikohimeSimple {
     }
     if ($classpath -lt 0) { throw 'Miko_Simple.txt has no classpath anchor.' }
     for ($index = $classpath + 1; $index -lt $lines.Count; $index++) {
-        if ($lines[$index] -match '(?i)^\s*-javaagent:') {
+        if ($lines[$index] -match '(?i)^\s*"?-javaagent:') {
             throw 'Miko_Simple.txt contains a javaagent after -classpath.'
         }
     }
@@ -395,7 +423,7 @@ function New-InstallationPlan {
             TargetSpec = $TargetSpec
             OriginalContent = $Content
             NewContent = Normalize-MikohimeSimple $Content
-            ExistingAgentCount = ([regex]::Matches($Content, '(?im)^\s*-javaagent:')).Count
+            ExistingAgentCount = ([regex]::Matches($Content, '(?im)^\s*"?-javaagent:')).Count
         }
     }
     if ($TargetSpec.Name -eq 'MikohimeGenerator') {
@@ -529,7 +557,7 @@ function New-InstallationPlan {
 # predictable half-installed multi-target result when one target is missing or malformed.
 $plans = foreach ($targetSpec in $selectedTargets) {
     if (-not (Test-Path -LiteralPath $targetSpec.Path -PathType Leaf)) {
-        throw "$($targetSpec.Name) vmparams not found: $($targetSpec.Path)`nThe mod must be inside <Starsector>\mods\$modFolder."
+        throw "$($targetSpec.Name) launch file not found: $($targetSpec.Path)`nCheck the selected launch path and complete its launcher configuration first."
     }
     $content = [System.IO.File]::ReadAllText($targetSpec.Path)
     if ($targetSpec.RequiresJavaPrefix -and $content -notmatch '(?i)-noverify') {

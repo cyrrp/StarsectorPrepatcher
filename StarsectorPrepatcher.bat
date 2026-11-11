@@ -64,12 +64,12 @@ if errorlevel 2 goto :select_fr
 set "TARGETS=Vanilla"
 
 :select_fr
-choice /C YN /N /M "  Faster Rendering (starsector-core\fr.vmparams)? [Y/N]: "
+choice /C YN /N /M "  Separate Faster Rendering launcher (starsector-core\fr.vmparams)? [Y/N]: "
 if errorlevel 2 goto :select_miko
 if defined TARGETS (set "TARGETS=%TARGETS%,FasterRendering") else (set "TARGETS=FasterRendering")
 
 :select_miko
-choice /C YN /N /M "  Mikohime / Java 27 (Miko_Simple.txt, DefaultVM, Configure_Me.cmd, Miko_Rouge.bat)? [Y/N]: "
+choice /C YN /N /M "  Mikohime (original or Gaius; detected automatically)? [Y/N]: "
 if errorlevel 2 goto :select_done
 if defined TARGETS (set "TARGETS=%TARGETS%,Mikohime") else (set "TARGETS=Mikohime")
 
@@ -97,7 +97,7 @@ if "%~3"=="" (
 set "RESULT=%ERRORLEVEL%"
 echo.
 if "%RESULT%"=="0" (
-    echo Action completed successfully.
+    echo Selected launch paths processed. Follow any instructions above.
 ) else (
     echo ERROR: action failed with exit code %RESULT%.
 )
@@ -163,6 +163,11 @@ echo   file is validated before any of them is written, and a timestamped
 echo   backup is created. The agent exports its ASM modules at startup, so
 echo   no --add-exports flags are needed.
 echo   Targets: Vanilla, FasterRendering, Mikohime (comma-separated), or All.
+echo   Original Mikohime: this installer updates its launch files.
+echo   Gaius Mikohime with built-in Prepatcher support: enable or disable it
+echo   in Configure_Me.cmd. This installer only displays instructions for it.
+echo   FasterRendering selects a separate fr.vmparams launch path; it is not
+echo   needed just because Faster Rendering is enabled inside Mikohime.
 echo.
 echo Remove (menu item 2 / 'uninstall' command):
 echo   Removes only the Prepatcher entry; other javaagents and launch

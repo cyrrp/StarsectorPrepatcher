@@ -2,7 +2,7 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Current version: **0.18.5**. Supported game build: **Starsector 0.98a-RC8**.
+Current version: **0.18.6**. Supported game build: **Starsector 0.98a-RC8**.
 
 [![Unplayable without Prepatcher versus smooth with Prepatcher](https://github.com/kirpoly/StarsectorPrepatcher/raw/HEAD/media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
@@ -20,11 +20,13 @@ A collection of code optimizations for Starsector internals and selected mods.
 
    **OR**
 
-   Run the included `StarsectorPrepatcher.bat`, choose **Install javaagent**, and answer the yes/no prompts for each launch path. This does the edit automatically with timestamped backups, and also supports [Faster Rendering](https://github.com/Halke1986/starsector-render) (`fr.vmparams`) and the [Mikohime launcher](https://github.com/GaiusCassiusL/Starsector_Mikohime-Unofficial-Java28-Configurator) (Java 27+) — for those, use the .bat or figure it out yourself.
+   Run the included `StarsectorPrepatcher.bat`, choose **Install javaagent**, and select the launch paths you use. It edits vanilla, the separate [Faster Rendering](https://github.com/Halke1986/starsector-render) launcher (`fr.vmparams`), and original Mikohime automatically with timestamped backups. Configure original Mikohime once before installing the agent.
+
+   [Gaius's Mikohime configurator](https://github.com/GaiusCassiusL/Starsector_Mikohime-Unofficial-Java28-Configurator) has built-in Prepatcher support: enable **StarsectorPrepatcher** there, generate the configuration, and launch with `Miko_Rouge.bat` or `Miko_Silent.bat` if available. Our installer detects this integration and displays instructions without editing its files. Selecting **Mikohime** is sufficient when Faster Rendering runs through Mikohime; the separate **FasterRendering** target is not needed for that launch path.
 4. Enable **StarsectorPrepatcher** in the launcher (recommended — shows patch status in the game log) and start the game.
 5. If you use **AoTD — Theory of Toolbox**, also install the maintained [Scheduler Fork](https://github.com/cyrrp/AoTD-Theory-Of-Toolbox-Scheduler-Fork) mod (release `1.0.14-spp13`) and enable it. Without it, the market performance fixes do not apply when AoTD is installed.
 
-To remove: run `StarsectorPrepatcher.bat` and choose **Remove javaagent** (it backs up each file before changing it, with a timestamp), or delete the `-javaagent` entry manually.
+To remove: for Gaius's Mikohime with built-in integration, disable **StarsectorPrepatcher** in `Configure_Me.cmd` and regenerate the configuration before deleting the mod folder. For other launch paths, run `StarsectorPrepatcher.bat` and choose **Remove javaagent** (it backs up each changed file with a timestamp), or delete the `-javaagent` entry manually.
 
 ## Linux installation
 

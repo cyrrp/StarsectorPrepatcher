@@ -31,6 +31,20 @@ compare individual-file and archive verdicts, and scan the final player archive.
 coverage, analysis dates and any missing Defender evidence in the release report; a structural
 archive test or an old zero-detection report alone does not establish antivirus acceptance.
 
+## Windows installer gate
+
+Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-installers.ps1`.
+The isolated fixtures must cover original Mikohime install/reinstall/uninstall, persistent
+generator output and agent order, backups, foreign agents, all three supported quoting forms,
+and rejection of missing or unknown original layouts before any selected file is written.
+For Gaius native integration, cover monolithic and modular generators, absent generated files,
+enabled/disabled agents, another selected mod folder, and a stale `DefaultVM`. Installation
+and removal must return guidance without modifying or backing up any Mikohime files.
+Combined targets and `All` must still process Vanilla/FasterRendering, preserving other agents.
+Use the `GaiusConfigurator` string-array parameter when invoking the script from PowerShell
+to include locally downloaded upstream `Configure_Me.cmd` files in the same preservation matrix.
+No fixture executes Java, the installed game's generator, or a downloaded upstream script.
+
 ## Linux native gate
 
 Release validation uses clean official Windows/Linux game JARs. On Windows,

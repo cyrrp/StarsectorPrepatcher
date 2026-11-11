@@ -9,9 +9,11 @@ $modRoot = (Resolve-Path $PSScriptRoot).Path
 $modFolder = Split-Path $modRoot -Leaf
 $gameRoot = (Resolve-Path (Join-Path $modRoot '..\..')).Path
 $agentArg = "-javaagent:../mods/$modFolder/agent/StarsectorPrepatcherAgent.jar"
-$managedAgentTokenPattern = '-javaagent:"?\.\.[\\/]+mods[\\/]+' +
+$managedAgentPathPattern = '\.\.[\\/]+mods[\\/]+' +
         [regex]::Escape($modFolder) +
-        '[\\/]+agent[\\/]+StarsectorPrepatcherAgent\.jar"?'
+        '[\\/]+agent[\\/]+StarsectorPrepatcherAgent\.jar'
+$managedAgentTokenPattern = '(?:-javaagent:(?:' + $managedAgentPathPattern +
+        '|"' + $managedAgentPathPattern + '")|"-javaagent:' + $managedAgentPathPattern + '")'
 $managedAgentLinePattern = '(?i)^\s*' + $managedAgentTokenPattern + '\s*$'
 $availableTargets = @(
     [pscustomobject]@{
@@ -42,20 +44,35 @@ $availableTargets = @(
 )
 $mikohimeGeneratorSpec = $availableTargets | Where-Object Name -eq 'MikohimeGenerator'
 $modernMikohimeGenerator = $false
+$gaiusMikohime = $false
 if (Test-Path -LiteralPath $mikohimeGeneratorSpec.Path -PathType Leaf) {
     $generatorProbe = [IO.File]::ReadAllText($mikohimeGeneratorSpec.Path)
+    # Keep the same native-integration recognition as install-agent.ps1.
+    $nativeAgentDefinition = $generatorProbe -match
+            '(?im)^[ \t]*set[ \t]+"?PrepatcherAgent=-javaagent:[^\r\n]*StarsectorPrepatcherAgent\.jar"?[ \t]*\r?$'
+    $nativeAgentOutput = $generatorProbe -match
+            '(?im)^[ \t]*if[ \t]+/I[^\r\n]*[!%]PrepatcherStatus[!%][^\r\n]*\becho[ \t]+"?[!%]PrepatcherAgent[!%]"?[ \t]*\r?$'
+    $nativeGenerationModule = $generatorProbe -match
+            '(?im)^set[ \t]+"GenerationModule=!WindowsConfigRoot!\\Configurator\.Generation\.cmd"[ \t]*\r?$' -and
+            $generatorProbe -match
+            '(?im)^call[ \t]+"!GenerationModule!"[ \t]+BuildPendingFiles[ \t]*\r?$' -and
+            $generatorProbe -match '(?im)^[ \t]*set[ \t]+"PrepatcherStatus=(?:Enabled|Disabled)"[ \t]*\r?$'
+    $gaiusMikohime = ($nativeAgentDefinition -and $nativeAgentOutput) -or $nativeGenerationModule
     $modernMikohimeGenerator = $generatorProbe -match
             '(?im)^:AppendAgentsAndClasspath[ \t]*\r?$' -and
             $generatorProbe -match '(?im)^set[ \t]+"?OutputFile='
 }
-$mikohimeTargets = if ($modernMikohimeGenerator) {
+$mikohimeTargets = if ($gaiusMikohime) {
+    @()
+} elseif ($modernMikohimeGenerator) {
     $availableTargets | Where-Object Name -in @('MikohimeSimple', 'MikohimeGenerator')
 } else {
     $availableTargets | Where-Object Name -like 'Mikohime*'
 }
 if ($Target -eq 'All') {
     $selectedTargets = $availableTargets | Where-Object {
-        -not $modernMikohimeGenerator -or $_.Name -ne 'MikohimeTemplate'
+        (-not $gaiusMikohime -or $_.Name -notlike 'Mikohime*') -and
+        (-not $modernMikohimeGenerator -or $_.Name -ne 'MikohimeTemplate')
     }
 } else {
     $requestedNames = $Target -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
@@ -73,10 +90,19 @@ if ($Target -eq 'All') {
     }
 }
 
+if ($gaiusMikohime -and ($Target -eq 'All' -or $requestedNames -contains 'Mikohime')) {
+    Write-Host 'Mikohime (Gaius): Prepatcher is managed by Configure_Me.cmd.' -ForegroundColor Cyan
+    Write-Host 'Open Configure_Me.cmd, disable StarsectorPrepatcher, and regenerate the configuration.'
+    Write-Host 'This uninstaller did not disable Prepatcher or change any Mikohime launch files.'
+    if (-not $selectedTargets) { return }
+} elseif ($Target -eq 'All' -or $requestedNames -contains 'Mikohime') {
+    Write-Host 'Mikohime (original/legacy): removing through the Prepatcher uninstaller.' -ForegroundColor Cyan
+}
+
 # Preflight every selected file before removing an entry from any of them.
 $plans = foreach ($targetSpec in $selectedTargets) {
     if (-not (Test-Path -LiteralPath $targetSpec.Path -PathType Leaf)) {
-        throw "$($targetSpec.Name) vmparams not found: $($targetSpec.Path)"
+        throw "$($targetSpec.Name) launch file not found: $($targetSpec.Path)`nCheck the selected launch path and complete its launcher configuration first."
     }
     $content = [System.IO.File]::ReadAllText($targetSpec.Path)
     if ($targetSpec.Name -eq 'MikohimeGenerator') {

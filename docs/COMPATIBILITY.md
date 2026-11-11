@@ -15,7 +15,7 @@ hyperspace-патчи из `starfarer.api.jar` и `starfarer_obf.jar`, неза�
 
 ## Classloader-архитектура и Faster Rendering
 
-Версия 0.18.5 проверена на Java 17 и Miko Java `27+22` в Windows, а также на нативных Linux JAR
+Версия 0.18.6 проверена на Java 17 и Miko Java `27+22` в Windows, а также на нативных Linux JAR
 с Temurin Java `28-ea+13` и Faster Rendering. Для других JVM применяется та же проверка
 возможностей, но поддержка такой версии не заявляется без отдельной валидации.
 Решение никогда не зависит от версии или checksum Faster Rendering.
@@ -256,7 +256,7 @@ the original call. The local path deliberately retains the last committed global
 
 ## UI market-mutation refresh
 
-Prepatcher 0.18.5 and Scheduler Fork `1.0.14-spp13` use bridge schema V10. The required production
+Prepatcher 0.18.6 and Scheduler Fork `1.0.14-spp13` use bridge schema V10. The required production
 mask `0xbff` includes `UI_ECONOMY_DISPATCH` and `ECONOMY_RESTORE_COORDINATION`; the optional
 `UI_MARKET_MUTATION_REFRESH` bit 10 extends the complete profile to `0xfff`. The explicit dispatcher
 receives a classified action, detail value and, when needed, an immutable sorted `String[]` of
@@ -801,6 +801,37 @@ StarsectorPrepatcher.bat install All
 Каждый изменяемый файл получает отдельный timestamped backup; повторный вызов идемпотентен.
 Если telemetry или другой agent был установлен позднее, installer нужно запустить ещё раз, чтобы
 Prepatcher снова стал последним `-javaagent`.
+
+### Windows Mikohime: владелец конфигурации
+
+Цель `Mikohime` различает генераторы по структуре `Configure_Me.cmd`, без проверки версии,
+хеша или наличия `DefaultVM`. В конфигураторе Gaius со встроенной интеграцией единый script
+задаёт `PrepatcherAgent` с `StarsectorPrepatcherAgent.jar` и условно выводит его по
+`PrepatcherStatus`; модульный вариант задаёт `GenerationModule` как
+`!WindowsConfigRoot!\Configurator.Generation.cmd`, вызывает его `BuildPendingFiles` и
+ведёт `PrepatcherStatus`. Эти признаки выбирают передачу управления конфигуратору.
+
+Для этого варианта install/uninstall показывают инструкцию включить/отключить
+`StarsectorPrepatcher` в `Configure_Me.cmd` и заново создать конфигурацию. Они завершаются
+без ошибки и без заявления об установке или удалении агента. Файлы Mikohime, включая текущий
+`Miko_Simple.txt`, генератор, модули, лаунчеры и оставшийся от старой установки `DefaultVM`,
+не изменяются; backups для них не создаются. Наличие агента в текущем argfile не означает,
+что он выбран в конфигураторе. Передача управления работает и до первой генерации argfile.
+
+Оригинальный Mikohime без встроенной интеграции обслуживается нашим installer-ом:
+`Miko_Simple.txt`, `mikohime/DefaultVM`, `Configure_Me.cmd` и `Miko_Rouge.bat` проходят общую
+предварительную проверку; запись выполняется с отдельными timestamped backups и rollback.
+Агент выводится генератором перед classpath, после rendering agent; из `DefaultVM` его
+управляемые записи удаляются. Существующий adapter старого OutputFile-генератора без нативной
+интеграции сохраняется. Повторная установка идемпотентна; записи `-javaagent:path`,
+`-javaagent:"path"` и `"-javaagent:path"` для текущей папки мода распознаются одинаково.
+Неизвестная структура или отсутствие обязательного launch-файла остаётся ошибкой до записи;
+это сообщение не приписывает отсутствие файла неправильному размещению мода.
+
+При комбинированном выборе и `All` пути Vanilla/FasterRendering обрабатываются независимо
+от передачи Mikohime конфигуратору; их обязательные файлы по-прежнему проверяются до записи.
+Цель FasterRendering означает отдельный `fr.vmparams`, а не включение FR внутри Mikohime.
+Перед удалением папки мода пользователь Gaius должен отключить агент и пересоздать конфигурацию.
 
 ## Presentation и structural patches
 
