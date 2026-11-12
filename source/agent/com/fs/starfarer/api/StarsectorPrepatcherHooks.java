@@ -285,6 +285,11 @@ public final class StarsectorPrepatcherHooks {
   public static String readUtf8Normalized(InputStream input) throws IOException {
     return StarsectorPrepatcherStartupRuntime.readUtf8Normalized(input);
   }
+
+  public static String readUtf8NormalizedWithoutBom(InputStream input) throws IOException {
+    String text = StarsectorPrepatcherStartupRuntime.readUtf8Normalized(input);
+    return text.startsWith("\ufeff") ? text.substring(1) : text;
+  }
   public static void startupLogSuppressed(int category) {
     StarsectorPrepatcherStartupRuntime.startupLogSuppressed(category);
   }

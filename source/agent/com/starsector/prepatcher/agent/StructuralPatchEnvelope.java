@@ -77,6 +77,20 @@ final class StructuralPatchEnvelope {
       Set<String> publicApi = publicApi(node);
       markerPresent = hasPatchMarker(node, patchId);
       Match<P> match = patch.match(node);
+      if (match.notNeeded) {
+        if (markerPresent) throw mismatch("owned patch cannot become unnecessary without its postcondition");
+        PatchPostcondition absentCost = bytes -> {
+          ClassNode current = readClass(bytes);
+          if (hasPatchMarker(current, patchId) || !patch.match(current).notNeeded) {
+            throw mismatch(patchId + " no-longer-needed input contract was invalidated");
+          }
+        };
+        absentCost.validate(state.bytes);
+        state.applied.add(new AppliedPatch(patchId, absentCost, null, false));
+        recordStatus(state.className, patchId, "NOT_NEEDED");
+        PrepatcherLog.info("NOT_NEEDED " + patchId + " in " + state.className + ": " + match.reason);
+        return;
+      }
       if (match.alreadyApplied) throw already(match.reason);
       if (match.plan == null) throw mismatch(match.reason);
       PatchReport report = patch.mutate(match.plan);

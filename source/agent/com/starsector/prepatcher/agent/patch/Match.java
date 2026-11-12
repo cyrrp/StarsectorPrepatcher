@@ -5,11 +5,17 @@ public final class Match<P> {
   public final P plan;
   public final String reason;
   public final boolean alreadyApplied;
+  public final boolean notNeeded;
 
   private Match(P plan, String reason, boolean alreadyApplied) {
+    this(plan, reason, alreadyApplied, false);
+  }
+
+  private Match(P plan, String reason, boolean alreadyApplied, boolean notNeeded) {
     this.plan = plan;
     this.reason = reason;
     this.alreadyApplied = alreadyApplied;
+    this.notNeeded = notNeeded;
   }
 
   public static <P> Match<P> plan(P plan) {
@@ -24,5 +30,10 @@ public final class Match<P> {
   /** The class does not carry the structure this patch requires. */
   public static <P> Match<P> incompatible(String reason) {
     return new Match<>(null, reason, false);
+  }
+
+  /** The measured cost is absent in the input; no ownership or mutation is claimed. */
+  public static <P> Match<P> notNeeded(String reason) {
+    return new Match<>(null, reason, false, true);
   }
 }

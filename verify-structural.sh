@@ -39,8 +39,12 @@ fr_legacy_loader_state() {
 }
 
 bash "$MOD_ROOT/build-agent.sh"
-if [[ "$(java -cp "$BUILD/build-classes:$MOD_ROOT/lib/*" com.starsector.prepatcher.build.NamespaceJarTool --detect "$CORE/starfarer_obf.jar")" == linux ]]; then
+if [[ "$(cat "$BUILD/game-namespace.txt")" == linux-* ]]; then
   exec bash "$MOD_ROOT/verify-linux.sh" "$@"
+fi
+NATIVE_CORE="$CORE"
+if [[ "$(cat "$BUILD/game-namespace.txt")" != windows-0.98a-RC8 ]]; then
+  CORE="$BUILD/canonical-core"
 fi
 clean_build_directory test-classes
 clean_build_directory fr-smoke-classes
@@ -89,6 +93,9 @@ else
 fi
 
 CLASS_PATH="$TEST_CLASSES:$TEST_CP"
+java -cp "$CLASS_PATH" \
+  com.starsector.prepatcher.agent.ControlPlaneIsolationTest \
+  2>&1 | tee "$REPORT_DIR/control-plane-isolation.txt"
 java -cp "$CLASS_PATH" \
   com.starsector.prepatcher.agent.FasterRenderingConfigurationTest \
   2>&1 | tee "$REPORT_DIR/faster-rendering-configuration.txt"
@@ -365,6 +372,7 @@ java "${EXPORTS[@]}" -cp "$RUNTIME_CP" \
 # JavaCompatibilityRoute selects JAVA27_STANDARD for any runtime feature >= 27, so the gate
 # discovers the installed JDK by that contract instead of pinning one exact build directory.
 JAVA27="$GAME_ROOT/jdk-27+/bin/java (no runtime with feature >= 27 installed)"
+if [[ -n "${COMPATIBILITY_JAVA:-}" ]]; then JAVA27="$COMPATIBILITY_JAVA"; fi
 for candidate_home in "$GAME_ROOT"/jdk-*; do
   [[ -d "$candidate_home" ]] || continue
   candidate="$candidate_home/bin/java.exe"
@@ -795,4 +803,19 @@ else
   fi
 fi
 
+if [[ "$NATIVE_CORE" != "$CORE" ]]; then
+  NATIVE_CP="$TEST_CLASSES:$AGENT_CLASSES:$MOD_ROOT/lib/*:$NATIVE_CORE/*"
+  java -Xverify:none -cp "$NATIVE_CP" com.starsector.prepatcher.agent.NativeNamespaceCompatibilityTest \
+    "$VERIFICATION_CONFIG_JAVA" "$NATIVE_CORE/starfarer_obf.jar" "$NATIVE_CORE/fs.common_obf.jar" \
+    "$NATIVE_CORE/fs.sound_obf.jar" "$NATIVE_CORE/starfarer.api.jar" \
+    2>&1 | tee "$REPORT_DIR/native-namespace-pipeline.txt"
+  NATIVE_JAVA=java
+  NATIVE_VERIFICATION=-Xverify:none
+  if [[ -x "$JAVA27" ]]; then NATIVE_JAVA="$JAVA27"; NATIVE_VERIFICATION=-Xverify:all; fi
+  "$NATIVE_JAVA" "$NATIVE_VERIFICATION" "-javaagent:$AGENT_JAR_JAVA" \
+    -cp "$TEST_CLASSES:$NATIVE_CORE/*" com.starsector.prepatcher.runtime.NativeRuntimeLinkageSmokeTest \
+    "$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" "$BUILD/native-targets.txt" \
+    2>&1 | tee "$REPORT_DIR/native-runtime-linkage.txt"
+  if grep -q 'Atomic transformer pipeline rolled back' "$REPORT_DIR/native-runtime-linkage.txt"; then exit 1; fi
+fi
 echo 'Documentation/structural/runtime/hyperspace/startup/FR verification completed.'

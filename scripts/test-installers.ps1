@@ -145,9 +145,9 @@ type mikohime\DefaultPath>>Miko_Rouge.bat
 echo ..\%JavaPath%\bin\java.exe @..\Miko_Simple.txt>>Miko_Rouge.bat
 echo if %errorlevel% neq 0 pause>>Miko_Rouge.bat
 '@
-foreach ($quote in @('plain', 'path', 'whole')) {
+foreach ($quote in @('plain', 'path', 'whole', 'merged', 'merged-stale', 'merged-disabled')) {
     $game = New-Game "original-$quote"
-    $renderEnabled = $quote -ne 'path'
+    $renderEnabled = $quote -notin @('path', 'merged-disabled')
     $generator = if ($renderEnabled) { $original } else { $original.Replace('FR_status=Enabled', 'FR_status=Disabled') }
     Write-FixtureFile $game 'Configure_Me.cmd' $generator
     Write-FixtureFile $game 'mikohime\DefaultVM' "-Xmx8192m`n"
@@ -156,14 +156,26 @@ foreach ($quote in @('plain', 'path', 'whole')) {
         'plain' { $agent }
         'path' { '-javaagent:"../mods/StarsectorPrepatcher/agent/StarsectorPrepatcherAgent.jar"' }
         'whole' { '"' + $agent + '"' }
+        default { $agent }
     }
     Write-FixtureFile $game 'Miko_Simple.txt' ("-Xmx8192m`n-javaagent:telemetry.jar`n" + $entry + "`n-classpath game.jar`nMain`n")
-    Write-FixtureFile $game 'Miko_Rouge.bat' "@echo off`n..\fixture-java\bin\java.exe @..\Miko_Simple.txt`nif errorlevel 1 pause`n"
-    New-FixtureJar (Join-Path $game 'starsector-core\fr.jar') @{
-        'com/genir/renderer/loaders/AppClassLoader.class' = 'fixture'
-        'com/genir/renderer/loaders/ClassTransformer.class' = 'fixture'
+    if ($quote -in @('merged', 'merged-stale')) {
+        $frBefore = if ($quote -eq 'merged-stale') { "-javaagent:fr.agent.jar`n-javaagent:fr.jar" } else { '-javaagent:fr.jar' }
+        Write-FixtureFile $game 'Miko_Simple.txt' ("-Xmx8192m`n-javaagent:telemetry.jar`n" + $frBefore + "`n" + $entry + "`n-classpath fr.jar;game.jar`nMain`n")
     }
-    if ($quote -eq 'whole') {
+    Write-FixtureFile $game 'Miko_Rouge.bat' "@echo off`n..\fixture-java\bin\java.exe @..\Miko_Simple.txt`nif errorlevel 1 pause`n"
+    if ($quote -notlike 'merged*') {
+        New-FixtureJar (Join-Path $game 'starsector-core\fr.jar') @{
+            'com/genir/renderer/loaders/AppClassLoader.class' = 'fixture'
+            'com/genir/renderer/loaders/ClassTransformer.class' = 'fixture'
+        }
+    }
+    if ($quote -like 'merged*') {
+        New-FixtureJar (Join-Path $game 'starsector-core\fr.jar') @{
+            'META-INF/MANIFEST.MF' = "Manifest-Version: 1.0`r`nPremain-Class: com.genir.renderer.agent.Agent`r`n"
+        }
+    }
+    if ($quote -in @('whole', 'merged-stale')) {
         New-FixtureJar (Join-Path $game 'starsector-core\fr.agent.jar') @{
             'META-INF/MANIFEST.MF' = "Manifest-Version: 1.0`r`nPremain-Class: Fixture`r`n"
         }
@@ -176,6 +188,12 @@ foreach ($quote in @('plain', 'path', 'whole')) {
     Assert-AgentOrder $installed
     Assert-That ($installed.Contains('-javaagent:telemetry.jar')) 'Original installation lost another agent'
     Assert-That ($installed.Contains('-Xmx8192m')) 'Original installation changed memory settings'
+    if ($quote -like 'merged*') {
+        $expectedMergedAgents = if ($renderEnabled) { 1 } else { 0 }
+        Assert-That ([regex]::Matches($installed, '(?m)^-javaagent:fr\.jar\r?$').Count -eq $expectedMergedAgents) 'Merged FR agent missing, duplicated or enabled against user choice'
+        Assert-That (-not $installed.Contains('-javaagent:fr.agent.jar')) 'Stale split FR agent remained active'
+        Assert-That (-not $installed.Contains('-Djava.system.class.loader=')) 'Legacy FR loader remained active with merged agent'
+    }
     foreach ($path in $targets) {
         $fullPath = Join-Path $game $path
         if ([IO.File]::ReadAllText($fullPath) -ne $originalContents[$path]) {
@@ -195,7 +213,7 @@ foreach ($quote in @('plain', 'path', 'whole')) {
     Assert-That ($generatorExit -eq 0) 'Original generator failed'
     $generated = [IO.File]::ReadAllText((Join-Path $game 'Miko_Simple.txt'))
     Assert-AgentOrder $generated
-    $renderingOption = if ($quote -eq 'whole') { '-javaagent:fr.agent.jar' } else {
+    $renderingOption = if ($quote -like 'merged*') { '-javaagent:fr.jar' } elseif ($quote -eq 'whole') { '-javaagent:fr.agent.jar' } else {
         '-Djava.system.class.loader=com.genir.renderer.loaders.AppClassLoader'
     }
     if ($renderEnabled) {
@@ -214,7 +232,7 @@ foreach ($quote in @('plain', 'path', 'whole')) {
     Assert-That (-not $removed.Contains('StarsectorPrepatcherAgent.jar')) 'Quoted agent removal failed'
     Assert-That ($removed.Contains('-javaagent:telemetry.jar')) 'Uninstall removed another agent'
 }
-Write-Host 'PASS: original install/reinstall/generation/uninstall, backups, foreign agents and three quoting forms'
+Write-Host 'PASS: original install/reinstall/generation/uninstall, backups, foreign agents, quoting and merged/split/legacy FR'
 
 $game = New-Game 'invalid'
 Write-FixtureFile $game 'Configure_Me.cmd' $original

@@ -44,8 +44,35 @@ Combined targets and `All` must still process Vanilla/FasterRendering, preservin
 Use the `GaiusConfigurator` string-array parameter when invoking the script from PowerShell
 to include locally downloaded upstream `Configure_Me.cmd` files in the same preservation matrix.
 No fixture executes Java, the installed game's generator, or a downloaded upstream script.
+Original fixtures also cover a merged FR agent/runtime JAR, with and without a stale split
+agent beside it: install/reinstall/regeneration must retain exactly one `fr.jar` agent before
+Prepatcher, preserve foreign agents/memory, and leave FR disabled when the user selected that.
 
 ## Linux native gate
+
+Release coverage includes clean Windows/Linux 0.98a-RC8 and 0.98.5a-RC3 JARs.
+Both builders detect the native namespace and create a private canonical compilation view.
+The Windows verifier runs its complete existing suite on that view, then
+`NativeNamespaceCompatibilityTest` on the original JARs and an actual-agent
+`NativeRuntimeLinkageSmokeTest` with a classpath containing only native game JARs.
+`COMPATIBILITY_JAVA` can select an installed Java 27+ executable independently of the game directory.
+Linux uses the same native tests after its canonical suite. Require complete target inventory,
+textual ASM roundtrip equality, native output identity, idempotence, atomic rollback, mandatory
+name-repair preservation, and resolution of every payload/target descriptor and reflection bridge.
+
+`GameUpdateBehaviorTest`, invoked by the structural gate on both versions, executes real isolated
+`Memory.advance` bodies for empty, data-only, expiry, requirement and paused cases and compares raw
+and transformed results. It also executes `BaseTiledTerrain.render/isTileVisible` with square,
+wide and tall arrays and short/oversized viewports; both the viewport-height calculation and the
+comparison/assignment clamp must agree. Only the graphics call is stubbed; no GL context is opened.
+Loading/save tests cover leading, repeated and interior BOMs, CR normalization, stream closure and
+read errors while retaining the old reader's BOM behavior. New rules parsing keeps all nine sites.
+For a script runner with no INFO cost, require `NOT_NEEDED`, unchanged bytes and no hook or marker;
+foreign hooks/markers and reintroduced INFO cost must never receive that status.
+`ParticleArrayCleanupCompatibilityTest` checks byte/counter preservation, repeat handling,
+changed increments, static field drift, foreign ownership and changed calls, plus revalidation
+of the absence contract after a later mutation. Supplying the real current FR JAR exercises its
+actual override body; the native agent gate must report `NOT_NEEDED` without pipeline rollback.
 
 Release validation uses clean official Windows/Linux game JARs. On Windows,
 `STARSECTOR_ROOT` selects an isolated game directory for both build and verification;
@@ -63,11 +90,19 @@ native identity, ASM verification, idempotence, rollback and mandatory name-repa
 runtime payload/target linkage on Java 28 + FR; and DOM/SAX/XML transformer plus Preferences
 import/export/flush with no pipeline failures. Platform isolation must also reject unparseable
 input before any patch stage, using bootstrap/platform ownership instead of package names.
+Control-plane isolation must reject the agent's own loader/CodeSource pair before parsing or
+transaction initialization, including a legacy FR predefine entry. Foreign and unknown code
+sources in that same parent loader must still reach the pipeline.
 
 When the real AoTD fork is supplied, run its existing structural/behavior contract tests and
 the actual-agent child-loader handshake (`0xfff`) with exactly-once restore callback delivery.
 The native smoke parent classpath must exclude test-only AoTD stub classes. A missing fork
 must be reported as untested, never as supported by the core-only gate.
+The construction ownership regression includes encoded file URLs and legacy FR JAR-root URLs
+with literal spaces, plus signs and Unicode paths, with foreign-archive and JAR-entry negatives.
+With the legacy FR loader, run the real child-loader smoke in `--legacy-fr-script-loader` mode:
+the construction patch must apply before handshake, followed by `0xfff` negotiation and the
+exactly-once restore callback. The parent classpath must still exclude test-only AoTD stubs.
 
 Shell checks cover flat Linux and split Windows layouts, spaces in paths, LF scripts, Java
 argument parsing, agent order, unchanged Mikohime settings and safe build cleanup. Build and
@@ -455,7 +490,7 @@ Safe baseline остаётся `20` классов/`59` wrapper sites, aggressiv
 | `patch.marketNoOpCallbacks` | тысячи inherited vanilla/BaseIndustry subclasses: dormant, building, disrupted, direct disruption-memory edit и custom overrides | JFR `BaseIndustry.advance`; structural retained-body/wake checks; isolated actual-agent audit=2 smoke; callback counters в fixture | dormant inherited call skips between audits; building/setDisrupted wake same call; custom `advance/isDisrupted/getDisruptedKey` full cadence; condition callbacks untouched; state transient |
 | `patch.commRelaySystemIndex` | hyperspace с functional/nonfunctional relays и 1000+ systems | index hits/builds/fallbacks, candidates/total, validation scans/systems | relay и Random/tie behavior совпадают; size/endpoints проверяются каждый query; exact identity/location audit выполняется по TTL; владелец релиза принимает bounded staleness до TTL для direct middle-system mutation |
 | `patch.shipAdvanceScratch` | бой 100–300 ships/fighters с modded listeners/commands | scratch counts + allocation profile | listener snapshot fresh; order, multiplicity, callback count и nested reentrancy совпадают |
-| `patch.particleCleanup` | particle-heavy эффект с массовым expiry | group/expiry/linear-removal counts | все particles advance до cleanup; survivor order/duplicates/equality/exception behavior совпадают |
+| `patch.particleCleanup` | particle-heavy эффект с массовым expiry | group/expiry/linear-removal counts or proven `NOT_NEEDED` | vanilla keeps advance-before-cleanup and stable survivors; an already optimized FR body and its native ordering remain unchanged |
 | `patch.loadingTextReader` | **known-disabled:** изолированный startup/mission прогон больших JSON/CSV с CRLF, UTF-8 boundary и ошибками чтения | allocation profile + loading/save runtime suite + mission smoke | текст, normalization, close и exception timing совпадают с vanilla; до доказательства переключатель остаётся `false` во всех профилях |
 | `patch.startupLogAggregation` | **known-disabled:** изолированный cold startup/mission прогон большой mod-сборки | число INFO/WARN/ERROR до и после + mission smoke | уменьшаются только целевые repetitive INFO; работа loaders и WARN/ERROR сохраняются; до доказательства переключатель остаётся `false` во всех профилях |
 | `patch.rulesLiteralParser` | загрузка большого rules.csv и randomized differential corpus | parser call/CPU profile + differential suite | split/replace semantics совпадают для delimiters, пустых fields и Unicode |

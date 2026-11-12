@@ -24,6 +24,7 @@ public final class LoadingSaveRuntimeRegressionTest {
     try {
       configure(temp, 15);
       testUtf8Reader();
+      testUtf8BomReader();
       testUtf8ReaderClosesOnFailure();
       testRuleLiteralHelpers();
       testProgressFrequency(temp);
@@ -72,6 +73,25 @@ public final class LoadingSaveRuntimeRegressionTest {
     }
     require(failed, "read failure was swallowed");
     require(input.closed, "failed input was not closed");
+  }
+
+  private static void testUtf8BomReader() throws Exception {
+    for (String sample : new String[] {"", "plain", "\ufeff", "\ufeff\ufeffa\r\n", "a\ufeffb", "\r\ufeffПривет\r\n"}) {
+      byte[] bytes = sample.getBytes(StandardCharsets.UTF_8);
+      String normalized = sample.replace("\r", "");
+      String expected = normalized.startsWith("\ufeff") ? normalized.replaceFirst("\ufeff", "") : normalized;
+      TrackingInputStream input = new TrackingInputStream(bytes);
+      require(expected.equals(StarsectorPrepatcherHooks.readUtf8NormalizedWithoutBom(input)), "BOM reader changed native prefix semantics");
+      require(input.closed, "BOM reader did not close input");
+      require(normalized.equals(StarsectorPrepatcherHooks.readUtf8Normalized(new ByteArrayInputStream(bytes))), "legacy reader removed a BOM");
+    }
+    FailingInputStream input = new FailingInputStream(1024, 333);
+    try {
+      StarsectorPrepatcherHooks.readUtf8NormalizedWithoutBom(input);
+      throw new AssertionError("BOM reader swallowed a read failure");
+    } catch (IOException expected) {
+      require(input.closed, "BOM reader failed to close on error");
+    }
   }
 
   private static void testRuleLiteralHelpers() {

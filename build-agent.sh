@@ -14,14 +14,20 @@ ASM_COMMONS="$MOD_ROOT/lib/asm-commons-9.10.1.jar"
 CP_BUILD="$ASM_CORE:$ASM_COMMONS:$ASM_TREE"
 CP_BOOT="$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/log4j-1.2.9.jar"
 find "$MOD_ROOT/source/build" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -cp "$CP_BUILD" -d "$BUILD/build-classes"
-NAMESPACE="$(java -cp "$BUILD/build-classes:$CP_BUILD" com.starsector.prepatcher.build.NamespaceJarTool --detect "$CORE/starfarer_obf.jar")"
+NAMESPACE_TABLES="$MOD_ROOT/source/resources/com/starsector/prepatcher/agent"
+NAMESPACE="$(java -cp "$BUILD/build-classes:$CP_BUILD" com.starsector.prepatcher.build.NamespaceJarTool --detect "$CORE/starfarer_obf.jar" "$NAMESPACE_TABLES")"
+printf '%s\n' "$NAMESPACE" > "$BUILD/game-namespace.txt"
 COMPILE_CORE="$CORE"
-if [[ "$NAMESPACE" == linux ]]; then
+if [[ "$NAMESPACE" != windows-0.98a-RC8 ]]; then
   COMPILE_CORE="$BUILD/canonical-core"
   mkdir -p "$COMPILE_CORE"
+  for dependency in "$CORE"/*.jar; do
+    case "${dependency##*/}" in starfarer_obf.jar|fs.common_obf.jar|fs.sound_obf.jar|starfarer.api.jar) continue ;; esac
+    cp -- "$dependency" "$COMPILE_CORE/"
+  done
   for game_jar in starfarer_obf.jar fs.common_obf.jar fs.sound_obf.jar starfarer.api.jar; do
     java -cp "$BUILD/build-classes:$CP_BUILD" com.starsector.prepatcher.build.NamespaceJarTool \
-      "$MOD_ROOT/source/resources/com/starsector/prepatcher/agent/linux-0.98a-RC8.tsv" \
+      "$NAMESPACE_TABLES/$NAMESPACE.tsv" \
       "$CORE/$game_jar" "$COMPILE_CORE/$game_jar"
   done
 fi
@@ -52,14 +58,14 @@ fi
 printf '%s\n' \
   'Manifest-Version: 1.0' \
   'Implementation-Title: StarsectorPrepatcher Agent' \
-  'Implementation-Version: 0.18.6' \
+  'Implementation-Version: 0.18.7' \
   'Premain-Class: com.starsector.prepatcher.agent.PrepatcherAgent' \
   'Can-Redefine-Classes: false' \
   'Can-Retransform-Classes: true' '' > "$BUILD/agent.mf"
 printf '%s\n' \
   'Manifest-Version: 1.0' \
   'Implementation-Title: StarsectorPrepatcher Bootstrap' \
-  'Implementation-Version: 0.18.6' '' > "$BUILD/bootstrap.mf"
+  'Implementation-Version: 0.18.7' '' > "$BUILD/bootstrap.mf"
 jar --create --file "$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" --manifest "$BUILD/agent.mf" --date=2026-01-01T00:00:00Z -C "$BUILD/agent-classes" .
 jar --create --file "$MOD_ROOT/jars/StarsectorPrepatcherBootstrap.jar" --manifest "$BUILD/bootstrap.mf" --date=2026-01-01T00:00:00Z -C "$BUILD/bootstrap-classes" .
 

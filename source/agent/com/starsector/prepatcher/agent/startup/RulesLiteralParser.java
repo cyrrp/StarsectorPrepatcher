@@ -23,7 +23,13 @@ public final class RulesLiteralParser implements StructuredPatch<RulesLiteralPar
 
   @Override
   public Match<Plan> match(ClassNode node) {
-    MethodNode method = requireMethod(node, "o00000", "(Lcom/fs/starfarer/loading/ResourceLoaderState;)V");
+    MethodNode method = only(node.methods.stream().filter(m ->
+        (m.desc.equals("(Lcom/fs/starfarer/loading/ResourceLoaderState;)V")
+            || m.desc.equals("(Ljava/lang/String;Lcom/fs/starfarer/loading/ResourceLoaderState;)V"))
+        && (countCalls(m, Opcodes.INVOKEVIRTUAL, "java/lang/String", "replaceAll",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;") > 0
+            || countCalls(m, Opcodes.INVOKESTATIC, HOOKS, "removeCarriageReturns",
+                "(Ljava/lang/String;)Ljava/lang/String;") > 0)).toList(), "rules literal parser body");
     List<MethodInsnNode> carriageReturns = new ArrayList<>();
     List<MethodInsnNode> newlineToSpace = new ArrayList<>();
     List<MethodInsnNode> newlineSplits = new ArrayList<>();

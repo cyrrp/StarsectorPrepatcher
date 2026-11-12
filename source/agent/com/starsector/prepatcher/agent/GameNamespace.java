@@ -13,10 +13,10 @@ final class GameNamespace {
     private static volatile GameNamespace active;
     private final Map<String,String> forward = new HashMap<>(), reverse = new HashMap<>();
     private final Map<String,String> nativeMembers = new HashMap<>(), canonicalMembers = new HashMap<>();
-    private final boolean linux;
-    private GameNamespace() { linux=false; }
+    private final boolean translated;
+    private GameNamespace() { translated=false; }
     private GameNamespace(InputStream input) throws IOException {
-        linux=true;
+        translated=true;
         List<String[]> rows;
         try (BufferedReader reader=new BufferedReader(new InputStreamReader(input,StandardCharsets.UTF_8))) {
             rows=reader.lines().filter(s -> !s.isBlank() && !s.startsWith("#")).map(s -> s.split("\\t",-1)).toList();
@@ -48,29 +48,57 @@ final class GameNamespace {
             try (InputStream in=ClassLoader.getSystemResourceAsStream("com/fs/starfarer/campaign/CampaignEngine.class")) {
                 if (in==null) return IDENTITY; // -version / no game classpath; do not cache absence.
                 ClassNode node=new ClassNode(); new ClassReader(in).accept(node,ClassReader.SKIP_CODE|ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES);
-                boolean isLinux=node.methods.stream().anyMatch(m -> m.name.equals("advance") && m.desc.equals("(FLcom/fs/starfarer/util/super/B;)V"));
-                boolean isWindows=node.methods.stream().anyMatch(m -> m.name.equals("advance") && m.desc.equals("(FLcom/fs/starfarer/util/A/new;)V"));
-                if (!isLinux && !isWindows) throw new IllegalStateException("Unknown Starsector bytecode namespace; refusing guessed names");
-                if (isLinux) {
-                    InputStream table=GameNamespace.class.getResourceAsStream("/com/starsector/prepatcher/agent/linux-0.98a-RC8.tsv");
-                    if (table==null) throw new IllegalStateException("Linux name table is missing from the agent");
-                    active=new GameNamespace(table);
-                } else active=IDENTITY;
-                System.setProperty("starsector.prepatcher.gameNamespace",isLinux?"linux-0.98a-RC8":"windows-0.98a-RC8");
+                String canonicalAdvance="(FLcom/fs/starfarer/util/A/new;)V";
+                GameNamespace selected=null;
+                String selectedId=null;
+                if (node.methods.stream().anyMatch(m -> m.name.equals("advance") && m.desc.equals(canonicalAdvance))) {
+                    selected=IDENTITY;
+                    selectedId="windows-0.98a-RC8";
+                }
+                for (String id : List.of("linux-0.98a-RC8", "windows-0.98.5a-RC3", "linux-0.98.5a-RC3")) {
+                    String resource="/com/starsector/prepatcher/agent/"+id+".tsv";
+                    String descriptor=advanceDescriptor(resource);
+                    if (node.methods.stream().anyMatch(m -> m.name.equals("advance") && m.desc.equals(descriptor))) {
+                        if (selected!=null) throw new IllegalStateException("Ambiguous Starsector bytecode namespace");
+                        selected=new GameNamespace(GameNamespace.class.getResourceAsStream(resource));
+                        selectedId=id;
+                    }
+                }
+                if (selected==null) throw new IllegalStateException("Unknown Starsector bytecode namespace; refusing guessed names");
+                active=selected;
+                System.setProperty("starsector.prepatcher.gameNamespace",selectedId);
                 return active;
             } catch (IOException e) { throw new IllegalStateException("Cannot read game namespace",e); }
         }
     }
+    private static String advanceDescriptor(String resource) throws IOException {
+        InputStream table=GameNamespace.class.getResourceAsStream(resource);
+        if (table==null) throw new IllegalStateException("Namespace name table is missing: "+resource);
+        try (BufferedReader reader=new BufferedReader(new InputStreamReader(table,StandardCharsets.UTF_8))) {
+            for (String line; (line=reader.readLine())!=null;) {
+                String[] row=line.split("\t",-1);
+                if (row.length==3 && row[0].equals("C") && row[1].equals("com/fs/starfarer/util/A/new")) {
+                    return "(FL"+row[2]+";)V";
+                }
+            }
+        }
+        throw new IllegalStateException("Namespace table has no advance parameter correspondence: "+resource);
+    }
     String canonicalName(String nativeName) { return reverse.getOrDefault(nativeName,nativeName); }
     String nativeName(String canonicalName) { return forward.getOrDefault(canonicalName,canonicalName); }
-    byte[] toCanonical(byte[] bytes) { return linux ? remap(bytes,true,false) : bytes; }
-    byte[] toNative(byte[] bytes) { return linux ? remap(bytes,false,false) : bytes; }
-    byte[] toNativeRuntime(byte[] bytes) { return repairNative(toNative(bytes)); }
-    byte[] runtimePayload(byte[] bytes) { return repairNative(linux ? remap(bytes,false,true) : bytes); }
+    byte[] toCanonical(byte[] bytes) { return translated ? remap(bytes,true,false) : bytes; }
+    byte[] toNative(byte[] bytes) { return translated ? remap(bytes,false,false) : bytes; }
+    byte[] toNativeRuntime(byte[] bytes, boolean repairNames) {
+        byte[] nativeBytes=toNative(bytes);
+        return translated && repairNames
+                ? IllegalObfuscatedMemberNameRepair.repair(new ClassReader(nativeBytes).getClassName(),nativeBytes)
+                : repairNative(nativeBytes);
+    }
+    byte[] runtimePayload(byte[] bytes) { return repairNative(translated ? remap(bytes,false,true) : bytes); }
     private byte[] repairNative(byte[] bytes) {
         // A canonical legal name may map to a dotted native name. FR already ran
         // before us, so do not reintroduce illegal names after its repair pass.
-        return linux && Runtime.version().feature() >= 27
+        return translated && Runtime.version().feature() >= 27
                 ? IllegalObfuscatedMemberNameRepair.repair(new ClassReader(bytes).getClassName(),bytes)
                 : bytes;
     }

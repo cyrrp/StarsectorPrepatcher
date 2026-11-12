@@ -119,6 +119,20 @@ public final class AoTDForkCompatibilityTransformerTest {
     Path directory = Files.createTempDirectory("prepatcher-construction-ownership-");
     List<Path> files = new ArrayList<>();
     try {
+      URL spacedFork = fixtureJar(directory, files, "fork space + кириллица.jar", classes);
+      String encoded = spacedFork.toExternalForm();
+      String rawSpaces = encoded.replace("%20", " ");
+      try (URLClassLoader loader = resourceOnlyLoader(new URL[]{spacedFork})) {
+        for (URL source : List.of(spacedFork, new URL(rawSpaces + "!/"),
+            new URL(encoded + "!/"), new URL(rawSpaces))) {
+          assertOwned(loader, domain(source), original, "file URL / legacy FR JAR root: " + source);
+        }
+        assertUnowned(loader, domain(new URL(encoded + "!/foreign.class")), original,
+            "JAR entry is not its root");
+        URL other = fixtureJar(directory, files, "other space + кириллица.jar", classes);
+        assertUnowned(loader, domain(new URL(other.toExternalForm().replace("%20", " ") + "!/")), original,
+            "different legacy FR JAR with identical contract bytes");
+      }
       Map<String, byte[]> upstream = new HashMap<>(classes);
       upstream.keySet().removeIf(name -> name.startsWith("data.kaysaar.aotd.tot.compat."));
       URL upstreamUrl = fixtureJar(directory, files, "upstream.jar", upstream);
@@ -165,6 +179,16 @@ public final class AoTDForkCompatibilityTransformerTest {
       for (Path file : files) Files.deleteIfExists(file);
       Files.deleteIfExists(directory);
     }
+  }
+
+  private static void assertOwned(ClassLoader loader, ProtectionDomain domain, byte[] original, String label)
+      throws Exception {
+    System.clearProperty(STATUS_KEY);
+    byte[] patched = new AoTDForkCompatibilityTransformer(true).transform(loader, TARGET, null, domain, original);
+    require(patched != null && "APPLIED".equals(System.getProperty(STATUS_KEY)),
+        label + " failed ownership/transform: " + System.getProperty(STATUS_KEY));
+    inspectPatched(patched);
+    verifyMethods(patched);
   }
 
   private static URL fixtureJar(Path directory, List<Path> files, String name, Map<String, byte[]> classes)

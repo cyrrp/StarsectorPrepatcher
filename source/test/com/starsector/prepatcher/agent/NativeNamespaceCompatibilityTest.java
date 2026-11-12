@@ -15,7 +15,7 @@ import com.starsector.prepatcher.agent.uieconomy.IndustryMarketMutationTransform
 import com.starsector.prepatcher.agent.uieconomy.VanillaMarketOpenLocalizationContractTransformer;
 
 /** Native Linux bytes, the production ordered pipeline, and native output: no renamed game installation. */
-public final class LinuxNamespaceCompatibilityTest {
+public final class NativeNamespaceCompatibilityTest {
     private static void require(boolean ok,String text) { if(!ok) throw new AssertionError(text); }
     private static String text(byte[] bytes) {
         StringWriter out=new StringWriter();
@@ -24,7 +24,7 @@ public final class LinuxNamespaceCompatibilityTest {
     }
     public static void main(String[] args) throws Exception {
         GameNamespace ns=GameNamespace.current();
-        require("linux-0.98a-RC8".equals(System.getProperty("starsector.prepatcher.gameNamespace")),"not testing native Linux namespace");
+        require(System.getProperty("starsector.prepatcher.gameNamespace") != null,"native namespace was not detected");
         PrepatcherConfig config=PrepatcherConfig.load(Path.of(args[0]));
         ClassLoader loader=ClassLoader.getSystemClassLoader();
         Set<String> targets=new TreeSet<>(PrepatcherTransformer.TARGET_CLASSES);
@@ -40,7 +40,7 @@ public final class LinuxNamespaceCompatibilityTest {
             }
         }
         Set<String> found=new HashSet<>(); input.keySet().forEach(n -> found.add(ns.canonicalName(n)));
-        Files.write(Path.of(args[0]).toAbsolutePath().getParent().resolve("linux-native-targets.txt"),
+        Files.write(Path.of(args[0]).toAbsolutePath().getParent().resolve("native-targets.txt"),
                 input.keySet().stream().map(n -> n.replace('/','.')).toList());
         Set<String> missing=new TreeSet<>(PrepatcherTransformer.TARGET_CLASSES); missing.removeAll(found);
         require(missing.isEmpty(),"unmapped/missing optimizer targets "+missing);
@@ -59,7 +59,12 @@ public final class LinuxNamespaceCompatibilityTest {
                 new Analyzer<>(new BasicVerifier()).analyze(node.name,m);
             byte[] twice=pipeline.transform(loader,name,null,null,result);
             require(System.getProperty("starsector.prepatcher.pipelineFailure."+name.replace('/','.'))==null,"second pass rejected "+name);
-            require(twice==null || text(result).equals(text(twice)),"non-idempotent native pipeline "+name);
+            if (twice!=null && !text(result).equals(text(twice))) {
+                Path reports=Path.of(args[0]).toAbsolutePath().getParent();
+                Files.writeString(reports.resolve("native-idempotence-before.txt"),text(result));
+                Files.writeString(reports.resolve("native-idempotence-after.txt"),text(twice));
+                throw new AssertionError("non-idempotent native pipeline "+name);
+            }
             patched++;
         }
         byte[] sample=input.get(ns.nativeName("com/fs/starfarer/campaign/CampaignEngine"));
@@ -84,6 +89,6 @@ public final class LinuxNamespaceCompatibilityTest {
         });
         OrderedTransformerPipeline failing=new OrderedTransformerPipeline(List.of(new OrderedTransformerPipeline.Stage("mutation",mutate),new OrderedTransformerPipeline.Stage("rejection",reject)),loader,false,false);
         require(failing.transform(loader,new ClassReader(sample).getClassName(),null,null,sample)==null,"rollback must preserve original native bytes");
-        System.out.println("OK Linux namespace targets="+input.size()+" patched="+patched+" roundtrip/native-identity/full-order/ASM/idempotency/atomic-rollback");
+        System.out.println("OK native namespace targets="+input.size()+" patched="+patched+" roundtrip/native-identity/full-order/ASM/idempotency/atomic-rollback");
     }
 }

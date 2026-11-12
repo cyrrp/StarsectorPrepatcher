@@ -3,6 +3,7 @@ package com.starsector.prepatcher.agent;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.ref.WeakReference;
 import java.security.ProtectionDomain;
+import java.security.CodeSource;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -16,6 +17,8 @@ final class OrderedTransformerPipeline implements ClassFileTransformer {
   private final WeakReference<ClassLoader> runtimeLoader;
   private final boolean predefineBridgeRoute;
   private final boolean repairIllegalNamesInAgentPipeline;
+  private final ClassLoader controlLoader;
+  private final CodeSource controlSource;
 
   OrderedTransformerPipeline(List<Stage> stages, ClassLoader runtimeLoader, boolean predefineBridgeRoute,
       boolean repairIllegalNamesInAgentPipeline) {
@@ -23,6 +26,8 @@ final class OrderedTransformerPipeline implements ClassFileTransformer {
     this.runtimeLoader = new WeakReference<>(runtimeLoader);
     this.predefineBridgeRoute = predefineBridgeRoute;
     this.repairIllegalNamesInAgentPipeline = repairIllegalNamesInAgentPipeline;
+    this.controlLoader = OrderedTransformerPipeline.class.getClassLoader();
+    this.controlSource = OrderedTransformerPipeline.class.getProtectionDomain().getCodeSource();
     System.setProperty("starsector.prepatcher.transformerOrder",
         String.join(" -> ", this.stages.stream().map(Stage::name).toList()));
   }
@@ -35,6 +40,12 @@ final class OrderedTransformerPipeline implements ClassFileTransformer {
     // These bytes are never a game/mod transformation surface and may use a newer
     // classfile format than the ASM used to inspect Starsector's bytecode.
     if (loader == null || loader == ClassLoader.getPlatformClassLoader()) return null;
+    // A legacy predefine callback is outside Instrumentation's recursion guard.
+    // Loading our transaction/ASM classes there must not start another transaction
+    // while those same control classes are still being defined. Other JARs in the
+    // same parent loader (including sound.Sound) remain eligible.
+    if (loader == controlLoader && controlSource != null && protectionDomain != null
+        && controlSource.equals(protectionDomain.getCodeSource())) return null;
     ClassLoader expected = runtimeLoader.get();
     if (predefineBridgeRoute && expected != null && loader == expected) {
       // Old Faster Rendering defines its com.fs classes from the bridge below.
@@ -99,7 +110,7 @@ final class OrderedTransformerPipeline implements ClassFileTransformer {
         }
         // Translation is inside the same transaction: conversion failure must not
         // publish successful patch diagnostics or return a half-translated class.
-        byte[] output = stageChanged ? namespace.toNativeRuntime(current)
+        byte[] output = stageChanged ? namespace.toNativeRuntime(current, repairIllegalNamesInAgentPipeline)
             : (changed || !nullWhenUnchanged ? pipelineInput : null);
         diagnostics.commit();
         return output;

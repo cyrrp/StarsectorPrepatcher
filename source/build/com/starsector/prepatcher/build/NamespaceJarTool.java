@@ -9,15 +9,28 @@ import org.objectweb.asm.commons.*;
 /** Offline test/build namespace view. Outputs are private intermediates, never game replacements. */
 public final class NamespaceJarTool {
     public static void main(String[] args) throws Exception {
-        if (args.length == 2 && args[0].equals("--detect")) {
+        if (args.length == 3 && args[0].equals("--detect")) {
             try (JarFile jar = new JarFile(args[1])) {
                 org.objectweb.asm.tree.ClassNode node=new org.objectweb.asm.tree.ClassNode();
                 new ClassReader(jar.getInputStream(jar.getJarEntry("com/fs/starfarer/campaign/CampaignEngine.class"))).accept(node,ClassReader.SKIP_CODE);
-                for (var m : node.methods) if (m.name.equals("advance")) {
-                    if (m.desc.equals("(FLcom/fs/starfarer/util/super/B;)V")) {System.out.println("linux");return;}
-                    if (m.desc.equals("(FLcom/fs/starfarer/util/A/new;)V")) {System.out.println("windows");return;}
+                String canonical="(FLcom/fs/starfarer/util/A/new;)V";
+                List<String> matches=new ArrayList<>();
+                if (node.methods.stream().anyMatch(m -> m.name.equals("advance") && m.desc.equals(canonical))) matches.add("windows-0.98a-RC8");
+                try (var tables=Files.list(Path.of(args[2]))) {
+                    for (Path table : tables.filter(p -> p.getFileName().toString().endsWith(".tsv")).sorted().toList()) {
+                        Map<String,String> names=new HashMap<>();
+                        for (String line : Files.readAllLines(table)) {
+                            String[] row=line.split("\t");
+                            if (row[0].equals("C")) names.put(row[1],row[2]);
+                        }
+                        Remapper remapper=new Remapper(Opcodes.ASM9) { public String map(String n) { return names.getOrDefault(n,n); } };
+                        String descriptor=remapper.mapMethodDesc(canonical);
+                        if (node.methods.stream().anyMatch(m -> m.name.equals("advance") && m.desc.equals(descriptor))) matches.add(table.getFileName().toString().replace(".tsv",""));
+                    }
                 }
-                throw new IllegalArgumentException("Unknown game namespace");
+                if (matches.size()!=1) throw new IllegalArgumentException("Unknown or ambiguous game namespace: "+matches);
+                System.out.println(matches.get(0));
+                return;
             }
         }
         if (args.length != 3) throw new IllegalArgumentException("mapping.tsv linux-input.jar canonical-output.jar");

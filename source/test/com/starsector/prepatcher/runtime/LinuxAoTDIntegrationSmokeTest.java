@@ -9,10 +9,18 @@ import java.util.List;
 /** Real fork JAR in a child mod loader, real Linux game/runtime in the parent. */
 public final class LinuxAoTDIntegrationSmokeTest {
   public static void main(String[] args) throws Exception {
+    boolean legacyFr = args.length > 0 && "--legacy-fr-script-loader".equals(args[0]);
     List<URL> jars = new ArrayList<>();
-    for (String arg : args) jars.add(Path.of(arg).toUri().toURL());
+    for (int index = legacyFr ? 1 : 0; index < args.length; index++) {
+      jars.add(Path.of(args[index]).toUri().toURL());
+    }
     ClassLoader parent = ClassLoader.getSystemClassLoader();
-    try (URLClassLoader modLoader = new URLClassLoader(jars.toArray(URL[]::new), parent)) {
+    URL[] urls = jars.toArray(URL[]::new);
+    URLClassLoader selectedLoader = legacyFr
+        ? (URLClassLoader) Class.forName("com.genir.renderer.loaders.ScriptClassLoader")
+            .getConstructor(URL[].class, ClassLoader.class).newInstance(urls, parent)
+        : new URLClassLoader(urls, parent);
+    try (URLClassLoader modLoader = selectedLoader) {
       // Ownership proof must work before the runtime handshake, without eagerly
       // loading/initializing SchedulerBridge from inside a transformer.
       String constructionName = "data.kaysaar.aotd.tot.industries.AoTDConstructionSite";
@@ -53,7 +61,8 @@ public final class LinuxAoTDIntegrationSmokeTest {
       }
       System.out.println(
           "OK Linux real AoTD child-loader integration: ACTIVE capabilities=0x" + Long.toHexString(capabilities)
-              + " restore-signal=exactly-once native-economy-linkage construction-before-handshake");
+              + " restore-signal=exactly-once native-economy-linkage construction-before-handshake loader="
+              + modLoader.getClass().getName());
     }
   }
 

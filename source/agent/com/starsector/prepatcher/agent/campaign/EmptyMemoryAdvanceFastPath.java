@@ -50,7 +50,9 @@ public final class EmptyMemoryAdvanceFastPath implements StructuredPatch<EmptyMe
         calls(advance, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator", "()Ljava/util/Iterator;");
     List<MethodInsnNode> requireIterators =
         calls(advance, Opcodes.INVOKEINTERFACE, "java/util/Collection", "iterator", "()Ljava/util/Iterator;");
-    requireCount("Memory.advance expire iterator", expireIterators.size(), 1);
+    if (expireIterators.size() != 1 && expireIterators.size() != 2) {
+      return Match.incompatible("Memory.advance must have one expire scan and at most one deferred removal scan");
+    }
     requireCount("Memory.advance require iterator", requireIterators.size(), 1);
 
     Frame<SourceValue>[] frames = sourceFrames(node.name, advance);
@@ -279,6 +281,15 @@ public final class EmptyMemoryAdvanceFastPath implements StructuredPatch<EmptyMe
     AbstractInsnNode requireFieldInsn = nextMeaningful(requireLoadInsn);
     AbstractInsnNode requireStoreInsn = nextMeaningful(requireIterator);
     AbstractInsnNode requireGotoInsn = nextMeaningful(requireStoreInsn);
+    VarInsnNode removalStore = null;
+    if (requireGotoInsn != null && requireGotoInsn.getOpcode() == Opcodes.ACONST_NULL) {
+      AbstractInsnNode storeInsn = nextMeaningful(requireGotoInsn);
+      if (!(storeInsn instanceof VarInsnNode store) || store.getOpcode() != Opcodes.ASTORE) {
+        throw mismatch("Memory.advance deferred removal list is not initialized to null");
+      }
+      removalStore = store;
+      requireGotoInsn = nextMeaningful(store);
+    }
     if (!(requireLoadInsn instanceof VarInsnNode requireLoad) || requireLoad.getOpcode() != Opcodes.ALOAD
         || requireLoad.var != 0 || !(requireFieldInsn instanceof FieldInsnNode requireField)
         || requireField.getOpcode() != Opcodes.GETFIELD || !requireField.owner.equals(owner)
@@ -293,6 +304,26 @@ public final class EmptyMemoryAdvanceFastPath implements StructuredPatch<EmptyMe
     AbstractInsnNode requireHasNextInsn = nextMeaningful(requireTestLoadInsn);
     AbstractInsnNode requireLoopJumpInsn = nextMeaningful(requireHasNextInsn);
     AbstractInsnNode terminalReturn = nextMeaningful(requireLoopJumpInsn);
+    if (removalStore != null) {
+      if (removalStore.var == requireStore.var || removalStore.var == expireStore.var) {
+        throw mismatch("Memory.advance deferred removal list aliases a scan iterator");
+      }
+      AbstractInsnNode nullJumpInsn = nextMeaningful(terminalReturn);
+      if (!(terminalReturn instanceof VarInsnNode removalLoad) || removalLoad.getOpcode() != Opcodes.ALOAD
+          || removalLoad.var != removalStore.var || !(nullJumpInsn instanceof JumpInsnNode nullJump)
+          || nullJump.getOpcode() != Opcodes.IFNULL) {
+        throw mismatch("Memory.advance empty require scan must skip deferred removals through its null list");
+      }
+      terminalReturn = nextMeaningful(nullJump.label);
+      List<MethodInsnNode> iterators = calls(method, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator", "()Ljava/util/Iterator;");
+      requireCount("Memory.advance deferred removal iterator", iterators.size(), 2);
+      if (!sourceIsLocal(receiverSource(method, iterators.get(1), sourceFrames(owner, method)), Opcodes.ALOAD, removalStore.var)) {
+        throw mismatch("Memory.advance deferred removal iterator reads a different list");
+      }
+    }
+    requireCount("Memory.advance List.iterator sites",
+        countCalls(method, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator", "()Ljava/util/Iterator;"),
+        removalStore == null ? 1 : 2);
     if (!(requireTestLoadInsn instanceof VarInsnNode requireTestLoad) || requireTestLoad.getOpcode() != Opcodes.ALOAD
         || requireTestLoad.var != requireStore.var || !(requireHasNextInsn instanceof MethodInsnNode requireHasNext)
         || !callMatches(requireHasNext, Opcodes.INVOKEINTERFACE, "java/util/Iterator", "hasNext", "()Z")

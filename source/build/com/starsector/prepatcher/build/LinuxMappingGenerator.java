@@ -26,7 +26,7 @@ public final class LinuxMappingGenerator {
         // Human-readable names are not an obfuscator-generated correspondence.
         for (String name : g.windows.keySet()) {
             String simple = name.substring(name.lastIndexOf('/') + 1);
-            if (Arrays.stream(simple.split("\\$")).allMatch(s -> (s.length() > 4 && s.matches("[A-Z][a-z][A-Za-z0-9]+") && !s.matches("[oO0]+") && !Set.of("String", "Object").contains(s)) || s.matches("[0-9]+")) && g.linux.containsKey(name)) g.pair(name, name);
+            if (Arrays.stream(simple.split("\\$")).allMatch(s -> (s.length() > 4 && s.matches("[A-Z][a-z][A-Za-z0-9]+") && !s.matches("[oO0]+") && !Set.of("String", "Object").contains(s))) && g.linux.containsKey(name)) g.pair(name, name);
         }
         for (int round = 0; round < 8; round++) {
             int before = g.classes.size();
@@ -39,17 +39,64 @@ public final class LinuxMappingGenerator {
             g.matchMembers();
             if (before == g.members.size()) break;
         }
+        g.preserveUnmappedMembers();
         List<String> out = new ArrayList<>();
-        out.add("# Starsector 0.98a-RC8 Windows -> Linux; generated from paired local JARs.");
+        out.add("# Canonical Windows 0.98a-RC8 -> native namespace; generated from paired local JARs.");
         for (var e : g.classes.entrySet()) out.add("C\t" + e.getKey() + "\t" + e.getValue());
         for (var e : g.members.entrySet()) out.add(e.getKey() + "\t" + e.getValue());
         for (String nativeName : g.linux.keySet()) if (!g.reverse.containsKey(nativeName))
-            out.add("C\tspp/unmapped/linux/" + nativeName + "\t" + nativeName);
+            out.add("C\tspp/unmapped/native/" + nativeName + "\t" + nativeName);
         System.out.println("classes=" + g.classes.size() + "/" + g.windows.size() + " members=" + g.members.size());
         for (String name : g.windows.keySet()) if (!g.classes.containsKey(name)) System.out.println("UNMATCHED " + name);
         for (String conflict : g.conflicts) System.out.println("CONFLICT " + conflict);
         if (!g.conflicts.isEmpty()) throw new IllegalStateException("Mapping conflicts: " + g.conflicts.size());
         Files.write(Path.of(args[3]), out, StandardCharsets.UTF_8);
+    }
+    private String nativeDescriptor(String descriptor) {
+        return translateDescriptor(descriptor, classes);
+    }
+    private static String translateDescriptor(String descriptor, Map<String,String> names) {
+        var pattern = java.util.regex.Pattern.compile("L([^;]+);");
+        var matcher = pattern.matcher(descriptor);
+        StringBuffer result = new StringBuffer();
+        while (matcher.find()) matcher.appendReplacement(result, java.util.regex.Matcher.quoteReplacement("L" + names.getOrDefault(matcher.group(1),matcher.group(1)) + ";"));
+        matcher.appendTail(result);
+        return result.toString();
+    }
+    /** Native symbols without a proven pair must not accidentally consume another pair on return. */
+    private void preserveUnmappedMembers() {
+        Map<String,String> nativeToCanonicalClasses = new HashMap<>(reverse);
+        for (String name : linux.keySet()) nativeToCanonicalClasses.putIfAbsent(name,"spp/unmapped/native/"+name);
+        Set<String> pairedNative = new HashSet<>();
+        for (var entry : members.entrySet()) {
+            String[] key=entry.getKey().split("\t");
+            pairedNative.add(key[0]+'\t'+classes.get(key[1])+'\t'+entry.getValue()+'\t'+nativeDescriptor(key[3]));
+        }
+        for (ClassNode node : linux.values()) {
+            for (FieldNode field : node.fields) preserveMember("F",node.name,field.name,field.desc,nativeToCanonicalClasses,pairedNative);
+            for (MethodNode method : node.methods) {
+                preserveMember("M",node.name,method.name,method.desc,nativeToCanonicalClasses,pairedNative);
+                for (AbstractInsnNode instruction : method.instructions) {
+                    if (instruction instanceof FieldInsnNode f) preserveMember("F",f.owner,f.name,f.desc,nativeToCanonicalClasses,pairedNative);
+                    if (instruction instanceof MethodInsnNode m) preserveMember("M",m.owner,m.name,m.desc,nativeToCanonicalClasses,pairedNative);
+                }
+            }
+        }
+    }
+    private void preserveMember(String kind, String owner, String name, String descriptor,
+            Map<String,String> names, Set<String> pairedNative) {
+        String nativeKey=kind+'\t'+owner+'\t'+name+'\t'+descriptor;
+        if (name.startsWith("<") || pairedNative.contains(nativeKey) || !reverse.containsKey(owner)) return;
+        String canonicalOwner=reverse.get(owner), canonicalDescriptor=translateDescriptor(descriptor,names);
+        String key=kind+'\t'+canonicalOwner+'\t'+name+'\t'+canonicalDescriptor;
+        String target=members.get(key);
+        if (target==null || target.equals(name)) return;
+        StringBuilder alias=new StringBuilder("spp$native$");
+        name.codePoints().forEach(c -> alias.append(Integer.toHexString(c)).append('$'));
+        String aliasKey=kind+'\t'+canonicalOwner+'\t'+alias+'\t'+canonicalDescriptor;
+        String prior=members.putIfAbsent(aliasKey,name);
+        if (prior!=null && !prior.equals(name)) throw new IllegalStateException("Native alias collision: "+nativeKey);
+        pairedNative.add(nativeKey);
     }
     private void read(Path root, Map<String, ClassNode> into) throws Exception {
         for (String name : List.of("starfarer_obf.jar", "fs.common_obf.jar", "fs.sound_obf.jar")) {
@@ -152,7 +199,7 @@ public final class LinuxMappingGenerator {
             pairType(w.superName,l.superName);
             for (MethodNode wm : w.methods) {
                 String signature = methodShape(wm,false,false);
-                boolean readable = wm.name.matches("[a-z][a-zA-Z0-9]{7,}") || wm.name.startsWith("<");
+                boolean readable = readableMember(wm.name) || wm.name.startsWith("<");
                 List<MethodNode> matches = l.methods.stream().filter(lm -> (!readable || lm.name.equals(wm.name)) && signature.equals(methodShape(lm,true,false))).toList();
                 if (matches.size() != 1) continue;
                 // Require uniqueness in BOTH directions, including empty/bridge methods.
@@ -175,6 +222,9 @@ public final class LinuxMappingGenerator {
         String old = members.putIfAbsent(key,target);
         if (old != null && !old.equals(target)) conflicts.add(key + " -> " + target + " existing=" + old);
     }
+    private static boolean readableMember(String name) {
+        return name.matches("[a-z][a-zA-Z0-9]{7,}") && !javax.lang.model.SourceVersion.isKeyword(name) && !name.matches("[oO0]+");
+    }
     private void matchMembers() {
         for (var pair : classes.entrySet()) {
             ClassNode w = windows.get(pair.getKey()), l = linux.get(pair.getValue());
@@ -182,7 +232,7 @@ public final class LinuxMappingGenerator {
                 String key = "M\t" + w.name + "\t" + wm.name + "\t" + wm.desc;
                 String known = members.get(key);
                 List<MethodNode> matches = l.methods.stream().filter(lm -> desc(lm.desc,true,true).equals(wm.desc) && (known == null || lm.name.equals(known))).toList();
-                List<MethodNode> sameName = matches.stream().filter(lm -> lm.name.equals(wm.name) && (wm.name.length() > 7 || wm.name.startsWith("<"))).toList();
+                List<MethodNode> sameName = matches.stream().filter(lm -> lm.name.equals(wm.name) && (readableMember(wm.name) || wm.name.startsWith("<"))).toList();
                 if (sameName.size() == 1) matches = sameName;
                 else {
                     String sig = methodShape(wm,false,true);
@@ -202,8 +252,9 @@ public final class LinuxMappingGenerator {
             }
             for (FieldNode wf : w.fields) {
                 List<FieldNode> matches = l.fields.stream().filter(lf -> desc(lf.desc,true,true).equals(wf.desc) && lf.access == wf.access && Objects.equals(lf.value,wf.value)).toList();
-                List<FieldNode> same = matches.stream().filter(f -> f.name.equals(wf.name) && wf.name.length() > 7).toList();
+                List<FieldNode> same = matches.stream().filter(f -> f.name.equals(wf.name) && readableMember(wf.name)).toList();
                 if (same.size() == 1) matches = same;
+                else if (w.fields.stream().filter(f -> f.desc.equals(wf.desc) && f.access == wf.access && Objects.equals(f.value,wf.value)).count() != 1) continue;
                 if (matches.size() == 1 && !members.containsKey("F\t" + w.name + "\t" + wf.name + "\t" + wf.desc)) member("F",w.name,wf.name,wf.desc,matches.get(0).name);
             }
         }

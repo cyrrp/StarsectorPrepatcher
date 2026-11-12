@@ -127,6 +127,8 @@ public final class StructuralCompatibilityTest {
     runConstructionMutationCoverageTest(suppliedJars);
     runRemovedEconomyScratchSnapshotStructuralTest(suppliedJars);
     runHyperspaceViewportBoundsAtomicTest(suppliedJars);
+    GameUpdateBehaviorTest.run(suppliedJars);
+    ParticleArrayCleanupCompatibilityTest.main(new String[0]);
     runNegativeMapRenderStuffTests(config, Path.of(args[1]).toAbsolutePath().normalize());
     runNegativeHitTestGroupTests(config, Path.of(args[1]).toAbsolutePath().normalize());
     runNegativeIntelArrowRenderingTests(Path.of(args[1]).toAbsolutePath().normalize());
@@ -997,7 +999,25 @@ public final class StructuralCompatibilityTest {
         byte[] original = jar.getInputStream(entry).readAllBytes();
         PrepatcherTransformer transformer = new PrepatcherTransformer(config);
         byte[] transformed = transformer.transform(null, className, null, null, original);
+        if (transformed == null && className.equals(PrepatcherTransformer.SCRIPT_STORE_RUNNER)
+            && "NOT_NEEDED".equals(System.getProperty("starsector.prepatcher.patchStatus."
+                + className.replace('/', '.') + ".startupLogAggregation"))) {
+          require(countHook(original, HOOKS, "startupLogSuppressed") == 0, "unnecessary script suppression claimed a hook");
+          require(countCalls(method(read(original), "run", "()V"), Opcodes.INVOKEVIRTUAL,
+              "org/apache/log4j/Logger", "info", "(Ljava/lang/Object;)V") == 0, "script INFO calls still need suppression");
+          require(!hasOwnershipMarker(read(original), "startupLogAggregation"), "unnecessary script suppression claimed ownership");
+          assertUnnecessaryStartupNegatives(config, className, original);
+          transformer.transform(null, className, null, null, original);
+          transformed = original;
+        }
         require(transformed != null, "no patch applied to " + className + " from " + jarPath);
+        if (className.equals(PrepatcherTransformer.MEMORY)) {
+          MethodNode before = method(read(original), "advance", "(F)V");
+          MethodNode after = method(read(transformed), "advance", "(F)V");
+          require(countCalls(before, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator", "()Ljava/util/Iterator;")
+              == countCalls(after, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator", "()Ljava/util/Iterator;"),
+              "Memory fast path changed native expire/deferred-removal iterator sites");
+        }
         String compositionStatus = "starsector.prepatcher.patchStatus." + className.replace('/', '.') + ".composition";
         require("PASSED".equals(System.getProperty(compositionStatus)),
             "final composition validation did not pass for " + className);
@@ -1016,6 +1036,31 @@ public final class StructuralCompatibilityTest {
       }
     }
     return new Result(classes, methods);
+  }
+
+  private static void assertUnnecessaryStartupNegatives(PrepatcherConfig config, String name, byte[] original) {
+    for (int variant = 0; variant < 3; variant++) {
+      ClassNode node = read(original);
+      MethodNode run = method(node, "run", "()V");
+      if (variant == 0) {
+        com.starsector.prepatcher.agent.bytecode.Markers.addPatchMarker(node, "startupLogAggregation");
+      } else {
+        InsnList extra = new InsnList();
+        if (variant == 1) {
+          extra.add(new InsnNode(Opcodes.ICONST_2));
+          extra.add(new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "startupLogSuppressed", "(I)V", false));
+        } else {
+          extra.add(new InsnNode(Opcodes.ACONST_NULL));
+          extra.add(new LdcInsnNode("new startup cost"));
+          extra.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "org/apache/log4j/Logger", "info", "(Ljava/lang/Object;)V", false));
+        }
+        run.instructions.insertBefore(run.instructions.getFirst(), extra);
+      }
+      byte[] result = new PrepatcherTransformer(config).transform(null, name, null, null, write(node));
+      require(result == null, "unnecessary startup negative fixture was changed");
+      require("SKIPPED_STRUCTURAL".equals(System.getProperty("starsector.prepatcher.patchStatus."
+          + name.replace('/', '.') + ".startupLogAggregation")), "foreign marker/hook/INFO cost was called unnecessary");
+    }
   }
 
   private static void runNegativeMapRenderStuffTests(PrepatcherConfig config, Path jarPath) throws Exception {
@@ -2638,10 +2683,13 @@ public final class StructuralCompatibilityTest {
         expected.put("removeExpiredParticles", 1);
       }
       case PrepatcherTransformer.LOADING_UTILS -> {
-        expected.put("readUtf8Normalized", 1);
+        require(countHook(bytes, HOOKS, "readUtf8Normalized") + countHook(bytes, HOOKS, "readUtf8NormalizedWithoutBom") == 1, "text reader must contain exactly one normalization hook");
         expected.put("startupLogSuppressed", 5);
       }
-      case PrepatcherTransformer.SCRIPT_STORE_RUNNER -> expected.put("startupLogSuppressed", 1);
+      case PrepatcherTransformer.SCRIPT_STORE_RUNNER -> {
+        if (hasOwnershipMarker(read(bytes), "startupLogAggregation")) expected.put("startupLogSuppressed", 1);
+        else require(countHook(bytes, HOOKS, "startupLogSuppressed") == 0, "unowned script suppression hook");
+      }
       case PrepatcherTransformer.RULES -> {
         expected.put("startupLogSuppressed", 1);
         expected.put("removeCarriageReturns", 3);
@@ -3013,8 +3061,9 @@ public final class StructuralCompatibilityTest {
     MethodNode method = method(node, "advance", "(F)V");
     require(countCalls(method, "memoryExpireIterator") == 0 && countCalls(method, "memoryRequireIterator") == 0,
         "Memory.advance still calls the retired iterator helpers");
-    require(countCalls(method, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator", "()Ljava/util/Iterator;") == 1,
-        "Memory.advance expire iterator semantics changed");
+    int listIterators = countCalls(method, Opcodes.INVOKEINTERFACE, "java/util/List", "iterator", "()Ljava/util/Iterator;");
+    require(listIterators == 1 || listIterators == 2,
+        "Memory.advance expire/deferred-removal iterator semantics changed");
     require(
         countCalls(method, Opcodes.INVOKEINTERFACE, "java/util/Collection", "iterator", "()Ljava/util/Iterator;") == 1,
         "Memory.advance require iterator semantics changed");
@@ -3179,8 +3228,15 @@ public final class StructuralCompatibilityTest {
           widthLoads.add(load);
         }
       }
-      if (widthLoads.size() != 3) continue;
-      widthLoads.get(2).var = height;
+      if (widthLoads.size() == 3) widthLoads.get(2).var = height;
+      else if (widthLoads.size() == 2) {
+        VarInsnNode lastHeight = null;
+        for (AbstractInsnNode n = afterHeight.getNext(); n != null; n = n.getNext()) {
+          if (n instanceof VarInsnNode load && load.getOpcode() == Opcodes.FLOAD && load.var == height) lastHeight = load;
+        }
+        require(lastHeight != null, "new terrain height fixture missing");
+        lastHeight.var = width;
+      } else continue;
       return;
     }
     throw new AssertionError("viewport vertical-range fixture site not found");

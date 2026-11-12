@@ -9,6 +9,9 @@
 
 Основной agent выполняет независимое structural matching фактически загружаемого bytecode. Каждый
 блок имеет ownership marker, postcondition, ASM verification и fail-open fallback.
+Имена внутренних классов и descriptors ниже приведены в каноническом Windows 0.98a-RC8 namespace;
+Windows/Linux 0.98.5a-RC3 и Linux 0.98a-RC8 переводятся согласно
+[правилам namespace](COMPATIBILITY.md#native-game-namespaces).
 
 Hyperspace-патчи проходят тот же независимый structural pipeline единого agent: каждый патч
 проверяет target-класс, метод и descriptor, локальный bytecode-контракт, точное число точек
@@ -41,7 +44,7 @@ classfile или JAR не участвует в решении.
 | `patch.entityLookupIndexRepair` + `patch.campaignListenerThrottle` | `CampaignEngine.advance` listener-restoration boundary | one atomic listener plan: rebuild the vanilla transient entity-id map once after the boundary, plus skip unchanged internal repository listener sweep | both keys form a feature mask; either member may run alone; private transient readiness bit; exact vanilla rebuild; no steady full scan; public method untouched, periodic audit |
 | `patch.campaignSnapshotReuse` | `BaseLocation` | reusable eager snapshots | point-in-time order/mutation isolation |
 | `patch.entityScriptSnapshotReuse` | entity scripts | inline empty fast return; non-empty fresh vanilla snapshot | no scratch scope for empty lists; mutation isolation unchanged |
-| `patch.emptyMemoryAdvanceFastPath` | `Memory.advance` | inline return when expire+require are empty | restoration/pause and non-empty loops remain vanilla |
+| `patch.emptyMemoryAdvanceFastPath` | `Memory.advance(F)V`, post-pause/pre-clock empty path | inline return when expire+require are empty | restoration/pause and non-empty loops, including deferred require removals, remain vanilla |
 | `patch.coreWorldsExtentCache` | `CoreScript.advance(F)V`, `CampaignEngine.create/removeStarSystem`, `BaseLocation.add/remove/clearTags` | one campaign snapshot, weak system/core index, O(C+B) steady validation, unchanged-write suppression and optional fast-forward skip | all three structural surfaces must apply; missing mutation hook fails closed to vanilla; bounded audit covers direct live-tag additions |
 | `patch.routeJumpPointIndex` | route widget | ordered jump/system candidates | original filter/distance/tie loop |
 | `patch.strategicJumpDestinationFirst` + `patch.strategicJumpDestinationIndex` | `StrategicModule.findNearestSafeJumpPoint`, expired `JumpPlan`, jump/location topology mutators | one atomic destination plan: lazy hostile-market score plus budgeted ordered index keyed by destination `LocationAPI` identity | both keys form a feature mask; index requires first and index-only normalizes to disabled; no location type/size admission rule; cold/dirty work is deferred under one global frame budget |
@@ -183,10 +186,10 @@ commodity loop → entry observation, затем одним commit заменя�
 | `patch.marketNoOpCallbacks` | inherited `BaseIndustry.advance` | after a full dormant proof, skip disruption/build checks until wake or bounded audit | custom `advance/isDisrupted/getDisruptedKey` stay vanilla; direct disruption-memory edits may wait for audit |
 | `patch.commRelaySystemIndex` | `IntelManager` | conservative spatial system candidates + TTL position audit | original order/live relay checks; bounded coordinate staleness |
 | `patch.shipAdvanceScratch` | `Ship.advance` | reuse 3 lists + command snapshot + 2 sets | fresh listener snapshot, no API objects pooled |
-| `patch.particleCleanup` | `DynamicParticleGroup` | reuse expiry list + stable linear removal | all particles advance before removal |
-| `patch.loadingTextReader` | `LoadingUtils` | streaming UTF-8 normalization | **known-disabled in 0.7.1 profiles:** mission startup regression requires separate fix |
+| `patch.particleCleanup` | `DynamicParticleGroup.advance(F)V` | reuse expiry list + stable linear removal; `NOT_NEEDED` for proven allocation-free array compaction | vanilla keeps advance-before-removal; the already optimized input is preserved byte-for-byte |
+| `patch.loadingTextReader` | `LoadingUtils.super(InputStream)String` | streaming UTF-8 normalization; retain a BOM on the legacy body, remove one leading BOM on the body that does so natively | **known-disabled in profiles:** mission startup regression requires separate fix |
 | `patch.startupLogAggregation` | loaders/specs/rules/sound | remove/aggregate high-volume INFO | **known-disabled in 0.7.1 profiles:** mission startup regression requires separate fix |
-| `patch.rulesLiteralParser` | rules loader | literal fixed-delimiter operations | randomized differential semantics |
+| `patch.rulesLiteralParser` | `Rules` loader body, `(ResourceLoaderState)V` or `(String,ResourceLoaderState)V` | the same nine literal fixed-delimiter operations in the unique parsing body | randomized differential semantics; orchestration wrapper untouched |
 | `patch.saveLoadProgressThrottle` | progress streams | redraw ceiling | final forced updates retained |
 | `patch.saveOutputBufferDedup` | save output chain | remove one duplicate outer buffer | save bytes/format/close chain unchanged |
 
@@ -781,7 +784,7 @@ arguments или control-flow anchor, соответствующий класс 
 
 | Config | Target | Изменение | Принятое поведение/риск |
 |---|---|---|---|
-| `patch.hyperspaceViewportBounds` | `BaseTiledTerrain.render/isTileVisible` | atomically corrects the vertical range to use viewport height and clamps it to the inner tile-array dimension | both sites in both methods must match before either is changed; affects every subclass by design |
+| `patch.hyperspaceViewportBounds` | `BaseTiledTerrain.render/isTileVisible`, vertical range and yEnd clamp | viewport height, inner dimension in both clamp comparison and assignment | both methods must match the same original or upstream-corrected form before mutation; complete postcondition covers range, comparison and assignment; affects every subclass by design |
 | `patch.skipNoOpTerrainLayer` | `HyperspaceTerrainPlugin.getActiveLayers` | removes `TERRAIN_9` from backing set | also skips that layer's `preRender` sequence by design |
 | `patch.terrainRandomReuse` | tiled/hyperspace terrain | seeded `Random` ring + batched diagnostics | same seed/draw sequence; cumulative approximate counter; no per-tile `LongAdder`/clock call |
 | `patch.automatonBufferReuse` | automaton + terrain internal reads | owner-local spare `int[][]`; confirmed exact-owner internal reads bypass public escape mark | public/mod/subclass/unconfirmed paths use virtual getter; escaped aliases are never reused; transient state, zero-init |

@@ -10,6 +10,11 @@ import org.objectweb.asm.tree.analysis.Frame;
 import org.objectweb.asm.tree.analysis.SourceValue;
 
 import java.util.List;
+import java.util.ArrayList;
+import java.util.IdentityHashMap;
+import org.objectweb.asm.tree.*;
+import static com.starsector.prepatcher.agent.bytecode.Markers.hasPatchMarker;
+import static com.starsector.prepatcher.agent.bytecode.OwnedTemplates.*;
 
 import static com.starsector.prepatcher.agent.bytecode.Allocations.installScratchScope;
 import static com.starsector.prepatcher.agent.bytecode.Allocations.replaceStoredSimpleAllocations;
@@ -40,6 +45,9 @@ public final class DynamicParticleCleanup implements StructuredPatch<DynamicPart
   @Override
   public Match<Plan> match(ClassNode node) {
     MethodNode advance = requireMethod(node, "advance", "(F)V");
+    if (!hasPatchMarker(node, "particleCleanup") && matchesArrayCleanup(node, advance)) {
+      return Match.notNeeded("particle advance already uses allocation-free array compaction without a removal list or removeAll");
+    }
     PatchState state = uniformPatchState("DynamicParticleGroup cleanup",
         scratchScopeState(node.name, advance, "DynamicParticleGroup.advance"),
         storedSimpleAllocationState(advance, "java/util/ArrayList", "()V", "borrowParticleRemovalList",
@@ -51,6 +59,43 @@ public final class DynamicParticleCleanup implements StructuredPatch<DynamicPart
     MethodInsnNode removeAll =
         calls(advance, Opcodes.INVOKEVIRTUAL, "java/util/LinkedList", "removeAll", "(Ljava/util/Collection;)Z").get(0);
     return Match.plan(new Plan(node.name, advance, removeAll, matchParticleScratchMutation(node.name, advance)));
+  }
+
+  private static boolean matchesArrayCleanup(ClassNode node, MethodNode advance) {
+    String particleArray = "[Lcom/fs/graphics/particle/BaseParticle;";
+    boolean array = node.fields.stream().anyMatch(f -> f.name.equals("particlesArray") && f.desc.equals(particleArray)
+        && (f.access & Opcodes.ACC_STATIC) == 0);
+    boolean size = node.fields.stream().anyMatch(f -> f.name.equals("particlesNum") && f.desc.equals("I")
+        && (f.access & Opcodes.ACC_STATIC) == 0);
+    if (!array || !size || (advance.access & (Opcodes.ACC_STATIC | Opcodes.ACC_SYNCHRONIZED)) != 0) return false;
+    String templateOwner = "com/starsector/prepatcher/agent/templates/ParticleArrayCleanupTemplate";
+    ClassNode template = loadOwnedTemplate(templateOwner, "/" + templateOwner + ".class", "particle array cleanup");
+    MethodNode expected = cloneAndRemapOwnedTemplateMethod(requireMethod(template, "advance", "(F)V"), templateOwner, node.name, "particle array cleanup");
+    return advance.tryCatchBlocks.isEmpty() && instructionShape(advance).equals(instructionShape(expected));
+  }
+
+  /** Every opcode, operand and branch target is checked; debug entries and frame encoding are not semantic. */
+  private static List<String> instructionShape(MethodNode method) {
+    IdentityHashMap<LabelNode, Integer> labels = new IdentityHashMap<>();
+    int position = 0;
+    for (AbstractInsnNode instruction : method.instructions) {
+      if (instruction instanceof LabelNode label) labels.put(label, position);
+      if (instruction.getOpcode() >= 0) position++;
+    }
+    List<String> shape = new ArrayList<>();
+    for (AbstractInsnNode instruction : method.instructions) {
+      int opcode = instruction.getOpcode();
+      if (opcode < 0) continue;
+      String key = Integer.toString(opcode);
+      if (instruction instanceof VarInsnNode var) key += ":" + var.var;
+      else if (instruction instanceof FieldInsnNode field) key += ":" + field.owner + ":" + field.name + ":" + field.desc;
+      else if (instruction instanceof MethodInsnNode call) key += ":" + call.owner + ":" + call.name + ":" + call.desc + ":" + call.itf;
+      else if (instruction instanceof JumpInsnNode jump) key += ":" + labels.get(jump.label);
+      else if (instruction instanceof IincInsnNode increment) key += ":" + increment.var + ":" + increment.incr;
+      else if (!(instruction instanceof InsnNode)) return List.of("unsupported instruction");
+      shape.add(key);
+    }
+    return shape;
   }
 
   @Override

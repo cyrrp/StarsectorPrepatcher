@@ -40,7 +40,7 @@ function Test-JarEntry {
     } catch { return $false }
 }
 function Test-JavaAgentJar {
-    param([string] $JarPath)
+    param([string] $JarPath, [string] $RequiredPremain = '')
     if (-not (Test-Path -LiteralPath $JarPath -PathType Leaf)) { return $false }
     try {
         $archive = [System.IO.Compression.ZipFile]::OpenRead($JarPath)
@@ -49,6 +49,9 @@ function Test-JavaAgentJar {
             if ($null -eq $entry) { return $false }
             $reader = [IO.StreamReader]::new($entry.Open(), [Text.Encoding]::UTF8, $true)
             try { $manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
+            if ($RequiredPremain) {
+                return $manifest -match ('(?im)^Premain-Class\s*:\s*' + [regex]::Escape($RequiredPremain) + '\s*$')
+            }
             return $manifest -match '(?im)^Premain-Class\s*:\s*\S+'
         } finally { $archive.Dispose() }
     } catch { return $false }
@@ -56,7 +59,10 @@ function Test-JavaAgentJar {
 
 $frAgentJar = Join-Path $gameRoot 'starsector-core\fr.agent.jar'
 $frRuntimeJar = Join-Path $gameRoot 'starsector-core\fr.jar'
-$fasterRenderingLayout = if (Test-JavaAgentJar $frAgentJar) {
+$fasterRenderingLayout = if (Test-JavaAgentJar $frRuntimeJar 'com.genir.renderer.agent.Agent') {
+    $frAgentArg = '-javaagent:fr.jar'
+    'Agent'
+} elseif (Test-JavaAgentJar $frAgentJar) {
     'Agent'
 } elseif ((Test-JarEntry $frRuntimeJar 'com/genir/renderer/loaders/AppClassLoader.class') -and
           (Test-JarEntry $frRuntimeJar 'com/genir/renderer/loaders/ClassTransformer.class')) {
@@ -190,7 +196,7 @@ function Normalize-MikohimeSimple {
         if ($line -match $managedAgentLinePattern) { continue }
         if ($line -match '(?i)^\s*--patch-module=java\.base="?\.\.[\\/]+Java28PrepatcherCompat[\\/]+prepatcher-java-base-asm\.jar"?\s*$') { continue }
         if ($line -match '(?i)^\s*-javaagent:"?\.\.[\\/]+Java28PrepatcherCompat[\\/]+prepatcher-java28-frame-repair-agent\.jar"?\s*$') { continue }
-        if ($line.Trim().Equals($frAgentArg, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        if ($line.Trim() -match '(?i)^(?:-javaagent:"?fr(?:\.agent)?\.jar"?|"-javaagent:fr(?:\.agent)?\.jar")$') { continue }
         if ($fasterRenderingLayout -eq 'Agent' -and
                 $line.Trim().Equals($legacyFrLoaderArg, [StringComparison]::OrdinalIgnoreCase)) { continue }
         if ($line.Length -eq 0 -and $lines.Count -gt 0 -and

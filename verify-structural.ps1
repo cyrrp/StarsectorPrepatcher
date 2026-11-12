@@ -67,6 +67,11 @@ $utf8 = New-Object Text.UTF8Encoding($false)
 $exports = @()
 
 & (Join-Path $modRoot 'build-agent.ps1')
+$nativeCore = $core
+$namespace = (Get-Content -LiteralPath (Join-Path $build 'game-namespace.txt') -Raw).Trim()
+if ($namespace -ne 'windows-0.98a-RC8') {
+    $core = Join-Path $build 'canonical-core'
+}
 if (Test-Path $testClasses) { Remove-Item -Recurse -Force $testClasses }
 New-Item -ItemType Directory -Force -Path $testClasses, $frSmokeClasses, $reportDir | Out-Null
 
@@ -96,6 +101,9 @@ $testSources = Get-ChildItem -Path (Join-Path $modRoot 'source\test') -Filter '*
 if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed.' }
 & javac -encoding UTF-8 --release 17 -d $frSmokeClasses $frSmokeSource
 if ($LASTEXITCODE -ne 0) { throw 'FR smoke harness compilation failed.' }
+$frAoTDSmokeSource = Join-Path $modRoot 'source/test/com/starsector/prepatcher/runtime/LinuxAoTDIntegrationSmokeTest.java'
+& javac -encoding UTF-8 --release 17 -d $frSmokeClasses $frAoTDSmokeSource
+if ($LASTEXITCODE -ne 0) { throw 'FR AoTD smoke harness compilation failed.' }
 
 $probeMutationAgentJar = Join-Path $build 'fr.agent.jar'
 $probeMutationManifest = Join-Path $build 'probe-mutation-test-agent.mf'
@@ -141,6 +149,8 @@ if ($CoreJars.Count -gt 0) {
     )
 }
 $classPath = @($testClasses, $testCp) -join [IO.Path]::PathSeparator
+& java -cp $classPath com.starsector.prepatcher.agent.ControlPlaneIsolationTest
+if ($LASTEXITCODE -ne 0) { throw 'Control-plane ownership isolation verification failed.' }
 & java -cp $classPath com.fs.starfarer.api.OptionalModProbeLinkageTest
 if ($LASTEXITCODE -ne 0) { throw 'Optional-mod reflective linkage verification failed.' }
 $frConfigurationReport = Join-Path $reportDir 'faster-rendering-configuration.txt'
@@ -880,6 +890,7 @@ $mainAgentJar = Join-Path $modRoot 'agent\StarsectorPrepatcherAgent.jar'
 # JavaCompatibilityRoute selects JAVA27_STANDARD for any runtime feature >= 27, so the gate
 # discovers the installed JDK by that contract instead of pinning one exact build directory.
 $java27 = Join-Path $gameRoot 'jdk-27+\bin\java.exe'
+if ($env:COMPATIBILITY_JAVA) { $java27 = (Resolve-Path -LiteralPath $env:COMPATIBILITY_JAVA).Path }
 foreach ($candidateHome in (Get-ChildItem -LiteralPath $gameRoot -Directory -Filter 'jdk-*' -ErrorAction SilentlyContinue | Sort-Object Name)) {
     $candidate = Join-Path $candidateHome.FullName 'bin\java.exe'
     if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
@@ -1703,8 +1714,54 @@ if (-not (Test-Path -LiteralPath $frJar -PathType Leaf)) {
             }
         }
     }
+    if ($aotdAvailable) {
+        $legacyAoTDJavaCases = @([pscustomobject]@{ Path = (Get-Command java).Source; Verification = '-Xverify:none'; Label = 'reference' })
+        if (Test-Path -LiteralPath $java27 -PathType Leaf) {
+            $legacyAoTDJavaCases += [pscustomobject]@{ Path = $java27; Verification = '-Xverify:all'; Label = 'java27' }
+        }
+        foreach ($case in $legacyAoTDJavaCases) {
+            $ErrorActionPreference = 'Continue'
+            try {
+                $output = @(& $case.Path $case.Verification `
+                    '-Djava.system.class.loader=com.genir.renderer.loaders.AppClassLoader' `
+                    '-Dstarsector.prepatcher.sessionOrigin=legacy-fr-aotd-ownership' `
+                    "-javaagent:$mainAgentJar=config=$verificationConfig" -cp $frSmokeCp `
+                    com.starsector.prepatcher.runtime.LinuxAoTDIntegrationSmokeTest `
+                    --legacy-fr-script-loader $aotdJar 2>&1)
+                $exitCode = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $savedErrorActionPreference
+            }
+            $lines = @($output | ForEach-Object { $_.ToString() })
+            $joined = $lines -join "`n"
+            $lines
+            [IO.File]::WriteAllLines((Join-Path $reportDir "legacy-fr-aotd-$($case.Label).txt"), [string[]] $lines, $utf8)
+            if ($exitCode -ne 0 -or $joined -notmatch 'construction-before-handshake loader=com.genir.renderer.loaders.ScriptClassLoader' `
+                    -or $joined -match 'Atomic transformer pipeline rolled back') {
+                throw "Legacy FR AoTD construction/handshake smoke '$($case.Label)' failed."
+            }
+        }
+    }
 }
 
+if ($namespace -ne 'windows-0.98a-RC8') {
+    $nativeCp = @($testClasses, $agentClasses, (Join-Path $modRoot 'lib/*'), (Join-Path $nativeCore '*')) -join [IO.Path]::PathSeparator
+    & java -Xverify:none -cp $nativeCp com.starsector.prepatcher.agent.NativeNamespaceCompatibilityTest $verificationConfig (Join-Path $nativeCore 'starfarer_obf.jar') (Join-Path $nativeCore 'fs.common_obf.jar') (Join-Path $nativeCore 'fs.sound_obf.jar') (Join-Path $nativeCore 'starfarer.api.jar')
+    if ($LASTEXITCODE -ne 0) { throw 'Native namespace pipeline verification failed.' }
+    $nativeRuntimeCp = @($testClasses, (Join-Path $nativeCore '*')) -join [IO.Path]::PathSeparator
+    $nativeJava = if (Test-Path -LiteralPath $java27 -PathType Leaf) { $java27 } else { (Get-Command java).Source }
+    $nativeVerification = if ($nativeJava -eq $java27) { '-Xverify:all' } else { '-Xverify:none' }
+    $nativePreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $nativeOutput = @(& $nativeJava $nativeVerification "-javaagent:$mainAgentJar" -cp $nativeRuntimeCp com.starsector.prepatcher.runtime.NativeRuntimeLinkageSmokeTest $mainAgentJar (Join-Path $build 'native-targets.txt') 2>&1)
+        $nativeExit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $nativePreference }
+    $nativeLines = @($nativeOutput | ForEach-Object { $_.ToString() })
+    $nativeLines
+    [IO.File]::WriteAllLines((Join-Path $reportDir 'native-runtime-linkage.txt'), [string[]]$nativeLines, $utf8)
+    if ($nativeExit -ne 0 -or ($nativeLines -join "`n") -match 'Atomic transformer pipeline rolled back') { throw 'Native runtime linkage verification failed.' }
+}
 Write-Host 'Documentation/structural/runtime/hyperspace/startup/FR verification completed.' -ForegroundColor Green
 } finally {
     if ($verifyMutexTaken) {

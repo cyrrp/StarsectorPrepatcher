@@ -23,6 +23,8 @@ java -cp "$TESTS" com.starsector.prepatcher.docs.DocumentationConsistencyTest "$
   2>&1 | tee "$BUILD/reports/linux-documentation-consistency.txt"
 java -cp "$NATIVE_CP" com.starsector.prepatcher.agent.PlatformNamespaceIsolationTest \
   2>&1 | tee "$BUILD/reports/linux-platform-isolation.txt"
+java -cp "$NATIVE_CP" com.starsector.prepatcher.agent.ControlPlaneIsolationTest \
+  2>&1 | tee "$BUILD/reports/linux-control-plane-isolation.txt"
 CONFIG="$BUILD/linux-all-enabled.properties"
 {
   sed -e 's/^patch\.loadingTextReader=.*/patch.loadingTextReader=true/' \
@@ -50,12 +52,12 @@ if [[ -f "$AOTD_JAR" ]]; then
 else
   echo "AoTD integration not exercised: no fork JAR at $AOTD_JAR"
 fi
-java -cp "$NATIVE_CP" com.starsector.prepatcher.agent.LinuxNamespaceCompatibilityTest "$CONFIG" \
+java -cp "$NATIVE_CP" com.starsector.prepatcher.agent.NativeNamespaceCompatibilityTest "$CONFIG" \
   "$CORE/starfarer_obf.jar" "$CORE/fs.common_obf.jar" "$CORE/fs.sound_obf.jar" "$CORE/starfarer.api.jar" \
   2>&1 | tee "$BUILD/reports/linux-native-pipeline.txt"
 # Real JVM agent route, using exactly the installed Mikohime/FR argument chain.
 [[ -f "$CORE/Miko_Simple.txt" ]] || { echo 'Miko_Simple.txt required for Java 28 + FR smoke.' >&2; exit 1; }
-for test in com.starsector.prepatcher.agent.JavaCompatibilityRouteSmokeMain com.starsector.prepatcher.runtime.CoreWorldsActualAgentSmokeTest com.starsector.prepatcher.runtime.LinuxRuntimeLinkageSmokeTest com.starsector.prepatcher.runtime.PlatformXmlActualAgentSmokeTest; do
+for test in com.starsector.prepatcher.agent.JavaCompatibilityRouteSmokeMain com.starsector.prepatcher.runtime.CoreWorldsActualAgentSmokeTest com.starsector.prepatcher.runtime.NativeRuntimeLinkageSmokeTest com.starsector.prepatcher.runtime.PlatformXmlActualAgentSmokeTest; do
   args_file="$BUILD/linux-${test##*.}.args"
   awk -v agent="$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" -v tests="$TESTS" -v main="$test" '
     /^-Xms/ { print "-Xms128m"; next }
@@ -69,7 +71,7 @@ for test in com.starsector.prepatcher.agent.JavaCompatibilityRouteSmokeMain com.
     /^com[.]fs[.]starfarer[.]StarfarerLauncher$/ { print main; next }
     { print }
   ' "$CORE/Miko_Simple.txt" > "$args_file"
-  (cd "$CORE" && java "@$args_file" "$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" "$BUILD/linux-native-targets.txt") 2>&1 | tee "$BUILD/reports/linux-${test##*.}.txt"
+  (cd "$CORE" && java "@$args_file" "$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" "$BUILD/native-targets.txt") 2>&1 | tee "$BUILD/reports/linux-${test##*.}.txt"
   if grep -q 'Atomic transformer pipeline rolled back' "$BUILD/reports/linux-${test##*.}.txt"; then
     echo "Unexpected pipeline rollback in $test" >&2
     exit 1

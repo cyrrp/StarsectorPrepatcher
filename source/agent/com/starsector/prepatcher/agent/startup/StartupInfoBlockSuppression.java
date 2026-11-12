@@ -44,6 +44,17 @@ public final class StartupInfoBlockSuppression implements StructuredPatch<Startu
   public Match<Plan> match(ClassNode node) {
     List<StartupInfoBlocks.LogBlock> blocks = StartupInfoBlocks.startupInfoBlockPlans(node, literal);
     int hooks = countCategoryHooks(node, "startupLogSuppressed", "(I)V", category);
+    if (node.name.equals("com/fs/starfarer/loading/scripts/ScriptStore$3") && category == 2
+        && blocks.isEmpty() && hooks == 0 && !hasPatchMarker(node, "startupLogAggregation")) {
+      var run = requireMethod(node, "run", "()V");
+      if (node.interfaces.contains("java/lang/Runnable")
+          && countCalls(run, org.objectweb.asm.Opcodes.INVOKEVIRTUAL, "org/codehaus/janino/JavaSourceClassLoader",
+              "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;") == 1
+          && countCalls(run, org.objectweb.asm.Opcodes.INVOKEVIRTUAL, "org/apache/log4j/Logger", "info", "(Ljava/lang/Object;)V") == 0
+          && countStringConstants(node, literal) == 0) {
+        return Match.notNeeded("script compilation runner has no startup INFO calls to suppress");
+      }
+    }
     int expectedHooks = emitRuntimeCounter ? expected : 0;
     if (blocks.isEmpty() && hooks == expectedHooks) {
       return Match.alreadyApplied("startup INFO suppression postcondition matches for " + literal);

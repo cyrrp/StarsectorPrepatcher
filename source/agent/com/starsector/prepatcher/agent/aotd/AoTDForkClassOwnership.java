@@ -5,6 +5,7 @@ import static com.fs.starfarer.api.StarsectorPrepatcherRuntimeBridge.AOTD_CURREN
 
 import java.io.InputStream;
 import java.net.JarURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.net.URLConnection;
 import java.nio.file.Path;
@@ -60,17 +61,26 @@ final class AoTDForkClassOwnership {
       return entry.equals(jar.getEntryName()) && sameLocation(origin, jar.getJarFileURL()) ? resource : null;
     }
     if ("file".equals(origin.getProtocol()) && "file".equals(resource.getProtocol())) {
-      Path expected = Path.of(origin.toURI()).resolve(entry).normalize();
-      return expected.equals(Path.of(resource.toURI()).normalize()) ? resource : null;
+      Path expected = fileLocation(origin, false).resolve(entry).normalize();
+      return expected.equals(fileLocation(resource, false)) ? resource : null;
     }
     return null;
   }
 
   private static boolean sameLocation(URL left, URL right) throws Exception {
     if ("file".equals(left.getProtocol()) && "file".equals(right.getProtocol())) {
-      return Path.of(left.toURI()).normalize().equals(Path.of(right.toURI()).normalize());
+      return fileLocation(left, true).equals(fileLocation(right, true));
     }
     return left.toURI().normalize().equals(right.toURI().normalize());
+  }
+
+  private static Path fileLocation(URL location, boolean archiveRoot) throws Exception {
+    String external = location.toExternalForm();
+    // Legacy FR removes the class entry from a jar URL but keeps its terminal !/.
+    // Its URL may also contain literal spaces; encode those without decoding or
+    // changing existing escapes, literal plus signs, or other path characters.
+    if (archiveRoot && external.endsWith("!/")) external = external.substring(0, external.length() - 2);
+    return Path.of(new URI(external.replace(" ", "%20"))).normalize();
   }
 
   private static ClassNode read(URL resource) throws Exception {

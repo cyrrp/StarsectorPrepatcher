@@ -40,12 +40,27 @@ $asmAnalysis = Join-Path $modRoot 'lib\asm-analysis-9.10.1.jar'
 $asmCommons = Join-Path $modRoot 'lib\asm-commons-9.10.1.jar'
 $agentCp = @((Join-Path $core 'starfarer.api.jar'),(Join-Path $core 'starfarer_obf.jar'),(Join-Path $core 'fs.common_obf.jar'),(Join-Path $core 'fs.sound_obf.jar'),(Join-Path $core 'lwjgl.jar'),(Join-Path $core 'lwjgl_util.jar'),$asmCore,$asmTree,$asmAnalysis,$asmCommons) -join ';'
 $buildCp = @($asmCore,$asmCommons,$asmTree) -join ';'
+& javac -encoding UTF-8 --release 17 -cp $buildCp -d $buildClasses $buildSources
+if ($LASTEXITCODE -ne 0) { throw 'Build tools compilation failed.' }
+$namespaceTables = Join-Path $modRoot 'source/resources/com/starsector/prepatcher/agent'
+$namespace = & java -cp "$buildClasses;$buildCp" com.starsector.prepatcher.build.NamespaceJarTool --detect (Join-Path $core 'starfarer_obf.jar') $namespaceTables
+if ($LASTEXITCODE -ne 0) { throw 'Game namespace detection failed.' }
+$compileCore = $core
+if ($namespace -ne 'windows-0.98a-RC8') {
+    $compileCore = Join-Path $build 'canonical-core'
+    New-Item -ItemType Directory -Force $compileCore | Out-Null
+    Get-ChildItem -LiteralPath $core -Filter '*.jar' -File | Where-Object { $_.Name -notin @('starfarer_obf.jar','fs.common_obf.jar','fs.sound_obf.jar','starfarer.api.jar') } | Copy-Item -Destination $compileCore -Force
+    foreach ($gameJar in @('starfarer_obf.jar','fs.common_obf.jar','fs.sound_obf.jar','starfarer.api.jar')) {
+        & java -cp "$buildClasses;$buildCp" com.starsector.prepatcher.build.NamespaceJarTool (Join-Path $namespaceTables "$namespace.tsv") (Join-Path $core $gameJar) (Join-Path $compileCore $gameJar)
+        if ($LASTEXITCODE -ne 0) { throw "Canonical build view failed: $gameJar" }
+    }
+    $agentCp = @((Join-Path $compileCore 'starfarer.api.jar'),(Join-Path $compileCore 'starfarer_obf.jar'),(Join-Path $compileCore 'fs.common_obf.jar'),(Join-Path $compileCore 'fs.sound_obf.jar'),(Join-Path $core 'lwjgl.jar'),(Join-Path $core 'lwjgl_util.jar'),$asmCore,$asmTree,$asmAnalysis,$asmCommons) -join ';'
+}
+$namespace | Set-Content -Encoding Ascii -LiteralPath (Join-Path $build 'game-namespace.txt')
 $bootstrapCp = @((Join-Path $core 'starfarer.api.jar'),(Join-Path $core 'starfarer_obf.jar'),(Join-Path $core 'log4j-1.2.9.jar')) -join ';'
 & javac -encoding UTF-8 --release 17 -cp $agentCp -d $agentRawClasses $agentSources
 if ($LASTEXITCODE -ne 0) { throw 'Agent compilation failed.' }
 Copy-Item -Path (Join-Path $modRoot 'source/resources/*') -Destination $agentRawClasses -Recurse -Force
-& javac -encoding UTF-8 --release 17 -cp $buildCp -d $buildClasses $buildSources
-if ($LASTEXITCODE -ne 0) { throw 'ASM relocator compilation failed.' }
 & javac -encoding UTF-8 --release 17 -cp $bootstrapCp -d $bootstrapClasses $bootstrapSources
 if ($LASTEXITCODE -ne 0) { throw 'Bootstrap compilation failed.' }
 
@@ -81,8 +96,8 @@ foreach ($classFile in Get-ChildItem -LiteralPath $agentClasses -Filter *.class 
 $utf8 = New-Object Text.UTF8Encoding($false)
 $agentManifest = Join-Path $build 'agent.mf'
 $bootstrapManifest = Join-Path $build 'bootstrap.mf'
-[IO.File]::WriteAllText($agentManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Agent`nImplementation-Version: 0.18.6`nPremain-Class: com.starsector.prepatcher.agent.PrepatcherAgent`nCan-Redefine-Classes: false`nCan-Retransform-Classes: true`n`n", $utf8)
-[IO.File]::WriteAllText($bootstrapManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Bootstrap`nImplementation-Version: 0.18.6`n`n", $utf8)
+[IO.File]::WriteAllText($agentManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Agent`nImplementation-Version: 0.18.7`nPremain-Class: com.starsector.prepatcher.agent.PrepatcherAgent`nCan-Redefine-Classes: false`nCan-Retransform-Classes: true`n`n", $utf8)
+[IO.File]::WriteAllText($bootstrapManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Bootstrap`nImplementation-Version: 0.18.7`n`n", $utf8)
 $agentJar = Join-Path $modRoot 'agent\StarsectorPrepatcherAgent.jar'
 & jar --create --file $agentJar --manifest $agentManifest --date=2026-01-01T00:00:00Z -C $agentClasses .
 if ($LASTEXITCODE -ne 0) { throw 'Agent JAR creation failed.' }

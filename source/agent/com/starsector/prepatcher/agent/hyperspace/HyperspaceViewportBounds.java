@@ -55,6 +55,10 @@ public final class HyperspaceViewportBounds implements StructuredPatch<Hyperspac
       Candidate candidate = originalCandidate(method);
       if (candidate != null) candidates.add(candidate);
     }
+    if (candidates.size() == 2 && (candidates.get(0).verticalRangeLoad() == null)
+        != (candidates.get(1).verticalRangeLoad() == null)) {
+      return Match.incompatible("viewportBounds methods have inconsistent original/upstream-corrected surfaces");
+    }
     // The surface is atomic: a partial or ambiguous shape collapses to "found 0" rather than
     // reporting a partial count, matching the refusal the mutating scanner produced.
     requireCount("viewportBounds structural sites", candidates.size() == 2 ? 2 : 0, 2);
@@ -64,17 +68,21 @@ public final class HyperspaceViewportBounds implements StructuredPatch<Hyperspac
   @Override
   public PatchReport mutate(Plan plan) {
     for (Candidate candidate : plan.candidates()) {
-      candidate.verticalRangeLoad().var = candidate.heightLocal();
-      InsnList replacement = new InsnList();
-      replacement.add(new InsnNode(Opcodes.ICONST_0));
-      replacement.add(new InsnNode(Opcodes.AALOAD));
-      replacement.add(new InsnNode(Opcodes.ARRAYLENGTH));
-      candidate.method().instructions.insertBefore(candidate.verticalClampLength(), replacement);
-      candidate.method().instructions.remove(candidate.verticalClampLength());
+      if (candidate.verticalRangeLoad() != null) candidate.verticalRangeLoad().var = candidate.heightLocal();
+      useInnerDimension(candidate.method(), candidate.verticalClampLength());
     }
     PatchReport report = new PatchReport();
     report.add("viewportBounds", plan.candidates().size());
     return report;
+  }
+
+  private static void useInnerDimension(MethodNode method, InsnNode length) {
+    InsnList replacement = new InsnList();
+    replacement.add(new InsnNode(Opcodes.ICONST_0));
+    replacement.add(new InsnNode(Opcodes.AALOAD));
+    replacement.add(new InsnNode(Opcodes.ARRAYLENGTH));
+    method.instructions.insertBefore(length, replacement);
+    method.instructions.remove(length);
   }
 
   @Override
@@ -99,11 +107,19 @@ public final class HyperspaceViewportBounds implements StructuredPatch<Hyperspac
       if (load.var == locals.widthLocal()) widthLoads.add(load);
       else if (load.var == locals.heightLocal()) heightLoads++;
     }
-    if (widthLoads.size() != 3 || heightLoads != 1) return null;
-
     ClampShape clamp = clampShape(method);
     if (clamp.direct().size() != 2 || clamp.nested() != 0) return null;
-    return new Candidate(method, locals.heightLocal(), widthLoads.get(2), clamp.direct().get(1));
+    InsnNode comparison = clamp.direct().get(1);
+    InsnNode assignment = clampAssignment(comparison);
+    if (assignment == null) return null;
+    if (previousMeaningful(assignment).getOpcode() != Opcodes.AALOAD) return null;
+    if (widthLoads.size() == 3 && heightLoads == 1) {
+      return new Candidate(method, locals.heightLocal(), widthLoads.get(2), comparison);
+    }
+    if (widthLoads.size() == 2 && heightLoads == 2) {
+      return new Candidate(method, locals.heightLocal(), null, comparison);
+    }
+    return null;
   }
 
   private static boolean hasPatchedViewportBounds(MethodNode method) {
@@ -117,7 +133,53 @@ public final class HyperspaceViewportBounds implements StructuredPatch<Hyperspac
     }
     if (widthLoads != 2 || heightLoads != 2) return false;
     ClampShape clamp = clampShape(method);
-    return clamp.direct().size() == 1 && clamp.nested() == 1;
+    if (clamp.direct().size() != 1 || clamp.nested() != 1) return false;
+    for (AbstractInsnNode n : method.instructions) {
+      if (!(n instanceof InsnNode length) || length.getOpcode() != Opcodes.ARRAYLENGTH) continue;
+      AbstractInsnNode next = nextMeaningful(length);
+      if (next == null || next.getOpcode() != Opcodes.I2F) continue;
+      AbstractInsnNode compare = nextMeaningful(next);
+      if (compare == null || compare.getOpcode() != Opcodes.FCMPL) continue;
+      if (previousMeaningful(length).getOpcode() != Opcodes.AALOAD) continue;
+      InsnNode assignment = clampAssignment(length);
+      return assignment != null && previousMeaningful(assignment).getOpcode() == Opcodes.AALOAD;
+    }
+    return false;
+  }
+
+  /** The assignment must read the same tiles array as the comparison and store its length - 1. */
+  private static InsnNode clampAssignment(InsnNode comparison) {
+    AbstractInsnNode comparisonField = previousMeaningful(comparison);
+    if (comparisonField != null && comparisonField.getOpcode() == Opcodes.AALOAD) {
+      AbstractInsnNode zero = previousMeaningful(comparisonField);
+      comparisonField = previousMeaningful(zero);
+    }
+    if (!(comparisonField instanceof FieldInsnNode field) || field.getOpcode() != Opcodes.GETFIELD) return null;
+    AbstractInsnNode receiver = previousMeaningful(field), compared = previousMeaningful(receiver);
+    if (!(receiver instanceof VarInsnNode selfLoad) || selfLoad.getOpcode() != Opcodes.ALOAD || selfLoad.var != 0
+        || !(compared instanceof VarInsnNode bound) || bound.getOpcode() != Opcodes.FLOAD) return null;
+    AbstractInsnNode jumpInsn = nextMeaningful(nextMeaningful(nextMeaningful(comparison)));
+    if (!(jumpInsn instanceof JumpInsnNode jump) || jump.getOpcode() != Opcodes.IFLT) return null;
+    AbstractInsnNode load = nextMeaningful(jump);
+    AbstractInsnNode fieldInsn = nextMeaningful(load);
+    if (!(load instanceof VarInsnNode self) || self.getOpcode() != Opcodes.ALOAD || self.var != 0
+        || !(fieldInsn instanceof FieldInsnNode assignedField) || assignedField.getOpcode() != Opcodes.GETFIELD
+        || !assignedField.owner.equals(field.owner) || !assignedField.name.equals(field.name)
+        || !assignedField.desc.equals(field.desc)) return null;
+    AbstractInsnNode lengthInsn = nextMeaningful(assignedField);
+    if (lengthInsn != null && lengthInsn.getOpcode() == Opcodes.ICONST_0) {
+      AbstractInsnNode array = nextMeaningful(lengthInsn);
+      if (array == null || array.getOpcode() != Opcodes.AALOAD) return null;
+      lengthInsn = nextMeaningful(array);
+    }
+    if (!(lengthInsn instanceof InsnNode length) || length.getOpcode() != Opcodes.ARRAYLENGTH) return null;
+    AbstractInsnNode one = nextMeaningful(length), subtract = nextMeaningful(one), convert = nextMeaningful(subtract);
+    AbstractInsnNode store = nextMeaningful(convert);
+    if (one == null || one.getOpcode() != Opcodes.ICONST_1 || subtract == null || subtract.getOpcode() != Opcodes.ISUB
+        || convert == null || convert.getOpcode() != Opcodes.I2F || !(store instanceof VarInsnNode local)
+        || local.getOpcode() != Opcodes.FSTORE || local.var != bound.var
+        || nextMeaningful(store) != nextMeaningful(jump.label)) return null;
+    return length;
   }
 
   private static ViewportLocals viewportLocals(MethodNode method) {

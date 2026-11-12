@@ -15,8 +15,9 @@ hyperspace-патчи из `starfarer.api.jar` и `starfarer_obf.jar`, неза�
 
 ## Classloader-архитектура и Faster Rendering
 
-Версия 0.18.6 проверена на Java 17 и Miko Java `27+22` в Windows, а также на нативных Linux JAR
-с Temurin Java `28-ea+13` и Faster Rendering. Для других JVM применяется та же проверка
+Версия 0.18.7 проверена на Windows/Linux 0.98a-RC8 и 0.98.5a-RC3: Java 17 и Miko Java `27+22`
+в Windows, Temurin Java `28-ea+13` и Faster Rendering в Linux. Для новой игры проверен FR 1.0.0
+с объединённым agent/runtime JAR; прежняя игра также проверена с прежними layouts. Для других JVM применяется та же проверка
 возможностей, но поддержка такой версии не заявляется без отдельной валидации.
 Решение никогда не зависит от версии или checksum Faster Rendering.
 
@@ -113,6 +114,14 @@ Java-27 normalization остаётся входом транзакции, поэ
 Rendering делает `com.genir.renderer.loaders.AppClassLoader` system/game loader и child-load'ит
 `com.fs.*`. Prepatcher разделяет control plane и target runtime:
 
+До создания diagnostic transaction обычный Instrumentation callback исключает собственный
+control plane по совместному совпадению classloader и CodeSource agent JAR. Legacy predefine
+bridge вызывается вне JVM recursion guard; без этой границы первая загрузка
+`TransformDiagnostics$Transaction` может рекурсивно войти в pipeline и дать ClassCircularityError.
+Другой JAR в том же parent loader, включая `sound.Sound`, и неизвестный CodeSource сохраняют
+обычные проверки. Package-name exclusion не используется; injected target payload остаётся
+в domain игрового lookup anchor.
+
 ```text
 agent loader
 └─ com.starsector.prepatcher.agent.*       config, ASM, transformer, RuntimeInstaller
@@ -144,28 +153,40 @@ target, который вызывает typed runtime, loader должен бы�
 site count сохраняют ownership/idempotency. Сам `patch.startupLogAggregation` пока остаётся
 known-disabled независимо от этого loader-исключения.
 
-## Native Linux namespace
+## Native game namespaces
 
-Linux 0.98a-RC8 uses a different obfuscation namespace from Windows. `GameNamespace`
+Windows/Linux 0.98.5a-RC3 and Linux 0.98a-RC8 use different obfuscation namespaces from canonical Windows 0.98a-RC8. `GameNamespace`
 detects the namespace from the actual CampaignEngine descriptor, not `os.name`, and
 translates class/member names and descriptors around the complete ordered pipeline.
 The shipped table is generated offline from corresponding clean Windows/Linux JARs;
 game JARs are not rewritten. Unresolved class pairs are not guessed. The existing
 structural matchers and postconditions remain authoritative after translation.
 
+The canonical reference remains Windows 0.98a-RC8. Three reversible tables cover native
+Linux 0.98a-RC8 and Windows/Linux 0.98.5a-RC3. Table selection requires exactly one matching
+native `CampaignEngine.advance` descriptor; unknown or ambiguous namespaces fail before
+runtime installation. These are name translations, not version/hash acceptance gates.
+Readable anonymous-class suffixes and Java keywords are not stable mapping evidence.
+The changed `ScriptStore$3` compilation runner is an explicitly reviewed class correspondence;
+its removed INFO cost is separately verified by its matcher.
+Unpaired native members that collide with mapped canonical names receive reversible private
+namespace aliases in the table. They are not guessed correspondences. A native→canonical→native
+roundtrip must preserve all target instructions, declarations and metadata, and mandatory member
+name repair must survive output translation as well as rollback, including forced-route fixtures.
+
 The transaction consumes canonical bytes, converts a successful result back to native
 names before committing diagnostics, and rolls back to its original native input on
 failure. Mandatory Java-27+ name repair remains preserved on rollback. Runtime payloads
 are translated before definition in the game loader, including the selection-indicator
 reflection bridge; repaired member names must not become illegal again after Faster
-Rendering has run. Windows remains the identity namespace.
+Rendering has run. Windows 0.98a-RC8 remains the identity namespace.
 
 Bootstrap- and platform-loader classes are excluded before parsing, regardless of their
 package names. In particular, Java 28's `org.xml.sax` and `org.w3c.dom` classes must never
 reach the game-bytecode ASM remapper. This is a loader-ownership boundary, not a growing
 package exclusion list. Application and child mod loaders still reach normal patch checks.
 
-The Linux build creates canonical compile-time JAR copies only under `.build/canonical-core`.
+Both builders create canonical compile-time JAR copies only under `.build/canonical-core`.
 Native game/runtime validation remains separate from this build-time representation.
 
 ## Жизненный цикл патча
@@ -191,6 +212,44 @@ Native game/runtime validation remains separate from this build-time representat
 
 Строковые литералы, constant-pool ordering, line numbers и debug metadata не являются частью
 решения о совместимости. Поэтому переводы и изменения несвязанных методов не блокируют патчи.
+
+### Адаптированные startup и terrain surfaces
+
+`Rules` literal parsing accepts exactly one parsing body with descriptor
+`(Lcom/fs/starfarer/loading/ResourceLoaderState;)V` or
+`(Ljava/lang/String;Lcom/fs/starfarer/loading/ResourceLoaderState;)V`. All nine existing
+literal call sites must match; the new overload's orchestration caller is left intact.
+
+`LoadingUtils.super(Ljava/io/InputStream;)Ljava/lang/String;` retains its native BOM policy.
+The legacy nine-call body keeps a leading BOM; the eleven-call body must additionally contain
+the exact final `startsWith(BOM)` / conditional `replaceFirst(BOM, "")` sequence on the same
+local. Only that form selects `readUtf8NormalizedWithoutBom`. Unknown/partial tails are rejected.
+The kill switch and known-disabled default remain unchanged.
+
+For `ScriptStore$3.run()V`, `startupLogAggregation` reports `NOT_NEEDED` only when the runnable
+still contains the Janino compilation call, has no INFO calls, no target literal, no suppression
+hook and no ownership marker. No bytes or counters change. The absence contract is revalidated
+after later patches and at final composition; a foreign hook or marker is refused.
+The old runner still receives its original suppression transformation.
+
+`DynamicParticleGroup.advance(F)V` additionally recognizes the allocation-free array-compaction
+body used by current Faster Rendering. This is a read-only absence contract: non-static
+`particlesArray:BaseParticle[]` and `particlesNum:int`, every opcode/operand/branch of the complete
+loop, one `BaseParticle.advance` and `isExpired`, last-element replacement, trailing null, count
+decrement and survivor-only index increment must match the owned contract template. Debug/frame
+encoding may differ. A foreign marker, changed branch/call/field, allocation, handler or extra work
+is refused. A match reports `NOT_NEEDED` without hooks, ownership or counter changes; later stages
+must preserve the complete body. Vanilla still receives the original stable cleanup patch.
+The FR body's existing particle order and immediate removal semantics remain FR-owned; this
+patch does not convert them to vanilla ordering. There is no FR version/hash gate or linkage.
+
+`BaseTiledTerrain.render` and `isTileVisible` form one atomic viewport-bounds surface.
+Both must have the same supported input: the original wrong-height/inner-assignment form,
+or the native height/inner-assignment form with its remaining direct comparison.
+The result must use height for yEnd and the same inner tile-array length for both its clamp
+comparison and `length - 1` assignment. A mixed pair, partial guard, or marker with an incomplete
+postcondition is refused. The existing inner-dimension assignment is preserved in both game versions;
+the legacy transformation's output behavior is unchanged.
 
 ## Owned fork как first-class compatibility surface
 
@@ -256,7 +315,7 @@ the original call. The local path deliberately retains the last committed global
 
 ## UI market-mutation refresh
 
-Prepatcher 0.18.6 and Scheduler Fork `1.0.14-spp13` use bridge schema V10. The required production
+Prepatcher 0.18.7 and Scheduler Fork `1.0.14-spp13` use bridge schema V10. The required production
 mask `0xbff` includes `UI_ECONOMY_DISPATCH` and `ECONOMY_RESTORE_COORDINATION`; the optional
 `UI_MARKET_MUTATION_REFRESH` bit 10 extends the complete profile to `0xfff`. The explicit dispatcher
 receives a classified action, detail value and, when needed, an immutable sorted `String[]` of
@@ -392,6 +451,8 @@ without linking its child loader to a runtime helper.
 
 - `APPLIED` — контракт совпал, результат верифицирован и принят содержащей его транзакцией;
 - `ALREADY_APPLIED` — точный postcondition уже присутствует;
+- `NOT_NEEDED` — matcher доказал отсутствие устраняемой стоимости; bytes, ownership marker
+  и счётчики применений/пропусков не меняются, отсутствие повторно проверяется при композиции;
 - `SKIPPED_STRUCTURAL` — site отсутствует, неоднозначен или конфликтует;
 - `SKIPPED_LOADER` — target и typed runtime принадлежат разным classloader'ам; target оставлен vanilla;
 - `SKIPPED_ERROR` — анализ/сериализация завершились непредвиденной ошибкой;
@@ -490,6 +551,9 @@ ULP fixtures входят в actual-agent regression suite.
   iterator — от `this.require.values()`. Единственный `CampaignClock.convertToDays(F)F` остаётся
   после restore/pause path и до обоих scans; expire iterator предшествует require iterator.
   Inline guard читает те же два поля, стоит после исходного pause-return и до clock conversion.
+  В новой форме после require iterator допускается только null-initialized deferred-removal list;
+  пустой require scan обязан переходить через проверку этой null-ссылки сразу к финальному RETURN.
+  Дополнительный List.iterator относится к непустой отложенной очистке и сохраняется.
   Partial/raw-hook mixture, другой map receiver, изменённый порядок и лишние sites отвергаются.
 - Persistent Economy/Market snapshots: synthetic owner fields must be private, transient, and
   initialized in constructors plus `readResolve`; `Market.clone()` receives independent state.
@@ -828,6 +892,14 @@ Prepatcher снова стал последним `-javaagent`.
 Неизвестная структура или отсутствие обязательного launch-файла остаётся ошибкой до записи;
 это сообщение не приписывает отсутствие файла неправильному размещению мода.
 
+FR layout определяется по содержимому JAR. Объединённый `fr.jar` с
+`Premain-Class: com.genir.renderer.agent.Agent` выбирается первым, в том числе при оставшемся
+от предыдущей установки `fr.agent.jar`. Затем поддерживаются отдельный agent с Premain-Class
+и legacy `AppClassLoader`/`ClassTransformer` pair. При нормализации оригинального Mikohime
+старые FR-agent записи заменяются одной выбранной записью перед Prepatcher; generator использует
+тот же выбор и сохраняет пользовательский `FR_status`. Чужие агенты и настройки памяти сохраняются.
+На файлы конфигуратора Gaius это правило записи не распространяется: он остаётся их владельцем.
+
 При комбинированном выборе и `All` пути Vanilla/FasterRendering обрабатываются независимо
 от передачи Mikohime конфигуратору; их обязательные файлы по-прежнему проверяются до записи.
 Цель FasterRendering означает отдельный `fr.vmparams`, а не включение FR внутри Mikohime.
@@ -877,6 +949,11 @@ the construction class's own CodeSource (JAR or classes directory); mixed upstre
 parent-resource shadowing and absent provenance cannot authorize the patch. The byte-only check
 requires the existing current fork version/capability constants, bridge V10 marker and bridge
 method ABI. It does not load/initialize mod classes, cache loaders or depend on handshake order.
+File locations are compared as normalized filesystem paths. The legacy FR file-URL JAR root
+`file:/.../mod.jar!/` denotes the same archive as its ordinary file URL; only the terminal
+archive-root separator is removed for a JAR comparison. Literal URL spaces are percent-encoded
+before URI parsing, preserving existing escapes and literal plus signs. A JAR entry URL or a
+different archive cannot supply ownership, even if it contains identical fork contract bytes.
 Missing ownership reports `NOT_APPLICABLE_UNOWNED` without changing upstream ToT. Runtime
 activation still requires the existing callback handshake; this resource proof does not activate
 capabilities. A malformed resource or changed construction body remains a diagnostic rejection.

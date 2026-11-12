@@ -2,11 +2,14 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Текущая версия: **0.18.6**. Поддерживаемая версия игры: **Starsector 0.98a-RC8**.
+Текущая версия: **0.18.7**. Поддерживаемые сборки игры: **Starsector 0.98a-RC8 и 0.98.5a-RC3** (Windows/Linux).
+В metadata указана 0.98.5a-RC3; на поддерживаемой 0.98a-RC8 лаунчер может показывать отметку о другой патч-версии.
 
 [![Без препатчера и с ним](https://github.com/kirpoly/StarsectorPrepatcher/raw/HEAD/media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
 Набор оптимизаций внутреннего кода Starsector и избранных модов.
+
+Для Starsector 0.98.5a используйте Faster Rendering 1.0.0 или новее. После обновления Faster Rendering заново создайте конфигурацию Mikohime.
 
 ## Установка в Windows
 
