@@ -10,7 +10,7 @@
 Основной agent выполняет независимое structural matching фактически загружаемого bytecode. Каждый
 блок имеет ownership marker, postcondition, ASM verification и fail-open fallback.
 Имена внутренних классов и descriptors ниже приведены в каноническом Windows 0.98a-RC8 namespace;
-Windows/Linux 0.98.5a-RC3 и Linux 0.98a-RC8 переводятся согласно
+Windows/Linux 0.98.5a-RC3/RC5 и Linux 0.98a-RC8 переводятся согласно
 [правилам namespace](COMPATIBILITY.md#native-game-namespaces).
 
 Hyperspace-патчи проходят тот же независимый structural pipeline единого agent: каждый патч

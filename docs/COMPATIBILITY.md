@@ -15,7 +15,7 @@ hyperspace-патчи из `starfarer.api.jar` и `starfarer_obf.jar`, неза�
 
 ## Classloader-архитектура и Faster Rendering
 
-Версия 0.18.7 проверена на Windows/Linux 0.98a-RC8 и 0.98.5a-RC3: Java 17 и Miko Java `27+22`
+Поддерживаемые сборки 0.18.8: Windows/Linux 0.98a-RC8 и 0.98.5a-RC3/RC5; Java 17 и Miko Java `27+22`
 в Windows, Temurin Java `28-ea+13` и Faster Rendering в Linux. Для новой игры проверен FR 1.0.0
 с объединённым agent/runtime JAR; прежняя игра также проверена с прежними layouts. Для других JVM применяется та же проверка
 возможностей, но поддержка такой версии не заявляется без отдельной валидации.
@@ -155,18 +155,20 @@ known-disabled независимо от этого loader-исключения.
 
 ## Native game namespaces
 
-Windows/Linux 0.98.5a-RC3 and Linux 0.98a-RC8 use different obfuscation namespaces from canonical Windows 0.98a-RC8. `GameNamespace`
+Windows/Linux 0.98.5a-RC3/RC5 and Linux 0.98a-RC8 use different obfuscation namespaces from canonical Windows 0.98a-RC8. `GameNamespace`
 detects the namespace from the actual CampaignEngine descriptor, not `os.name`, and
 translates class/member names and descriptors around the complete ordered pipeline.
 The shipped table is generated offline from corresponding clean Windows/Linux JARs;
 game JARs are not rewritten. Unresolved class pairs are not guessed. The existing
 structural matchers and postconditions remain authoritative after translation.
 
-The canonical reference remains Windows 0.98a-RC8. Three reversible tables cover native
-Linux 0.98a-RC8 and Windows/Linux 0.98.5a-RC3. Table selection requires exactly one matching
+The canonical reference remains Windows 0.98a-RC8. Five reversible tables cover native
+Linux 0.98a-RC8 and Windows/Linux 0.98.5a-RC3/RC5. Table selection requires exactly one matching
 native `CampaignEngine.advance` descriptor; unknown or ambiguous namespaces fail before
 runtime installation. These are name translations, not version/hash acceptance gates.
 Readable anonymous-class suffixes and Java keywords are not stable mapping evidence.
+Concatenated obfuscator tokens such as `Objectnew` and `Stringsuper` are not readable-name
+seeds either; they require the same structural correspondence evidence as other obfuscated classes.
 The changed `ScriptStore$3` compilation runner is an explicitly reviewed class correspondence;
 its removed INFO cost is separately verified by its matcher.
 Unpaired native members that collide with mapped canonical names receive reversible private
@@ -179,7 +181,12 @@ names before committing diagnostics, and rolls back to its original native input
 failure. Mandatory Java-27+ name repair remains preserved on rollback. Runtime payloads
 are translated before definition in the game loader, including the selection-indicator
 reflection bridge; repaired member names must not become illegal again after Faster
-Rendering has run. Windows 0.98a-RC8 remains the identity namespace.
+Rendering has run. On Java 17–26, output translation preserves the exact incoming native
+member spelling by owner, kind and descriptor, including declarations and handle references.
+A dotted member is restored to its underscore spelling only when that exact repaired symbol
+was present in the input and the dotted symbol was absent. Plain Java 17 keeps its original
+dotted names; this does not enable global name repair on that route.
+Windows 0.98a-RC8 remains the identity namespace.
 
 Bootstrap- and platform-loader classes are excluded before parsing, regardless of their
 package names. In particular, Java 28's `org.xml.sax` and `org.w3c.dom` classes must never
@@ -315,7 +322,7 @@ the original call. The local path deliberately retains the last committed global
 
 ## UI market-mutation refresh
 
-Prepatcher 0.18.7 and Scheduler Fork `1.0.14-spp13` use bridge schema V10. The required production
+Prepatcher 0.18.8 and Scheduler Fork `1.0.14-spp13` use bridge schema V10. The required production
 mask `0xbff` includes `UI_ECONOMY_DISPATCH` and `ECONOMY_RESTORE_COORDINATION`; the optional
 `UI_MARKET_MUTATION_REFRESH` bit 10 extends the complete profile to `0xfff`. The explicit dispatcher
 receives a classified action, detail value and, when needed, an immutable sorted `String[]` of

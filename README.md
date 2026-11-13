@@ -2,14 +2,14 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Current version: **0.18.7**. Supported game builds: **Starsector 0.98a-RC8 and 0.98.5a-RC3** (Windows/Linux).
-The metadata targets 0.98.5a-RC3; on supported 0.98a-RC8 the launcher may show a different patch-version notice.
+Current version: **0.18.8**. Supported game builds: **Starsector 0.98a-RC8, 0.98.5a-RC3 and 0.98.5a-RC5** (Windows/Linux).
+The metadata targets 0.98.5a-RC5; on other supported builds the launcher may show a different patch-version notice.
 
 [![Unplayable without Prepatcher versus smooth with Prepatcher](https://github.com/kirpoly/StarsectorPrepatcher/raw/HEAD/media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 
 A collection of code optimizations for Starsector internals and selected mods.
 
-For Starsector 0.98.5a, use Faster Rendering 1.0.0 or later. Regenerate your Mikohime configuration after updating Faster Rendering.
+If you use Faster Rendering with Starsector 0.98.5a, use version 1.0.0 or later. Regenerate your Mikohime configuration after updating Faster Rendering.
 
 ## Windows installation
 

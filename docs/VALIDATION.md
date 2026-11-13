@@ -50,7 +50,7 @@ Prepatcher, preserve foreign agents/memory, and leave FR disabled when the user 
 
 ## Linux native gate
 
-Release coverage includes clean Windows/Linux 0.98a-RC8 and 0.98.5a-RC3 JARs.
+Release coverage includes clean Windows/Linux 0.98a-RC8 and 0.98.5a-RC3/RC5 JARs.
 Both builders detect the native namespace and create a private canonical compilation view.
 The Windows verifier runs its complete existing suite on that view, then
 `NativeNamespaceCompatibilityTest` on the original JARs and an actual-agent
@@ -59,6 +59,10 @@ The Windows verifier runs its complete existing suite on that view, then
 Linux uses the same native tests after its canonical suite. Require complete target inventory,
 textual ASM roundtrip equality, native output identity, idempotence, atomic rollback, mandatory
 name-repair preservation, and resolution of every payload/target descriptor and reflection bridge.
+On Java 17, transport earlier-agent-repaired native targets through the real pipeline and
+require preservation of their member spellings. In particular, `Ship.initSlotCovers` must
+retain every native call after `shipAdvanceScratch` commits; resolving target descriptors
+alone does not prove linkage of method bodies. Keep the plain Java 17 case with dotted names.
 
 `GameUpdateBehaviorTest`, invoked by the structural gate on both versions, executes real isolated
 `Memory.advance` bodies for empty, data-only, expiry, requirement and paused cases and compares raw

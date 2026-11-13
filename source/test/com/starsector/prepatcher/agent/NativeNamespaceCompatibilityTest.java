@@ -48,6 +48,9 @@ public final class NativeNamespaceCompatibilityTest {
         for(var e:input.entrySet()) {
             String name=e.getKey(); byte[] original=e.getValue();
             require(text(original).equals(text(ns.toNative(ns.toCanonical(original)))),"namespace roundtrip differs: "+name);
+            byte[] earlierRepaired=IllegalObfuscatedMemberNameRepair.repair(name,original);
+            require(text(earlierRepaired).equals(text(ns.toNativeRuntime(ns.toCanonical(earlierRepaired),false,earlierRepaired))),
+                    "namespace transport lost earlier-agent member spelling: "+name);
             OrderedTransformerPipeline pipeline=PrepatcherAgent.createOrderedPipeline(config,loader,Path.of(args[0]).toAbsolutePath().getParent(),false,true,true,true,true,false,true);
             byte[] result=pipeline.transform(loader,name,null,null,original);
             if (result != null) OptionalModLinkageAudit.verify(original, result);
@@ -67,6 +70,13 @@ public final class NativeNamespaceCompatibilityTest {
             }
             patched++;
         }
+        String shipName=ns.nativeName("com/fs/starfarer/combat/entities/Ship");
+        byte[] repairedShip=IllegalObfuscatedMemberNameRepair.repair(shipName,input.get(shipName));
+        OrderedTransformerPipeline shipPipeline=PrepatcherAgent.createOrderedPipeline(config,loader,Path.of(args[0]).toAbsolutePath().getParent(),false,true,true,true,true,false,true);
+        byte[] transformedShip=shipPipeline.transform(loader,shipName,null,null,repairedShip);
+        require(transformedShip!=null,"repaired Ship did not exercise the production mutation pipeline");
+        require(slotCoverCalls(repairedShip).equals(slotCoverCalls(transformedShip)),
+                "Ship.initSlotCovers lost native member linkage after earlier-agent repair");
         byte[] sample=input.get(ns.nativeName("com/fs/starfarer/campaign/CampaignEngine"));
         ClassNode repairFixture=new ClassNode(); new ClassReader(sample).accept(repairFixture,0);
         repairFixture.fields.add(new FieldNode(Opcodes.ACC_PUBLIC,"while.new","I",null,null));
@@ -89,6 +99,15 @@ public final class NativeNamespaceCompatibilityTest {
         });
         OrderedTransformerPipeline failing=new OrderedTransformerPipeline(List.of(new OrderedTransformerPipeline.Stage("mutation",mutate),new OrderedTransformerPipeline.Stage("rejection",reject)),loader,false,false);
         require(failing.transform(loader,new ClassReader(sample).getClassName(),null,null,sample)==null,"rollback must preserve original native bytes");
-        System.out.println("OK native namespace targets="+input.size()+" patched="+patched+" roundtrip/native-identity/full-order/ASM/idempotency/atomic-rollback");
+        System.out.println("OK native namespace targets="+input.size()+" patched="+patched+" roundtrip/native-identity/full-order/ASM/idempotency/atomic-rollback/earlier-member-spelling/slot-cover-linkage");
+    }
+    private static List<String> slotCoverCalls(byte[] bytes) {
+        ClassNode node=new ClassNode();new ClassReader(bytes).accept(node,0);
+        List<String> calls=new ArrayList<>();
+        for(MethodNode method:node.methods) if(method.name.equals("initSlotCovers"))
+            for(AbstractInsnNode insn:method.instructions) if(insn instanceof MethodInsnNode call)
+                calls.add(call.owner+'\t'+call.name+'\t'+call.desc);
+        require(!calls.isEmpty(),"Ship.initSlotCovers calls were not found");
+        return calls;
     }
 }

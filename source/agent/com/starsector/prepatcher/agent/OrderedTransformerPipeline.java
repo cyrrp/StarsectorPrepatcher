@@ -110,7 +110,7 @@ final class OrderedTransformerPipeline implements ClassFileTransformer {
         }
         // Translation is inside the same transaction: conversion failure must not
         // publish successful patch diagnostics or return a half-translated class.
-        byte[] output = stageChanged ? namespace.toNativeRuntime(current, repairIllegalNamesInAgentPipeline)
+        byte[] output = stageChanged ? namespace.toNativeRuntime(current, repairIllegalNamesInAgentPipeline, pipelineInput)
             : (changed || !nullWhenUnchanged ? pipelineInput : null);
         diagnostics.commit();
         return output;

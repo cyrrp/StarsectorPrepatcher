@@ -55,7 +55,8 @@ final class GameNamespace {
                     selected=IDENTITY;
                     selectedId="windows-0.98a-RC8";
                 }
-                for (String id : List.of("linux-0.98a-RC8", "windows-0.98.5a-RC3", "linux-0.98.5a-RC3")) {
+                for (String id : List.of("linux-0.98a-RC8", "windows-0.98.5a-RC3", "linux-0.98.5a-RC3",
+                        "windows-0.98.5a-RC5", "linux-0.98.5a-RC5")) {
                     String resource="/com/starsector/prepatcher/agent/"+id+".tsv";
                     String descriptor=advanceDescriptor(resource);
                     if (node.methods.stream().anyMatch(m -> m.name.equals("advance") && m.desc.equals(descriptor))) {
@@ -88,11 +89,45 @@ final class GameNamespace {
     String nativeName(String canonicalName) { return forward.getOrDefault(canonicalName,canonicalName); }
     byte[] toCanonical(byte[] bytes) { return translated ? remap(bytes,true,false) : bytes; }
     byte[] toNative(byte[] bytes) { return translated ? remap(bytes,false,false) : bytes; }
-    byte[] toNativeRuntime(byte[] bytes, boolean repairNames) {
+    byte[] toNativeRuntime(byte[] bytes, boolean repairNames, byte[] nativeInput) {
         byte[] nativeBytes=toNative(bytes);
-        return translated && repairNames
-                ? IllegalObfuscatedMemberNameRepair.repair(new ClassReader(nativeBytes).getClassName(),nativeBytes)
-                : repairNative(nativeBytes);
+        if (translated && repairNames)
+            return IllegalObfuscatedMemberNameRepair.repair(new ClassReader(nativeBytes).getClassName(),nativeBytes);
+        return translated && Runtime.version().feature() < 27
+                ? preserveIncomingMemberNames(nativeInput,nativeBytes) : repairNative(nativeBytes);
+    }
+    private static byte[] preserveIncomingMemberNames(byte[] input, byte[] output) {
+        Set<String> incoming=new HashSet<>();
+        Remapper collect=new Remapper(Opcodes.ASM9) {
+            private String member(String kind,String owner,String name,String desc) {
+                if (name.indexOf('.') >= 0 || name.indexOf('_') >= 0)
+                    incoming.add(kind+'\t'+owner+'\t'+name+'\t'+desc);
+                return name;
+            }
+            @Override public String mapMethodName(String o,String n,String d) { return member("M",o,n,d); }
+            @Override public String mapFieldName(String o,String n,String d) { return member("F",o,n,d); }
+        };
+        // Collect declarations and references, including handles in bootstrap arguments.
+        new ClassReader(input).accept(new ClassRemapper(new ClassWriter(0),collect),0);
+        boolean[] changed={false};
+        Remapper preserve=new Remapper(Opcodes.ASM9) {
+            private String member(String kind,String owner,String name,String desc) {
+                if (name.indexOf('.') < 0) return name;
+                String key=kind+'\t'+owner+'\t';
+                String repaired=name.replace('.','_');
+                // An actually present dotted symbol wins over a similarly named repaired one.
+                if (!incoming.contains(key+name+'\t'+desc) && incoming.contains(key+repaired+'\t'+desc)) {
+                    changed[0]=true;
+                    return repaired;
+                }
+                return name;
+            }
+            @Override public String mapMethodName(String o,String n,String d) { return member("M",o,n,d); }
+            @Override public String mapFieldName(String o,String n,String d) { return member("F",o,n,d); }
+        };
+        ClassWriter writer=new ClassWriter(0);
+        new ClassReader(output).accept(new ClassRemapper(writer,preserve),0);
+        return changed[0] ? writer.toByteArray() : output;
     }
     byte[] runtimePayload(byte[] bytes) { return repairNative(translated ? remap(bytes,false,true) : bytes); }
     private byte[] repairNative(byte[] bytes) {

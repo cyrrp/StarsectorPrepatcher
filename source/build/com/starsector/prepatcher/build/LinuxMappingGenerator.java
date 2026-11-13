@@ -26,7 +26,7 @@ public final class LinuxMappingGenerator {
         // Human-readable names are not an obfuscator-generated correspondence.
         for (String name : g.windows.keySet()) {
             String simple = name.substring(name.lastIndexOf('/') + 1);
-            if (Arrays.stream(simple.split("\\$")).allMatch(s -> (s.length() > 4 && s.matches("[A-Z][a-z][A-Za-z0-9]+") && !s.matches("[oO0]+") && !Set.of("String", "Object").contains(s))) && g.linux.containsKey(name)) g.pair(name, name);
+            if (Arrays.stream(simple.split("\\$")).allMatch(LinuxMappingGenerator::readableClassSegment) && g.linux.containsKey(name)) g.pair(name, name);
         }
         for (int round = 0; round < 8; round++) {
             int before = g.classes.size();
@@ -224,6 +224,16 @@ public final class LinuxMappingGenerator {
     }
     private static boolean readableMember(String name) {
         return name.matches("[a-z][a-zA-Z0-9]{7,}") && !javax.lang.model.SourceVersion.isKeyword(name) && !name.matches("[oO0]+");
+    }
+    private static boolean readableClassSegment(String name) {
+        if (name.length() <= 4 || !name.matches("[A-Z][a-z][A-Za-z0-9]+") || name.matches("[oO0]+")) return false;
+        // The obfuscator also concatenates its String/Object tokens with Java keywords.
+        // Their spelling is not evidence that the class kept its identity across builds.
+        for (String token : List.of("String", "Object")) {
+            if (name.equals(token) || (name.startsWith(token)
+                    && javax.lang.model.SourceVersion.isKeyword(name.substring(token.length())))) return false;
+        }
+        return true;
     }
     private void matchMembers() {
         for (var pair : classes.entrySet()) {

@@ -5,7 +5,7 @@ import java.lang.invoke.MethodHandle;
 import java.util.*;
 import java.util.jar.*;
 
-/** Resolves the real injected payload in the native Linux game loader, without starting a GUI. */
+/** Resolves the real injected payload in the native game loader, without starting a GUI. */
 public final class NativeRuntimeLinkageSmokeTest {
     public static void main(String[] args) throws Exception {
         if (System.getProperty("starsector.prepatcher.gameNamespace") == null) throw new AssertionError("namespace not detected");
@@ -22,8 +22,27 @@ public final class NativeRuntimeLinkageSmokeTest {
         Class<?> hooks=Class.forName("com.fs.starfarer.api.StarsectorPrepatcherPresentationHooks",false,loader);
         Method sensor=Arrays.stream(hooks.getDeclaredMethods()).filter(m -> m.getName().equals("advanceSensorRangeIndicator")).findFirst().orElseThrow();
         Class<?> nativeSensor=sensor.getParameterTypes()[0];
-        if(!nativeSensor.getName().equals("com.fs.starfarer.campaign.o0OO")) throw new AssertionError("Windows sensor descriptor leaked into Linux payload");
-        nativeSensor.getDeclaredMethod("new",float.class);
+        Class<?> fleet=Class.forName("com.fs.starfarer.campaign.fleet.CampaignFleet",false,loader);
+        if(nativeSensor!=fleet.getDeclaredMethod("getSensorRangeIndicator").getReturnType())
+            throw new AssertionError("sensor payload descriptor differs from the actual native fleet getter");
+        // Namespace tables are sparse: an absent member row preserves its canonical spelling.
+        // The real fleet getter above independently establishes the required native class identity.
+        String sensorAdvance="Ò00000";
+        String namespace=System.getProperty("starsector.prepatcher.gameNamespace");
+        if(!namespace.equals("windows-0.98a-RC8")) try(JarFile jar=new JarFile(args[0])) {
+            JarEntry table=jar.getJarEntry("com/starsector/prepatcher/agent/"+namespace+".tsv");
+            if(table==null) throw new AssertionError("missing native namespace table: "+namespace);
+            List<String> rows=new String(jar.getInputStream(table).readAllBytes(),java.nio.charset.StandardCharsets.UTF_8).lines().toList();
+            String classPrefix="C\tcom/fs/starfarer/campaign/E\t";
+            String expected=rows.stream().filter(r -> r.startsWith(classPrefix)).findFirst().orElseThrow().substring(classPrefix.length());
+            if(!nativeSensor.getName().equals(expected.replace('/','.')))
+                throw new AssertionError("native fleet sensor identity differs from its proven correspondence");
+            String memberPrefix="M\tcom/fs/starfarer/campaign/E\t"+sensorAdvance+"\t(F)V\t";
+            List<String> members=rows.stream().filter(r -> r.startsWith(memberPrefix)).toList();
+            if(members.size()>1) throw new AssertionError("ambiguous sensor advance correspondence");
+            if(!members.isEmpty()) sensorAdvance=members.get(0).substring(memberPrefix.length());
+        }
+        nativeSensor.getDeclaredMethod(sensorAdvance,float.class);
         Class<?> bridge=Class.forName("com.fs.starfarer.api.StarsectorPrepatcherPresentationHooks$SelectionIndicatorBridge",true,loader);
         Field advance=bridge.getDeclaredField("ADVANCE"); advance.setAccessible(true);
         if(!(advance.get(null) instanceof MethodHandle)) throw new AssertionError("selection indicator MethodHandle unresolved");
