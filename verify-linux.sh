@@ -19,6 +19,8 @@ LIBS="$MOD_ROOT/lib/*"
 CANONICAL_CP="$TESTS:$BUILD/agent-raw-classes:$LIBS:$CANONICAL/*:$CORE/*"
 NATIVE_CP="$TESTS:$BUILD/agent-raw-classes:$LIBS:$CORE/*"
 find "$MOD_ROOT/source/test" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -cp "$CANONICAL_CP" -d "$TESTS"
+java -cp "$NATIVE_CP" com.starsector.prepatcher.agent.GameNamespaceSelectionTest \
+  "$(cat "$BUILD/game-namespace.txt")" "$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar"
 java -cp "$TESTS" com.starsector.prepatcher.docs.DocumentationConsistencyTest "$MOD_ROOT" \
   2>&1 | tee "$BUILD/reports/linux-documentation-consistency.txt"
 java -cp "$NATIVE_CP" com.starsector.prepatcher.agent.PlatformNamespaceIsolationTest \

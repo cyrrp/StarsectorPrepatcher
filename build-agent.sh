@@ -13,7 +13,7 @@ ASM_ANALYSIS="$MOD_ROOT/lib/asm-analysis-9.10.1.jar"
 ASM_COMMONS="$MOD_ROOT/lib/asm-commons-9.10.1.jar"
 CP_BUILD="$ASM_CORE:$ASM_COMMONS:$ASM_TREE"
 CP_BOOT="$CORE/starfarer.api.jar:$CORE/starfarer_obf.jar:$CORE/log4j-1.2.9.jar"
-find "$MOD_ROOT/source/build" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -cp "$CP_BUILD" -d "$BUILD/build-classes"
+find "$MOD_ROOT/source/build" "$MOD_ROOT/source/shared" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -cp "$CP_BUILD" -d "$BUILD/build-classes"
 NAMESPACE_TABLES="$MOD_ROOT/source/resources/com/starsector/prepatcher/agent"
 NAMESPACE="$(java -cp "$BUILD/build-classes:$CP_BUILD" com.starsector.prepatcher.build.NamespaceJarTool --detect "$CORE/starfarer_obf.jar" "$NAMESPACE_TABLES")"
 printf '%s\n' "$NAMESPACE" > "$BUILD/game-namespace.txt"
@@ -32,7 +32,7 @@ if [[ "$NAMESPACE" != windows-0.98a-RC8 ]]; then
   done
 fi
 CP_AGENT="$COMPILE_CORE/starfarer.api.jar:$COMPILE_CORE/starfarer_obf.jar:$COMPILE_CORE/fs.common_obf.jar:$COMPILE_CORE/fs.sound_obf.jar:$CORE/lwjgl.jar:$CORE/lwjgl_util.jar:$ASM_CORE:$ASM_TREE:$ASM_ANALYSIS:$ASM_COMMONS"
-find "$MOD_ROOT/source/agent" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -cp "$CP_AGENT" -d "$BUILD/agent-raw-classes"
+find "$MOD_ROOT/source/agent" "$MOD_ROOT/source/shared" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -cp "$CP_AGENT" -d "$BUILD/agent-raw-classes"
 cp -R "$MOD_ROOT/source/resources/." "$BUILD/agent-raw-classes/"
 find "$MOD_ROOT/source/bootstrap" -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -cp "$CP_BOOT" -d "$BUILD/bootstrap-classes"
 # Extract only runtime ASM, then relocate its classes and all agent references into
@@ -58,14 +58,14 @@ fi
 printf '%s\n' \
   'Manifest-Version: 1.0' \
   'Implementation-Title: StarsectorPrepatcher Agent' \
-  'Implementation-Version: 0.18.8' \
+  'Implementation-Version: 0.18.9' \
   'Premain-Class: com.starsector.prepatcher.agent.PrepatcherAgent' \
   'Can-Redefine-Classes: false' \
   'Can-Retransform-Classes: true' '' > "$BUILD/agent.mf"
 printf '%s\n' \
   'Manifest-Version: 1.0' \
   'Implementation-Title: StarsectorPrepatcher Bootstrap' \
-  'Implementation-Version: 0.18.8' '' > "$BUILD/bootstrap.mf"
+  'Implementation-Version: 0.18.9' '' > "$BUILD/bootstrap.mf"
 jar --create --file "$MOD_ROOT/agent/StarsectorPrepatcherAgent.jar" --manifest "$BUILD/agent.mf" --date=2026-01-01T00:00:00Z -C "$BUILD/agent-classes" .
 jar --create --file "$MOD_ROOT/jars/StarsectorPrepatcherBootstrap.jar" --manifest "$BUILD/bootstrap.mf" --date=2026-01-01T00:00:00Z -C "$BUILD/bootstrap-classes" .
 

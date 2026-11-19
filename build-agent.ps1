@@ -33,6 +33,9 @@ foreach ($buildDirectory in @($agentRawClasses, $asmRawClasses, $agentClasses, $
 New-Item -ItemType Directory -Force $agentRawClasses, $asmRawClasses, $agentClasses, $buildClasses, $bootstrapClasses, (Join-Path $modRoot 'agent'), (Join-Path $modRoot 'jars') | Out-Null
 $agentSources = Get-ChildItem -Recurse -Filter *.java (Join-Path $modRoot 'source\agent') | ForEach-Object FullName
 $buildSources = Get-ChildItem -Recurse -Filter *.java (Join-Path $modRoot 'source\build') | ForEach-Object FullName
+$sharedSources = Get-ChildItem -Recurse -Filter *.java (Join-Path $modRoot 'source\shared') | ForEach-Object FullName
+$agentSources += $sharedSources
+$buildSources += $sharedSources
 $bootstrapSources = Get-ChildItem -Recurse -Filter *.java (Join-Path $modRoot 'source\bootstrap') | ForEach-Object FullName
 $asmCore = Join-Path $modRoot 'lib\asm-9.10.1.jar'
 $asmTree = Join-Path $modRoot 'lib\asm-tree-9.10.1.jar'
@@ -96,8 +99,8 @@ foreach ($classFile in Get-ChildItem -LiteralPath $agentClasses -Filter *.class 
 $utf8 = New-Object Text.UTF8Encoding($false)
 $agentManifest = Join-Path $build 'agent.mf'
 $bootstrapManifest = Join-Path $build 'bootstrap.mf'
-[IO.File]::WriteAllText($agentManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Agent`nImplementation-Version: 0.18.8`nPremain-Class: com.starsector.prepatcher.agent.PrepatcherAgent`nCan-Redefine-Classes: false`nCan-Retransform-Classes: true`n`n", $utf8)
-[IO.File]::WriteAllText($bootstrapManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Bootstrap`nImplementation-Version: 0.18.8`n`n", $utf8)
+[IO.File]::WriteAllText($agentManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Agent`nImplementation-Version: 0.18.9`nPremain-Class: com.starsector.prepatcher.agent.PrepatcherAgent`nCan-Redefine-Classes: false`nCan-Retransform-Classes: true`n`n", $utf8)
+[IO.File]::WriteAllText($bootstrapManifest, "Manifest-Version: 1.0`nImplementation-Title: StarsectorPrepatcher Bootstrap`nImplementation-Version: 0.18.9`n`n", $utf8)
 $agentJar = Join-Path $modRoot 'agent\StarsectorPrepatcherAgent.jar'
 & jar --create --file $agentJar --manifest $agentManifest --date=2026-01-01T00:00:00Z -C $agentClasses .
 if ($LASTEXITCODE -ne 0) { throw 'Agent JAR creation failed.' }

@@ -51,11 +51,12 @@ final class RuntimeInstaller {
           + describeLoader(runtimeLoader) + " (system=" + describeLoader(systemLoader) + ")");
     }
 
+    GameNamespace namespace = GameNamespace.forRuntimeInstallation();
     List<PayloadClass> payload = readPayload(agentJar);
     MethodHandles.Lookup targetLookup = MethodHandles.privateLookupIn(anchor, MethodHandles.lookup());
     Map<String, Class<?>> defined = new LinkedHashMap<>();
     for (PayloadClass item : payload) {
-      Class<?> runtimeClass = targetLookup.defineClass(GameNamespace.current().runtimePayload(item.bytecode()));
+      Class<?> runtimeClass = targetLookup.defineClass(namespace.runtimePayload(item.bytecode()));
       if (runtimeClass.getClassLoader() != runtimeLoader) {
         throw new IllegalStateException("Runtime payload class has the wrong loader: " + runtimeClass.getName() + " -> "
             + describeLoader(runtimeClass.getClassLoader()));

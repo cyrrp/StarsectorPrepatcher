@@ -803,8 +803,10 @@ else
   fi
 fi
 
+NATIVE_CP="$TEST_CLASSES:$AGENT_CLASSES:$MOD_ROOT/lib/*:$NATIVE_CORE/*"
+java -cp "$NATIVE_CP" com.starsector.prepatcher.agent.GameNamespaceSelectionTest \
+  "$(cat "$BUILD/game-namespace.txt")" "$AGENT_JAR_JAVA"
 if [[ "$NATIVE_CORE" != "$CORE" ]]; then
-  NATIVE_CP="$TEST_CLASSES:$AGENT_CLASSES:$MOD_ROOT/lib/*:$NATIVE_CORE/*"
   java -Xverify:none -cp "$NATIVE_CP" com.starsector.prepatcher.agent.NativeNamespaceCompatibilityTest \
     "$VERIFICATION_CONFIG_JAVA" "$NATIVE_CORE/starfarer_obf.jar" "$NATIVE_CORE/fs.common_obf.jar" \
     "$NATIVE_CORE/fs.sound_obf.jar" "$NATIVE_CORE/starfarer.api.jar" \

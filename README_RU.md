@@ -2,8 +2,9 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Текущая версия: **0.18.8**. Поддерживаемые сборки игры: **Starsector 0.98a-RC8, 0.98.5a-RC3 и 0.98.5a-RC5** (Windows/Linux).
-В metadata указана 0.98.5a-RC5; на остальных поддерживаемых сборках лаунчер может показывать отметку о другой патч-версии.
+Текущая версия: **0.18.9**. Поддерживаемые сборки игры: **Starsector 0.98a-RC8 и 0.98.5a-RC8** (Windows/Linux).
+В metadata указана 0.98.5a-RC8; на остальных поддерживаемых сборках лаунчер может показывать отметку о другой патч-версии.
+Для 0.98.5a-RC3 и RC5 используйте [Prepatcher 0.18.8](https://github.com/cyrrp/StarsectorPrepatcher/releases/tag/v0.18.8).
 
 [![Без препатчера и с ним](https://github.com/kirpoly/StarsectorPrepatcher/raw/HEAD/media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 

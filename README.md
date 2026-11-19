@@ -2,8 +2,9 @@
 
 [English](README.md) | [Русский](README_RU.md)
 
-Current version: **0.18.8**. Supported game builds: **Starsector 0.98a-RC8, 0.98.5a-RC3 and 0.98.5a-RC5** (Windows/Linux).
-The metadata targets 0.98.5a-RC5; on other supported builds the launcher may show a different patch-version notice.
+Current version: **0.18.9**. Supported game builds: **Starsector 0.98a-RC8 and 0.98.5a-RC8** (Windows/Linux).
+The metadata targets 0.98.5a-RC8; on other supported builds the launcher may show a different patch-version notice.
+For 0.98.5a-RC3 or RC5, use [Prepatcher 0.18.8](https://github.com/cyrrp/StarsectorPrepatcher/releases/tag/v0.18.8).
 
 [![Unplayable without Prepatcher versus smooth with Prepatcher](https://github.com/kirpoly/StarsectorPrepatcher/raw/HEAD/media/smoothness_comparison.gif)](https://github.com/kirpoly/StarsectorPrepatcher/releases/download/v0.8.0/StarsectorPrepatcher-0.8.0-comparison.webm)
 

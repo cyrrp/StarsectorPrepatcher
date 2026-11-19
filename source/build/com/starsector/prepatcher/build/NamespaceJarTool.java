@@ -1,5 +1,7 @@
 package com.starsector.prepatcher.build;
 
+import com.starsector.prepatcher.namespace.GameNamespaceDetector;
+import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
 import java.util.jar.*;
@@ -11,25 +13,13 @@ public final class NamespaceJarTool {
     public static void main(String[] args) throws Exception {
         if (args.length == 3 && args[0].equals("--detect")) {
             try (JarFile jar = new JarFile(args[1])) {
-                org.objectweb.asm.tree.ClassNode node=new org.objectweb.asm.tree.ClassNode();
-                new ClassReader(jar.getInputStream(jar.getJarEntry("com/fs/starfarer/campaign/CampaignEngine.class"))).accept(node,ClassReader.SKIP_CODE);
-                String canonical="(FLcom/fs/starfarer/util/A/new;)V";
-                List<String> matches=new ArrayList<>();
-                if (node.methods.stream().anyMatch(m -> m.name.equals("advance") && m.desc.equals(canonical))) matches.add("windows-0.98a-RC8");
-                try (var tables=Files.list(Path.of(args[2]))) {
-                    for (Path table : tables.filter(p -> p.getFileName().toString().endsWith(".tsv")).sorted().toList()) {
-                        Map<String,String> names=new HashMap<>();
-                        for (String line : Files.readAllLines(table)) {
-                            String[] row=line.split("\t");
-                            if (row[0].equals("C")) names.put(row[1],row[2]);
-                        }
-                        Remapper remapper=new Remapper(Opcodes.ASM9) { public String map(String n) { return names.getOrDefault(n,n); } };
-                        String descriptor=remapper.mapMethodDesc(canonical);
-                        if (node.methods.stream().anyMatch(m -> m.name.equals("advance") && m.desc.equals(descriptor))) matches.add(table.getFileName().toString().replace(".tsv",""));
-                    }
+                JarEntry entry = jar.getJarEntry(GameNamespaceDetector.PROBE);
+                if (entry == null) throw new IOException("Missing " + GameNamespaceDetector.PROBE + " in " + args[1]);
+                Path tables = Path.of(args[2]);
+                try (var probe = jar.getInputStream(entry)) {
+                    System.out.println(GameNamespaceDetector.detect(probe,
+                            id -> Files.newInputStream(tables.resolve(id + ".tsv"))));
                 }
-                if (matches.size()!=1) throw new IllegalArgumentException("Unknown or ambiguous game namespace: "+matches);
-                System.out.println(matches.get(0));
                 return;
             }
         }

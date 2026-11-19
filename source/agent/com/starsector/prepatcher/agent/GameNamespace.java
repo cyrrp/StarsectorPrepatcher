@@ -1,11 +1,11 @@
 package com.starsector.prepatcher.agent;
 
+import com.starsector.prepatcher.namespace.GameNamespaceDetector;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import org.objectweb.asm.*;
 import org.objectweb.asm.commons.*;
-import org.objectweb.asm.tree.*;
 
 /** Reversible namespace transport around the ENTIRE atomic patch pipeline. */
 final class GameNamespace {
@@ -41,49 +41,33 @@ final class GameNamespace {
         if (name.contains(".")) putUnique(map,kind+'\t'+owner+'\t'+name.replace('.','_')+'\t'+desc,target.replace('.','_'));
     }
     static GameNamespace current() {
-        GameNamespace result=active;
-        if (result!=null) return result;
-        synchronized (GameNamespace.class) {
-            if (active!=null) return active;
-            try (InputStream in=ClassLoader.getSystemResourceAsStream("com/fs/starfarer/campaign/CampaignEngine.class")) {
-                if (in==null) return IDENTITY; // -version / no game classpath; do not cache absence.
-                ClassNode node=new ClassNode(); new ClassReader(in).accept(node,ClassReader.SKIP_CODE|ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES);
-                String canonicalAdvance="(FLcom/fs/starfarer/util/A/new;)V";
-                GameNamespace selected=null;
-                String selectedId=null;
-                if (node.methods.stream().anyMatch(m -> m.name.equals("advance") && m.desc.equals(canonicalAdvance))) {
-                    selected=IDENTITY;
-                    selectedId="windows-0.98a-RC8";
-                }
-                for (String id : List.of("linux-0.98a-RC8", "windows-0.98.5a-RC3", "linux-0.98.5a-RC3",
-                        "windows-0.98.5a-RC5", "linux-0.98.5a-RC5")) {
-                    String resource="/com/starsector/prepatcher/agent/"+id+".tsv";
-                    String descriptor=advanceDescriptor(resource);
-                    if (node.methods.stream().anyMatch(m -> m.name.equals("advance") && m.desc.equals(descriptor))) {
-                        if (selected!=null) throw new IllegalStateException("Ambiguous Starsector bytecode namespace");
-                        selected=new GameNamespace(GameNamespace.class.getResourceAsStream(resource));
-                        selectedId=id;
-                    }
-                }
-                if (selected==null) throw new IllegalStateException("Unknown Starsector bytecode namespace; refusing guessed names");
-                active=selected;
-                System.setProperty("starsector.prepatcher.gameNamespace",selectedId);
-                return active;
-            } catch (IOException e) { throw new IllegalStateException("Cannot read game namespace",e); }
-        }
+        return current(false);
     }
-    private static String advanceDescriptor(String resource) throws IOException {
-        InputStream table=GameNamespace.class.getResourceAsStream(resource);
-        if (table==null) throw new IllegalStateException("Namespace name table is missing: "+resource);
-        try (BufferedReader reader=new BufferedReader(new InputStreamReader(table,StandardCharsets.UTF_8))) {
-            for (String line; (line=reader.readLine())!=null;) {
-                String[] row=line.split("\t",-1);
-                if (row.length==3 && row[0].equals("C") && row[1].equals("com/fs/starfarer/util/A/new")) {
-                    return "(FL"+row[2]+";)V";
+    static GameNamespace forRuntimeInstallation() {
+        return current(true);
+    }
+    private static GameNamespace current(boolean gamePresent) {
+        GameNamespace result = active;
+        if (result != null) return result;
+        synchronized (GameNamespace.class) {
+            if (active != null) return active;
+            try (InputStream probe = ClassLoader.getSystemResourceAsStream(GameNamespaceDetector.PROBE)) {
+                if (probe == null) {
+                    if (gamePresent) throw new IOException("Game classpath is missing " + GameNamespaceDetector.PROBE);
+                    return IDENTITY; // java -version without the game; leave the cache empty.
                 }
+                String id = GameNamespaceDetector.detect(probe, GameNamespace::openTable);
+                result = id.equals(GameNamespaceDetector.IDENTITY) ? IDENTITY : new GameNamespace(openTable(id));
+                System.setProperty("starsector.prepatcher.gameNamespace", id);
+                active = result;
+                return result;
+            } catch (IOException e) {
+                throw new IllegalStateException("Cannot identify Starsector namespace: " + e.getMessage(), e);
             }
         }
-        throw new IllegalStateException("Namespace table has no advance parameter correspondence: "+resource);
+    }
+    private static InputStream openTable(String id) {
+        return GameNamespace.class.getResourceAsStream(id + ".tsv");
     }
     String canonicalName(String nativeName) { return reverse.getOrDefault(nativeName,nativeName); }
     String nativeName(String canonicalName) { return forward.getOrDefault(canonicalName,canonicalName); }

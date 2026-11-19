@@ -50,7 +50,11 @@ Prepatcher, preserve foreign agents/memory, and leave FR disabled when the user 
 
 ## Linux native gate
 
-Release coverage includes clean Windows/Linux 0.98a-RC8 and 0.98.5a-RC3/RC5 JARs.
+Release coverage includes clean Windows/Linux 0.98a-RC8 and 0.98.5a-RC8 JARs.
+For each supported Windows/Linux JAR check the exact namespace ID in the builder and running agent.
+At RC rollover, exercise the superseded RCs as negative inputs and verify the exact table inventory
+in the player agent. Exercise an unknown result type, overlapping matches, a wrong or missing probe,
+and the no-game JVM path.
 Both builders detect the native namespace and create a private canonical compilation view.
 The Windows verifier runs its complete existing suite on that view, then
 `NativeNamespaceCompatibilityTest` on the original JARs and an actual-agent

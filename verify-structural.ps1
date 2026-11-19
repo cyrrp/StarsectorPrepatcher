@@ -1744,8 +1744,10 @@ if (-not (Test-Path -LiteralPath $frJar -PathType Leaf)) {
     }
 }
 
+$nativeCp = @($testClasses, $agentClasses, (Join-Path $modRoot 'lib/*'), (Join-Path $nativeCore '*')) -join [IO.Path]::PathSeparator
+& java -cp $nativeCp com.starsector.prepatcher.agent.GameNamespaceSelectionTest $namespace $mainAgentJar
+if ($LASTEXITCODE -ne 0) { throw 'Game namespace selection verification failed.' }
 if ($namespace -ne 'windows-0.98a-RC8') {
-    $nativeCp = @($testClasses, $agentClasses, (Join-Path $modRoot 'lib/*'), (Join-Path $nativeCore '*')) -join [IO.Path]::PathSeparator
     & java -Xverify:none -cp $nativeCp com.starsector.prepatcher.agent.NativeNamespaceCompatibilityTest $verificationConfig (Join-Path $nativeCore 'starfarer_obf.jar') (Join-Path $nativeCore 'fs.common_obf.jar') (Join-Path $nativeCore 'fs.sound_obf.jar') (Join-Path $nativeCore 'starfarer.api.jar')
     if ($LASTEXITCODE -ne 0) { throw 'Native namespace pipeline verification failed.' }
     $nativeRuntimeCp = @($testClasses, (Join-Path $nativeCore '*')) -join [IO.Path]::PathSeparator
