@@ -1397,7 +1397,7 @@ final class StarsectorPrepatcherMarketScheduler {
     if (c == null || !c.marketScheduler || !StarsectorPrepatcherCampaignCaches.campaignCachesReady(generation)) return;
 
     long started = System.nanoTime();
-    dumpMarketSchedulerBaseline("before-save-flush");
+    if (c.marketSchedulerFlushSnapshots) dumpMarketSchedulerBaseline("before-save-flush");
     try {
       List<WeakIdentityEntry<MarketAPI, MarketScheduleState>> entries;
       try {
@@ -1417,7 +1417,7 @@ final class StarsectorPrepatcherMarketScheduler {
         deliverPendingForSave(market, state, exact);
       }
     } finally {
-      dumpMarketSchedulerBaseline("after-save-flush");
+      if (c.marketSchedulerFlushSnapshots) dumpMarketSchedulerBaseline("after-save-flush");
       long elapsed = System.nanoTime() - started;
       if (elapsed > 0L) StarsectorPrepatcherMetrics.SAVE_FLUSH_DURATION_NANOS.add(elapsed);
     }

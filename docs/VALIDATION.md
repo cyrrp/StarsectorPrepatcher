@@ -191,6 +191,9 @@ LRU/active-user protection, stale-generation maintenance, scratch gauge/grace be
 starfield leases. Run `MarketSchedulerRuntimeTest` for exact delivery/RLE, nested invocation, save
 failure and construction transitions, plus immutable snapshots across flush/reset, private owner
 root/context detachment and preservation of process-lifetime registration/delivery sequence.
+Exercise a ready scheduler with pending market steps. With the flush-snapshot key absent, require
+delivery and no snapshot directory. With the key enabled, check both CSV/JSON pairs and their
+pending-step counts across delivery. Exercise explicit one-shot capture with automatic snapshots off.
 `DirectMarketObservationRuntimeTest` must cover observer report-interval handoff, caller-stack
 filtering and nested exceptions followed by a non-recursive successful call. Keep these checks in
 the existing gate entries; changing the owning class must not silently drop their execution.

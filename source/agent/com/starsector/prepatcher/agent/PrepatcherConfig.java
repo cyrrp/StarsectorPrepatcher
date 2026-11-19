@@ -133,6 +133,7 @@ public final class PrepatcherConfig {
   public final String marketSchedulerPerSimulationTickMemoryKey;
   public final int marketSchedulerMaxPendingRuns;
   public final boolean marketSchedulerExactReplayBeforeSave;
+  public final boolean marketSchedulerFlushSnapshots;
   public final boolean marketAdvanceSemanticRiskObserver;
   public final boolean marketConstructionDiagnostics;
   public final int marketConstructionDiagnosticsMaxSamplesPerReason;
@@ -293,6 +294,7 @@ public final class PrepatcherConfig {
         string("market.scheduler.perSimulationTickMemoryKey", "$starsectorPrepatcher_perSimulationTickMarket");
     marketSchedulerMaxPendingRuns = integer("market.remote.maxPendingRuns", 32, 1, 4096);
     marketSchedulerExactReplayBeforeSave = bool("market.remote.exactReplayBeforeSave", false);
+    marketSchedulerFlushSnapshots = bool("observer.marketSchedulerFlushSnapshots", false);
     marketAdvanceSemanticRiskObserver = bool("observer.marketAdvanceSemanticRisks", false);
     marketConstructionDiagnostics = bool("observer.marketConstructionDiagnostics", false);
     marketConstructionDiagnosticsMaxSamplesPerReason =

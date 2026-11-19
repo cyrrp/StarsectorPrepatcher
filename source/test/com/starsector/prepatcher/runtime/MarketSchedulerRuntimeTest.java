@@ -33,13 +33,14 @@ import java.util.concurrent.atomic.LongAdder;
 /** Runtime semantics checks for the unified engine-owned market scheduler. */
 @SuppressWarnings({"rawtypes", "unchecked"})
 public final class MarketSchedulerRuntimeTest {
+  // The game owns its active engine strongly. The scheduler only keeps a weak reference.
+  private static Object campaignEngine;
   private MarketSchedulerRuntimeTest() {}
 
   public static void main(String[] args) throws Exception {
     PrepatcherConfig config = config(true);
     installConfig(config);
-    Object engine = new Object();
-    activateCampaign(engine);
+    resetSchedulerGeneration();
 
     MutableLocation currentLocation = new MutableLocation("current");
     MutableLocation remoteLocation = new MutableLocation("remote");
@@ -80,6 +81,7 @@ public final class MarketSchedulerRuntimeTest {
     } finally {
       Global.setSector(null);
       StarsectorPrepatcherHooks.beginCampaignEngineChange(null);
+      campaignEngine = null;
       installConfig(null);
     }
 
@@ -92,7 +94,7 @@ public final class MarketSchedulerRuntimeTest {
         + " advance-failure/save-abort/direct-sync/finite-overflow-split"
         + " exact-RLE/batch-context/differential-sequences/run-overflow"
         + " construction-full-rate/mutation-boundary/reason-counters/diagnostic-csv/save-exact"
-        + " pending-vs-delivered-baseline-dump" + " weak-key/disabled metrics");
+        + " default/opt-in flush snapshots and manual baseline dump" + " weak-key/disabled metrics");
   }
 
 
@@ -584,7 +586,7 @@ public final class MarketSchedulerRuntimeTest {
     require(inactive.calls == 1 && close(inactive.totalAmount, 0.25f), "inactive lifecycle did not fail open");
     require(metric("MARKET_SCHEDULER_LIFECYCLE_INACTIVE_CALLS") == inactiveBefore + 1L,
         "inactive lifecycle was not classified explicitly");
-    activateCampaign(new Object());
+    resetSchedulerGeneration();
   }
 
   private static void assertDeferredDuplicateOrdering(SectorContext sector, MutableLocation remote) throws Exception {
@@ -1328,6 +1330,16 @@ public final class MarketSchedulerRuntimeTest {
     Object previousRoot = modRootField.get(null);
     modRootField.set(null, root);
     try {
+      MutableMarket ordinary = new MutableMarket("default-flush", remote.proxy, false, false);
+      warmAndDefer(ordinary, 0.25f, 0);
+      require(pendingAmount(ordinary.proxy) > 0f, "expected deferred steps before default flush");
+      int calls = ordinary.calls;
+      StarsectorPrepatcherHooks.flushMarketSchedulerBeforeSave();
+      require(ordinary.calls == calls + 1 && pendingAmount(ordinary.proxy) == 0f,
+          "default flush did not deliver the pending callback");
+      require(Files.notExists(root.resolve("logs/market-scheduler-baseline")),
+          "default flush created automatic snapshot output");
+
       MutableMarket market = new MutableMarket("baseline-dump-market", remote.proxy, false, false);
 
       beginSyntheticSchedulerTick();
@@ -1356,7 +1368,29 @@ public final class MarketSchedulerRuntimeTest {
       require(content.contains("pending_steps"), "scheduler baseline omitted pending debt column");
       Path json = csv.resolveSibling(csv.getFileName().toString().replace(".csv", ".json"));
       require(Files.isRegularFile(json), "scheduler baseline summary JSON was not written");
+
+      Path options = root.resolve("opt-in.properties");
+      Files.writeString(options, "patch.marketScheduler=true\nobserver.marketSchedulerFlushSnapshots=true\n");
+      installConfig(PrepatcherConfig.load(options));
+      calls = market.calls;
+      StarsectorPrepatcherHooks.flushMarketSchedulerBeforeSave();
+      require(market.calls == calls + 1 && pendingAmount(market.proxy) == 0f,
+          "opt-in flush did not deliver the pending callback");
+      for (String reason : List.of("before-save-flush", "after-save-flush")) {
+        try (var paths = Files.newDirectoryStream(csv.getParent(), "*-" + reason + ".json")) {
+          var matches = paths.iterator();
+          require(matches.hasNext(), "missing " + reason + " summary");
+          Path summary = matches.next();
+          require(!matches.hasNext(), "extra " + reason + " summary");
+          String contents = Files.readString(summary);
+          require(contents.contains("\"pendingSteps\": " + (reason.startsWith("before") ? "1," : "0,")),
+              "snapshot taken on wrong side of flush: " + contents);
+          Path detail = summary.resolveSibling(summary.getFileName().toString().replace(".json", ".csv"));
+          require(Files.readString(detail).contains("baseline-dump-market"), "missing " + reason + " market row");
+        }
+      }
     } finally {
+      installConfig(config(true));
       modRootField.set(null, previousRoot);
     }
   }
@@ -1398,8 +1432,8 @@ public final class MarketSchedulerRuntimeTest {
     Object[] detached = new Object[contexts.length];
     for (int i = 0; i < contexts.length; i++)
       detached[i] = ((ThreadLocal<?>) schedulerField(contexts[i]).get(null)).get();
-    Object engine = new Object();
-    long transition = StarsectorPrepatcherHooks.beginCampaignEngineChange(engine);
+    campaignEngine = new Object();
+    long transition = StarsectorPrepatcherHooks.beginCampaignEngineChange(campaignEngine);
     require(transition >= 0L, "owner reset failed to open a transition");
     require(
         schedulerField("MARKET_SCHEDULER_STATES").get(null) != oldMap
@@ -1424,7 +1458,7 @@ public final class MarketSchedulerRuntimeTest {
     // the replacement contexts without resurrecting old debt or replay frames.
     StarsectorPrepatcherHooks.endMarketAdvanceInvocation();
     endSyntheticSchedulerTick();
-    StarsectorPrepatcherHooks.completeCampaignEngineChange(engine, transition);
+    StarsectorPrepatcherHooks.completeCampaignEngineChange(campaignEngine, transition);
     require(!StarsectorPrepatcherHooks.hasCurrentMarketAdvanceBatch(market.proxy), "old replay frame became visible");
     require(rows.size() == 1 && floatField(row, "pendingAmount") > 0f, "reset changed detached diagnostic rows");
     int calls = market.calls;
@@ -1664,17 +1698,11 @@ public final class MarketSchedulerRuntimeTest {
     field.set(null, config);
   }
 
-  private static void activateCampaign(Object engine) {
-    long transition = StarsectorPrepatcherHooks.beginCampaignEngineChange(engine);
-    require(transition >= 0L, "campaign lifecycle did not open scheduler generation");
-    StarsectorPrepatcherHooks.completeCampaignEngineChange(engine, transition);
-  }
-
   private static void resetSchedulerGeneration() {
-    Object engine = new Object();
-    long transition = StarsectorPrepatcherHooks.beginCampaignEngineChange(engine);
+    campaignEngine = new Object();
+    long transition = StarsectorPrepatcherHooks.beginCampaignEngineChange(campaignEngine);
     require(transition >= 0L, "scheduler reset did not open new generation");
-    StarsectorPrepatcherHooks.completeCampaignEngineChange(engine, transition);
+    StarsectorPrepatcherHooks.completeCampaignEngineChange(campaignEngine, transition);
   }
 
   private static long schedulerFrame() throws Exception {

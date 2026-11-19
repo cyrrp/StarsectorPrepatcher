@@ -531,6 +531,12 @@ Direct/event/fail-open barrier сначала доставляет старую 
 отдельно. Save по умолчанию coalesced с batch context; `market.remote.exactReplayBeforeSave=true`
 включает exact replay всех рынков. Construction markets всегда exact-replay’ятся.
 
+`observer.marketSchedulerFlushSnapshots=false` во всех профилях и при отсутствии ключа.
+При `true` каждый сброс накопленных шагов перед сохранением или по запросу AoTD записывает
+CSV и JSON до и после доставки в `logs/market-scheduler-baseline/`. Эти файлы накапливаются
+между запусками. При выключенной опции планировщик пропускает сбор данных для обоих снимков.
+Явный вызов `dumpMarketSchedulerBaseline(reason)` по-прежнему создаёт разовый снимок.
+
 `observer.marketAdvanceSemanticRisks` создаёт статический CSV-отчёт по mod component `advance(F)V`
 (`INTERVAL_SINGLE_ELAPSE`, random, single-threshold и market-structure mutation). Observer-only
 режим не меняет bytes даже у класса с прямым `Market.advance()` call site; runtime instrumentation

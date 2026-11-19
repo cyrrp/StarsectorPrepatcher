@@ -45,6 +45,8 @@ run_reference StructuralCompatibilityTest "$CONFIG" "$CANONICAL/starfarer_obf.ja
 "$REFERENCE_JAVA" -Xverify:none -cp "$CANONICAL_CP" com.fs.starfarer.api.OptionalModProbeLinkageTest \
   2>&1 | tee "$BUILD/reports/linux-optional-mod-probes.txt"
 run_reference UiMutationRepairedNamePipelineTest "$CANONICAL/starfarer_obf.jar"
+"$REFERENCE_JAVA" -Xverify:none -cp "$CANONICAL_CP" com.starsector.prepatcher.runtime.MarketSchedulerRuntimeTest \
+  2>&1 | tee "$BUILD/reports/linux-market-scheduler-runtime.txt"
 AOTD_JAR="${AOTD_TOOLBOX_JAR:-$GAME_ROOT/mods/AoTD-Theory-Of-Toolbox-Scheduler-Fork/jars/AoTDToolboxTheory.jar}"
 if [[ -f "$AOTD_JAR" ]]; then
   for test in MarketShareAoTDForkCompatibilityTest EconomyHotpathAoTDForkCompatibilityTest AoTDForkCompatibilityTransformerTest AoTDSchedulerBridgeTransformerTest AoTDUIEconomyBehaviorCompatibilityTest; do
